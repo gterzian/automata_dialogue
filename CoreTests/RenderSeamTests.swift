@@ -3,7 +3,7 @@ import XCTest
 
 /// A `FrameClock` the test drives by hand. Lives here rather than in `Core`
 /// because its only purpose is to advance a test deterministically.
-private final class ManualClock: FrameClock {
+private final class ManualClock: FrameClock, @unchecked Sendable {
     private var tick: (@Sendable (TimeInterval) -> Void)?
 
     func start(_ tick: @escaping @Sendable (TimeInterval) -> Void) {
@@ -80,6 +80,32 @@ final class RenderActorTests: XCTestCase {
         let actor = RenderActor()
         let frame = try await actor.advance(by: 1)
         XCTAssertNil(frame)
+        await actor.shutdown()
+    }
+
+    /// `drive` starts a clock on the render thread and advances the run on each
+    /// tick. The manual clock lets the test pump ticks and wait for frames.
+    func testDriveAdvancesOnEachClockTick() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E30")!
+        let sink = ReadbackSink()
+        let clock = ManualClock()
+        let actor = RenderActor()
+        try await actor.configure(spec: spec, cols: 20, rows: 10, steps: 40, sink: sink)
+        XCTAssertEqual(sink.deliveredCount, 1)
+        _ = sink.waitForFrame(timeout: 0.01) // consume the seed frame's signal
+        await actor.drive(clock: clock, stepsPerFrame: 5)
+
+        clock.pump(1.0 / 30)
+        let advanced = sink.waitForFrame(timeout: 0.5)
+        XCTAssertEqual(advanced?.step, 5)
+        XCTAssertEqual(sink.deliveredCount, 2)
+        let error = await actor.lastError
+        XCTAssertNil(error)
+
+        await actor.stopDriving(clock: clock)
         await actor.shutdown()
     }
 

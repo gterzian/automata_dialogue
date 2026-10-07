@@ -3,10 +3,9 @@
 Turns a `ProgramSpec` into a `ColorGrid` (one `UInt8` palette index per display
 cell, row-major) and, on the Metal path, into a GPU buffer. The design's three
 seams — **simulation core**, **frame sink** (delivery), **frame clock**
-(pacing) — are the target shape. The CPU reference and the sink-independent
-GPU simulation exist, `RenderActor` confines the GPU work to a dedicated
-thread, and `FrameSink`/`ReadbackSink` deliver finished frames; the on-screen
-`LayerSink` and the LED sink remain.
+(pacing) — are built: the CPU reference, the sink-independent GPU simulation,
+the dedicated render actor, a readback sink, and the on-screen `LayerSink`
+driven by `DisplayLinkClock`. The LED sink remains.
 
 ## What exists
 
@@ -24,8 +23,16 @@ thread, and `FrameSink`/`ReadbackSink` deliver finished frames; the on-screen
 - **Render seam** (`RenderExecutor`, `RenderActor`, `FrameSink`, `FrameClock`,
   `ReadbackSink`, `SinkFactory`) — `RenderActor` confines the Metal objects to
   a dedicated run-loop thread and delivers `RenderFrame`s to a `FrameSink`;
-  `ReadbackSink` retains the latest frame for a CPU consumer. `FrameClock` is
-  the pacing protocol a `CAMetalDisplayLink` implementation will conform to.
+  `ReadbackSink` retains the latest frame for a CPU consumer.
+- **On-screen sink** (`DisplayLinkClock`, `LayerSink`, `LayerRenderer`) —
+  `DisplayLinkClock` conforms to `FrameClock` over `CAMetalDisplayLink`
+  (`preferredFrameLatency = 2`); `LayerSink` is a `FrameSink` that owns the
+  layer and the clock, and `LayerRenderer` turns a frame into a draw: a `runs`
+  kernel compacts each same-colour non-background run into a `Span`, an
+  `encode_draw` kernel writes the `MTLDrawPrimitivesIndirectArguments` on the
+  GPU, and a render pass clears to the background and draws one instanced quad
+  per span. `RenderActor.drive(clock:stepsPerFrame:)` starts the clock on the
+  render thread.
 - **Fit** (`Fit`) — the one geometry rule both paths use.
 
 Both paths converge on the same `ColorGrid`; the readback test compares them.
@@ -60,19 +67,34 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
   throw; `compiler.makeLibrary/makeComputePipelineState(descriptor:)`;
   `command.makeComputeCommandEncoder()`; `table.setAddress(_:index:)`;
   `encoder.dispatchThreads(threadsPerGrid:threadsPerThreadgroup:)`.
+- Render names differ too: `command.makeRenderCommandEncoder(descriptor:)`;
+  `compiler.makeRenderPipelineState(descriptor:)`;
+  `render.setArgumentTable(_:stages:)`;
+  `render.drawPrimitives(primitiveType:indirectBuffer:)`; the render pass colour
+  attachment subscript is optional. The drawable arrives in the display-link
+  update and is presented with `present()`; this SDK's `MTLDrawable` has no
+  `waitForDrawable`/`signalDrawable`.
+- **Compute-to-render ordering is explicit.** The compute encoder publishes the
+  spans with `barrier(afterStages: .dispatch, beforeQueueStages: .vertex,
+  visibilityOptions: .device)` before the render encoder reads them; the
+  intra-encoder barriers only order dispatches within the compute pass.
 - The residency set is Metal 4's only residency mechanism; buffers must be
-  added and the set committed before use.
+  added and the set committed before use. A `CAMetalLayer`'s own
+  `residencySet` must be added to the queue as well.
 
 ## Remaining work
 
-- **`LayerSink`.** A `CAMetalDisplayLink`-driven `FrameSink` that presents a
-  `CAMetalLayer` drawable; the app panel currently draws the CPU `CGImage`.
-  It supplies the `FrameClock` (a display-link clock) and exploits the three
-  frame slots: `ReadbackSink` waits after every commit, so the rotation is
-  structural today and the ring only pays off once delivery returns from the
-  drawable callback without blocking.
 - **App wiring.** `RaterModel` still animates with `IncrementalRenderer` on the
-  main actor; it should drive `RenderActor` and keep only finished frames.
+  main actor and draws a `CGImage`; it should host a `CAMetalLayer`, create a
+  `LayerSink`, `configure` the actor with it, and `drive` its clock. The app
+  target cannot be type-checked in this sandbox (the SwiftUI macro plugin is
+  blocked), so this is untested here.
+- **GPU-resident frames.** `LayerSink` uploads the CPU `ColorGrid` each frame
+  and runs `runs` over the whole grid. The design's zero-readback path would
+  deliver the GPU `colorBuffer` and the newly-ready row range so only new rows
+  are compacted.
+- **Δ-based pacing.** `drive` advances a fixed `stepsPerFrame`; the design
+  accumulates `Δ × stepsPerSecond` and caps a tick at 64 steps.
 - **`LEDSink`** behind the `RATER_SINK_LED` flag.
 
 ## Testing
@@ -81,5 +103,8 @@ When `MTLCreateSystemDefaultDevice()` reports `.metal4`, `MetalTests` runs the
 GPU `step`/`fit` kernels and asserts the `ColorGrid` equals
 `CPUAutomatonRenderer`'s for binary, 3-color, and right-pinned entries.
 `RenderActorTests` asserts the GPU incremental path matches `IncrementalRenderer`
-frame for frame (including the partially filled grid mid-run) and that the
-render actor runs off the main thread.
+frame for frame (including the partially filled grid mid-run), that the render
+actor runs off the main thread, and that `drive` advances on a clock tick.
+`LayerTests` compares the `runs` span compaction with a CPU run-length pass and
+reads the rendered texture back to check spans are filled with palette colours.
+The display-link presentation itself needs a screen and is not tested here.

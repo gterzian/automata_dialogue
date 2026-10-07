@@ -7,9 +7,10 @@ import Metal
 /// waits after every commit, so the rotation is structural today; a
 /// `LayerSink` returns from its drawable callback and lets the ring overlap.
 @available(macOS 26.0, *)
-final class FrameSlot {
+final class FrameSlot: @unchecked Sendable {
     let allocator: any MTL4CommandAllocator
     let command: any MTL4CommandBuffer
+    private let available = DispatchSemaphore(value: 1)
 
     init(device: any MTLDevice, label: String) throws {
         guard let allocator = device.makeCommandAllocator(),
@@ -19,6 +20,12 @@ final class FrameSlot {
         self.allocator = allocator
         self.command = command
     }
+
+    /// Waits until the slot's previous frame has finished on the GPU.
+    func acquire() { available.wait() }
+
+    /// Returns the slot to the ring. Called when the GPU finishes the frame.
+    func release() { available.signal() }
 }
 
 @available(macOS 26.0, *)
@@ -38,6 +45,7 @@ final class FrameSlotRing {
         let index = next
         let slot = slots[index]
         next = (next + 1) % slots.count
+        slot.acquire()
         return (index, slot)
     }
 }
@@ -271,6 +279,7 @@ public final class MetalSimulation {
         context.queue.commit([slot.command], options: options)
         done.wait()
         slot.allocator.reset()
+        slot.release()
     }
 
     private func readColorGrid() -> ColorGrid {

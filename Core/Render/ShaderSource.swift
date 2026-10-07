@@ -1,10 +1,10 @@
 import Foundation
 
-/// Metal Shading Language source for the simulation core, compiled at startup
-/// with `device.makeLibrary(source:)`. SwiftPM cannot build a `.metallib`, and
-/// keeping the source in one string lets the headless CLI and the app share it.
-/// The kernels match `Core/Programs` row-for-row (verified by `ReadbackSink`
-/// tests).
+/// Metal Shading Language sources, compiled at startup from strings with the
+/// Metal 4 compiler. SwiftPM cannot build a `.metallib`, and keeping the source
+/// in strings lets the headless CLI and the app share it. `simulation` matches
+/// `Core/Programs` row-for-row; `layer` compacts the fitted grid into spans and
+/// draws them through a GPU-built indirect draw (see `LayerRenderer`).
 public enum ShaderSource {
     public static let simulation = """
     #include <metal_stdlib>
@@ -109,6 +109,95 @@ public enum ShaderSource {
             ? p.totalSteps - 1
             : (row * (p.totalSteps - 1)) / (p.displayRows - 1);
         colorGrid[row * p.displayCols + gid.x] = fit_value(history, p, target, gid.x);
+    }
+    """
+
+    public static let layer = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    // One horizontal run of same-colour, non-background cells (design doc §6:
+    // draw cost follows the structure). Layout mirrors `LayerRenderer.Span`.
+    struct Span {
+        uint row;
+        uint start;
+        uint length;
+        uint color;
+    };
+
+    struct LayerUniforms {
+        uint cols;
+        uint rows;
+    };
+
+    // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
+    struct DrawArguments {
+        uint vertexCount;
+        uint instanceCount;
+        uint vertexStart;
+        uint baseInstance;
+    };
+
+    kernel void clear_counter(device atomic_uint* counter [[buffer(0)]],
+                              uint gid [[thread_position_in_grid]]) {
+        if (gid == 0) { atomic_store_explicit(counter, 0, memory_order_relaxed); }
+    }
+
+    kernel void runs(device const uchar* cells [[buffer(0)]],
+                     device Span* spans [[buffer(1)]],
+                     device atomic_uint* counter [[buffer(2)]],
+                     constant LayerUniforms& u [[buffer(3)]],
+                     uint2 gid [[thread_position_in_grid]]) {
+        uint col = gid.x;
+        uint row = gid.y;
+        if (col >= u.cols || row >= u.rows) return;
+        uint index = row * u.cols + col;
+        uchar value = cells[index];
+        if (value == 0) return;
+        // A run starts where the left neighbour is background or a different
+        // colour; only that cell writes, so no two threads claim one span.
+        if (col != 0 && cells[index - 1] == value) return;
+        uint length = 1;
+        while (col + length < u.cols && cells[index + length] == value) { length += 1; }
+        uint slot = atomic_fetch_add_explicit(counter, 1, memory_order_relaxed);
+        spans[slot] = Span{row, col, length, uint(value)};
+    }
+
+    kernel void encode_draw(device const uint* counter [[buffer(0)]],
+                            device DrawArguments* arguments [[buffer(1)]],
+                            uint gid [[thread_position_in_grid]]) {
+        if (gid != 0) return;
+        arguments->vertexCount = 6;
+        arguments->instanceCount = *counter;
+        arguments->vertexStart = 0;
+        arguments->baseInstance = 0;
+    }
+
+    struct LayerVertexOut {
+        float4 position [[position]];
+        float4 color;
+    };
+
+    // One instance per span; six vertices form the quad. Row 0 is the top edge,
+    // matching `IncrementalRenderer`'s top-down grid.
+    vertex LayerVertexOut layer_vertex(uint vid [[vertex_id]],
+                                       uint iid [[instance_id]],
+                                       const device Span* spans [[buffer(0)]],
+                                       constant LayerUniforms& u [[buffer(1)]],
+                                       constant float4* palette [[buffer(2)]]) {
+        Span s = spans[iid];
+        float2 corner = float2((vid == 1 || vid == 4 || vid == 5) ? 1.0 : 0.0,
+                               (vid == 2 || vid == 3 || vid == 5) ? 1.0 : 0.0);
+        float x = (float(s.start) + corner.x * float(s.length)) / float(u.cols);
+        float y = (float(s.row) + corner.y) / float(u.rows);
+        LayerVertexOut out;
+        out.position = float4(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+        out.color = palette[s.color];
+        return out;
+    }
+
+    fragment float4 layer_fragment(LayerVertexOut in [[stage_in]]) {
+        return in.color;
     }
     """
 }

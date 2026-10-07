@@ -76,11 +76,41 @@ public actor RenderActor {
         simulation = nil
     }
 
+    /// The last error from a driven run, if any. The clock tick cannot throw,
+    /// so a failed `advance` is recorded here instead of being dropped.
+    public private(set) var lastError: String?
+
+    /// Starts `clock` on the render thread and advances the run one chunk per
+    /// tick. Because this is actor-isolated, the display link is added to the
+    /// render run loop, so ticks and presentation share the Metal thread.
+    public func drive(clock: any FrameClock, stepsPerFrame: Int) {
+        clock.start { [weak self] _ in
+            guard let self else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.advance(by: stepsPerFrame)
+                } catch {
+                    await self.record(error)
+                }
+            }
+        }
+    }
+
+    /// Stops a clock started with `drive`.
+    public func stopDriving(clock: any FrameClock) {
+        clock.stop()
+    }
+
     /// Stops the render thread. Status calls must not follow.
     public func shutdown() {
         finishRun()
         context = nil
         executor.shutdown()
+    }
+
+    private func record(_ error: Error) {
+        lastError = error.localizedDescription
     }
 
     // MARK: - Test hooks

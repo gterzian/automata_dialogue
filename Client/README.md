@@ -27,5 +27,7 @@ over `AutomatonNSView`), which draws the `CGImage` produced by `Core`'s
 `IncrementalRenderer`. `RaterModel` owns the agent run and the animation task:
 on a `.choice` event it starts the entry and advances the renderer ~30 times a
 second; a new `send()` calls `stopAutomaton()` first, so the running automaton
-stops immediately. The Metal `CAMetalDisplayLink` layer sink is pending (see
-`Core/Render/README.md`).
+stops immediately. `Core/Render` now has the on-screen path (`LayerSink` +
+`DisplayLinkClock` + `LayerRenderer`, driven by `RenderActor.drive`); the
+panel still draws the CPU image, so hosting a `CAMetalLayer` and switching
+`RaterModel` to the render actor is the remaining wiring.
