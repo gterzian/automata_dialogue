@@ -3,6 +3,10 @@ import Combine
 import Core
 import CoreGraphics
 
+#if canImport(Agent)
+import Agent
+#endif
+
 /// App state for the single panel: the transcript, the current automaton
 /// animation, and the agent run. A new prompt stops the running automaton
 /// before the next run starts.
@@ -20,7 +24,13 @@ final class RaterModel: ObservableObject {
     @Published var attachmentError: String?
 
     private let store = TranscriptStore()
+    /// The real MLX agent when the app is built with the `Agent` target; the
+    /// deterministic `HeuristicAgent` otherwise, so the app runs with no model.
+    #if canImport(Agent)
+    private let agent: any AgentRunning = AgentEngine()
+    #else
     private let agent: any AgentRunning = HeuristicAgent()
+    #endif
     private let sessionID = UUID()
     private var animationTask: Task<Void, Never>?
     private var renderer: IncrementalRenderer?

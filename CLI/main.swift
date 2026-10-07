@@ -3,6 +3,10 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
+#if canImport(Agent)
+import Agent
+#endif
+
 // rater-cli — see CLI/README.md.
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -170,11 +174,51 @@ func printUsage() -> Never {
         options: --cols N --rows N --steps N
       gpu <id>                        compare the Metal 4 kernels with the CPU
         options: --cols N --rows N --steps N
-      rate <path> ...                 run the MLX agent (not yet implemented)
+      rate <path> ...                 run the MLX agent over reference images
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
 }
+
+#if canImport(Agent)
+/// Runs the real agent over each image and prints `name<TAB>label<TAB>id<TAB>seconds`.
+func runRate() async throws {
+    let paths = positional(from: arguments)
+    guard !paths.isEmpty else {
+        FileHandle.standardError.write(Data("rate: provide one or more image paths\n".utf8))
+        exit(2)
+    }
+    let engine = AgentEngine()
+    var rated = 0
+    for path in paths {
+        let url = URL(fileURLWithPath: path)
+        let start = Date()
+        var label = "?"
+        var id = "?"
+        var failure: String?
+        do {
+            for try await event in engine.run(AgentInput(text: "", imageURL: url)) {
+                switch event {
+                case .rating(let rating): label = rating.label.rawValue
+                case .choice(let choice): id = choice.id
+                case .failed(let message): failure = message
+                case .text, .finished: break
+                }
+            }
+        } catch {
+            failure = error.localizedDescription
+        }
+        let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
+        if let failure {
+            print("\(url.lastPathComponent)\tFAILED\t\(failure)\t\(seconds)s")
+        } else {
+            rated += 1
+            print("\(url.lastPathComponent)\t\(label)\t\(id)\t\(seconds)s")
+        }
+    }
+    print("\n\(rated)/\(paths.count) rated")
+}
+#endif
 
 switch command {
 case "catalog":
@@ -193,8 +237,14 @@ case "gpu":
         print("Metal 4 requires macOS 26")
     }
 case "rate":
-    FileHandle.standardError.write(Data("rate: not yet implemented (needs the Agent target)\n".utf8))
+#if canImport(Agent)
+    try await runRate()
+#else
+    FileHandle.standardError.write(Data(
+        "rate: built without the Agent target; set RATER_AGENT=1 for SwiftPM or use the Xcode build\n".utf8
+    ))
     exit(1)
+#endif
 default:
     printUsage()
 }
