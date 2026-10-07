@@ -81,6 +81,10 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         lock.unlock()
     }
 
+    /// The layer binds the simulation's color buffer directly, so the actor
+    /// skips the per-frame CPU readback (design doc §7).
+    public var wantsGPUResidentFrames: Bool { true }
+
     public func finish() {
         lock.lock()
         finished = true
@@ -103,7 +107,11 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         lock.unlock()
         guard !done, let frame, let spec = Catalog.spec(id: frame.specID) else { return }
         do {
-            try renderer.render(grid: frame.grid, palette: spec.display.palette, into: drawable.texture)
+            if let gpu = frame.gpu {
+                try renderer.render(gpu: gpu, palette: spec.display.palette, into: drawable.texture)
+            } else if let grid = frame.grid {
+                try renderer.render(grid: grid, palette: spec.display.palette, into: drawable.texture)
+            }
         } catch {
             lock.lock()
             lastError = error.localizedDescription

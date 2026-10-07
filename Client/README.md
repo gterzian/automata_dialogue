@@ -28,6 +28,9 @@ over `AutomatonNSView`), which draws the `CGImage` produced by `Core`'s
 on a `.choice` event it starts the entry and advances the renderer ~30 times a
 second; a new `send()` calls `stopAutomaton()` first, so the running automaton
 stops immediately. `Core/Render` now has the on-screen path (`LayerSink` +
-`DisplayLinkClock` + `LayerRenderer`, driven by `RenderActor.drive`); the
-panel still draws the CPU image, so hosting a `CAMetalLayer` and switching
-`RaterModel` to the render actor is the remaining wiring.
+`DisplayLinkClock` + `LayerRenderer`, driven by
+`RenderActor.drive(clock:pacing:)`) and delivers GPU-resident frames to a sink
+that asks for them (`FrameSink.wantsGPUResidentFrames`); the panel still draws
+the CPU image, so hosting a `CAMetalLayer`, building the sink with
+`RenderActor.makeLayerSink(layer:)`, and switching `RaterModel` to the render
+actor is the remaining wiring.

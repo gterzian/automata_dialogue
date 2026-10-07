@@ -186,6 +186,30 @@ public final class MetalSimulation {
     /// the background palette index, matching `IncrementalRenderer`.
     @discardableResult
     public func render(chunk: Int) throws -> ColorGrid {
+        try advance(chunk: chunk)
+        return readColorGrid()
+    }
+
+    /// Advances without reading the grid back, returning the run's GPU color
+    /// buffer and the display rows this call fitted. A GPU-resident sink binds
+    /// the buffer directly and compacts only the new rows (design doc §7).
+    @discardableResult
+    public func renderGPU(chunk: Int) throws -> GPUColorGrid {
+        let firstRow = fittedRows
+        try advance(chunk: chunk)
+        return GPUColorGrid(
+            buffer: colorBuffer,
+            cols: cols,
+            rows: rows,
+            firstRow: firstRow,
+            rowCount: fittedRows - firstRow
+        )
+    }
+
+    /// Encodes the step and fit work for `chunk` rows and commits it. Returns
+    /// the number of display rows fitted so far.
+    @discardableResult
+    func advance(chunk: Int) throws -> Int {
         let target = min(totalSteps - 1, step + max(0, chunk))
         let (index, slot) = ring.borrow()
         lastSlot = index
@@ -204,7 +228,7 @@ public final class MetalSimulation {
 
         try commit(slot)
         step = target
-        return readColorGrid()
+        return ready
     }
 
     // MARK: - Private

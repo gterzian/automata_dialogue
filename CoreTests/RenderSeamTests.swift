@@ -23,6 +23,28 @@ private final class DeltaBox: @unchecked Sendable {
     var deltas: [TimeInterval] = []
 }
 
+/// A `FrameSink` that asks the actor for GPU-resident frames and records them,
+/// so a test can assert the CPU readback is skipped.
+private final class GPUSink: FrameSink, @unchecked Sendable {
+    let wantsGPUResidentFrames = true
+    private let lock = NSLock()
+    private var recorded: [RenderFrame] = []
+
+    func deliver(_ frame: RenderFrame) {
+        lock.lock()
+        recorded.append(frame)
+        lock.unlock()
+    }
+
+    func finish() {}
+
+    var frames: [RenderFrame] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+}
+
 final class FrameSeamTests: XCTestCase {
     func testReadbackSinkRetainsLatestFrame() {
         let sink = ReadbackSink()
@@ -62,6 +84,35 @@ final class FrameSeamTests: XCTestCase {
         clock.pump(3.0 / 30)
         XCTAssertEqual(box.deltas.count, 2)
         XCTAssertEqual(box.deltas[1], 2.0 / 30, accuracy: 1e-9)
+    }
+
+    func testFixedPacingIgnoresDelta() {
+        var remainder = 0.0
+        let pacing = RenderPacing.fixed(7)
+        XCTAssertEqual(pacing.steps(for: 0.001, remainder: &remainder), 7)
+        XCTAssertEqual(pacing.steps(for: 5, remainder: &remainder), 7)
+    }
+
+    func testTimedPacingCarriesSubRowRemainder() {
+        var remainder = 0.0
+        let pacing = RenderPacing.timed(stepsPerSecond: 10)
+        // 0.05 s is half a row at 10 rows/s, so the first tick advances none.
+        XCTAssertEqual(pacing.steps(for: 0.05, remainder: &remainder), 0)
+        // The carried half-row completes on the next tick.
+        XCTAssertEqual(pacing.steps(for: 0.05, remainder: &remainder), 1)
+        XCTAssertEqual(remainder, 0, accuracy: 1e-9)
+        // A full second advances ten rows at once.
+        XCTAssertEqual(pacing.steps(for: 1.0, remainder: &remainder), 10)
+    }
+
+    func testTimedPacingCapsAndDropsBacklog() {
+        var remainder = 0.0
+        let pacing = RenderPacing.timed(stepsPerSecond: 1000, maxStepsPerTick: 64)
+        XCTAssertEqual(pacing.steps(for: 1.0, remainder: &remainder), 64)
+        // The 1000-row delta is clamped instead of carried, so a stalled clock
+        // never runs the whole board in one frame.
+        XCTAssertEqual(remainder, 0, accuracy: 1e-9)
+        XCTAssertEqual(pacing.steps(for: 1.0 / 1000, remainder: &remainder), 1)
     }
 }
 
@@ -106,6 +157,56 @@ final class RenderActorTests: XCTestCase {
         XCTAssertNil(error)
 
         await actor.stopDriving(clock: clock)
+        await actor.shutdown()
+    }
+
+    /// `.timed` pacing advances by the tick delta, not a fixed count.
+    func testDriveTimedPacingFollowsDelta() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E30")!
+        let sink = ReadbackSink()
+        let clock = ManualClock()
+        let actor = RenderActor()
+        try await actor.configure(spec: spec, cols: 20, rows: 10, steps: 200, sink: sink)
+        _ = sink.waitForFrame(timeout: 0.01) // consume the seed frame's signal
+        await actor.drive(clock: clock, pacing: .timed(stepsPerSecond: 30))
+
+        clock.pump(0.5) // 15 rows at 30 rows/s
+        XCTAssertEqual(sink.waitForFrame(timeout: 0.5)?.step, 15)
+        clock.pump(1.0 / 30) // one more
+        XCTAssertEqual(sink.waitForFrame(timeout: 0.5)?.step, 16)
+
+        await actor.stopDriving(clock: clock)
+        await actor.shutdown()
+    }
+
+    /// A GPU-resident sink gets the simulation's buffer and no CPU grid, and
+    /// the new-row range advances monotonically across frames.
+    func testGPUSinkReceivesResidentFrames() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E30")!
+        let sink = GPUSink()
+        let actor = RenderActor()
+        let seed = try await actor.configure(spec: spec, cols: 20, rows: 10, steps: 40, sink: sink)
+        XCTAssertNil(seed.grid)
+        let seedGPU = try XCTUnwrap(seed.gpu)
+        XCTAssertEqual(seedGPU.firstRow, 0)
+        XCTAssertTrue(seedGPU.startsRun)
+        XCTAssertEqual(seedGPU.cols, 20)
+        XCTAssertEqual(seedGPU.rows, 10)
+
+        let secondFrame = try await actor.advance(by: 5)
+        let second = try XCTUnwrap(secondFrame)
+        XCTAssertNil(second.grid)
+        let secondGPU = try XCTUnwrap(second.gpu)
+        XCTAssertEqual(secondGPU.firstRow, seedGPU.rowCount)
+        XCTAssertFalse(secondGPU.startsRun)
+        XCTAssertEqual(sink.frames.count, 2)
+
         await actor.shutdown()
     }
 

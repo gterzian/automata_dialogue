@@ -128,6 +128,8 @@ public enum ShaderSource {
     struct LayerUniforms {
         uint cols;
         uint rows;
+        uint rowOffset;
+        uint padding;
     };
 
     // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
@@ -149,7 +151,9 @@ public enum ShaderSource {
                      constant LayerUniforms& u [[buffer(3)]],
                      uint2 gid [[thread_position_in_grid]]) {
         uint col = gid.x;
-        uint row = gid.y;
+        // Only the rows a frame added are dispatched; `rowOffset` places them in
+        // the shared grid.
+        uint row = u.rowOffset + gid.y;
         if (col >= u.cols || row >= u.rows) return;
         uint index = row * u.cols + col;
         uchar value = cells[index];

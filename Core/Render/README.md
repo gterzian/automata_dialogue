@@ -23,7 +23,19 @@ driven by `DisplayLinkClock`. The LED sink remains.
 - **Render seam** (`RenderExecutor`, `RenderActor`, `FrameSink`, `FrameClock`,
   `ReadbackSink`, `SinkFactory`) — `RenderActor` confines the Metal objects to
   a dedicated run-loop thread and delivers `RenderFrame`s to a `FrameSink`;
-  `ReadbackSink` retains the latest frame for a CPU consumer.
+  `ReadbackSink` retains the latest frame for a CPU consumer. `RenderPacing`
+  turns clock ticks into advances: `.fixed` for deterministic tests, `.timed`
+  accumulates `Δ × stepsPerSecond` and clamps each tick (design doc §7).
+  `RenderActor.makeLayerSink(layer:)` builds a layer sink on the actor's own
+  `GPUContext`, so the sink and the simulation share one device, queue, and
+  residency set.
+- **GPU-resident frames** — a sink that sets
+  `wantsGPUResidentFrames` receives `GPUColorGrid` (the simulation's
+  `colorBuffer` plus the rows this frame fitted) instead of a CPU `ColorGrid`,
+  so the actor skips the readback. `LayerRenderer.render(gpu:)` appends the new
+  rows to the spans it already compacted; display rows never change once
+  fitted, so the accumulated spans stay valid. A frame with `firstRow == 0`
+  starts a run and resets the counter.
 - **On-screen sink** (`DisplayLinkClock`, `LayerSink`, `LayerRenderer`) —
   `DisplayLinkClock` conforms to `FrameClock` over `CAMetalDisplayLink`
   (`preferredFrameLatency = 2`); `LayerSink` is a `FrameSink` that owns the
@@ -31,8 +43,8 @@ driven by `DisplayLinkClock`. The LED sink remains.
   kernel compacts each same-colour non-background run into a `Span`, an
   `encode_draw` kernel writes the `MTLDrawPrimitivesIndirectArguments` on the
   GPU, and a render pass clears to the background and draws one instanced quad
-  per span. `RenderActor.drive(clock:stepsPerFrame:)` starts the clock on the
-  render thread.
+  per span. `RenderActor.drive(clock:pacing:)` starts the clock on the render
+  thread.
 - **Fit** (`Fit`) — the one geometry rule both paths use.
 
 Both paths converge on the same `ColorGrid`; the readback test compares them.
@@ -85,17 +97,17 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
 ## Remaining work
 
 - **App wiring.** `RaterModel` still animates with `IncrementalRenderer` on the
-  main actor and draws a `CGImage`; it should host a `CAMetalLayer`, create a
-  `LayerSink`, `configure` the actor with it, and `drive` its clock. The app
-  target cannot be type-checked in this sandbox (the SwiftUI macro plugin is
-  blocked), so this is untested here.
-- **GPU-resident frames.** `LayerSink` uploads the CPU `ColorGrid` each frame
-  and runs `runs` over the whole grid. The design's zero-readback path would
-  deliver the GPU `colorBuffer` and the newly-ready row range so only new rows
-  are compacted.
-- **Δ-based pacing.** `drive` advances a fixed `stepsPerFrame`; the design
-  accumulates `Δ × stepsPerSecond` and caps a tick at 64 steps.
-- **`LEDSink`** behind the `RATER_SINK_LED` flag.
+  main actor and draws a `CGImage`; it should host a `CAMetalLayer`, ask the
+  actor for a `LayerSink` with `makeLayerSink(layer:)`, `configure` the actor
+  with it, and `drive` its clock with `.timed`. The app target cannot be
+  type-checked in this sandbox (the SwiftUI macro plugin is blocked), so this
+  is untested here.
+- **`LEDSink`** behind the `RATER_SINK_LED` flag. Its geometry, colour order,
+  and transport are open decisions (§11.13), so it waits on hardware.
+
+A sink that receives GPU-resident frames must read the buffer only on the
+render actor and must treat `firstRow == 0` as a new run, because the spans
+accumulate across frames.
 
 ## Testing
 
@@ -104,7 +116,9 @@ GPU `step`/`fit` kernels and asserts the `ColorGrid` equals
 `CPUAutomatonRenderer`'s for binary, 3-color, and right-pinned entries.
 `RenderActorTests` asserts the GPU incremental path matches `IncrementalRenderer`
 frame for frame (including the partially filled grid mid-run), that the render
-actor runs off the main thread, and that `drive` advances on a clock tick.
-`LayerTests` compares the `runs` span compaction with a CPU run-length pass and
-reads the rendered texture back to check spans are filled with palette colours.
-The display-link presentation itself needs a screen and is not tested here.
+actor runs off the main thread, that `drive` advances on a clock tick, and that
+`.timed` pacing follows the tick delta. `LayerTests` compares the `runs` span
+compaction with a CPU run-length pass, checks the incremental GPU path's
+accumulated spans against a full CPU compaction, and reads the rendered texture
+back to check spans are filled with palette colours. The display-link
+presentation itself needs a screen and is not tested here.

@@ -7,11 +7,21 @@ import Foundation
 /// declared `Sendable` only because `configure` accepts one across the actor
 /// boundary.
 public protocol FrameSink: AnyObject, Sendable {
+    /// Whether this sink can present a GPU-resident grid. When false (the
+    /// default) the actor reads the grid back and delivers it in `RenderFrame`;
+    /// when true the actor skips the readback and sets `RenderFrame.gpu`
+    /// instead.
+    var wantsGPUResidentFrames: Bool { get }
+
     /// Delivers a completed frame. Called on the render actor.
     func deliver(_ frame: RenderFrame)
 
     /// Called when the run ends or the actor shuts down.
     func finish()
+}
+
+public extension FrameSink {
+    var wantsGPUResidentFrames: Bool { false }
 }
 
 /// A sink that retains the most recent frame for a CPU consumer and lets it
@@ -68,8 +78,10 @@ public final class ReadbackSink: FrameSink, @unchecked Sendable {
     }
 }
 
-/// The delivery surfaces the design lists. `.readback` is built; `.layer` and
-/// `.led` arrive with `LayerSink`/`LEDSink` (see `Core/Render/README.md`).
+/// The delivery surfaces the design lists. `.readback` and `.layer` are built;
+/// `.led` waits on hardware (see `Core/Render/README.md`). The factory builds
+/// only context-free sinks, so a `LayerSink` comes from
+/// `RenderActor.makeLayerSink(layer:)`, which supplies the actor's context.
 public enum SinkKind: Sendable, CaseIterable {
     case readback
     case layer
@@ -78,11 +90,18 @@ public enum SinkKind: Sendable, CaseIterable {
 
 public enum SinkFactory {
     public enum SinkError: Error, LocalizedError {
+        /// The sink exists but needs a surface or context the factory cannot
+        /// supply (the layer sink).
+        case needsContext(SinkKind)
+        /// The sink is not built yet.
         case unimplemented(SinkKind)
 
         public var errorDescription: String? {
             switch self {
-            case .unimplemented(let kind): "No sink is built for \(kind) yet."
+            case .needsContext(let kind):
+                "\(kind) needs a layer and context; use RenderActor.makeLayerSink(layer:)."
+            case .unimplemented(let kind):
+                "No sink is built for \(kind) yet."
             }
         }
     }
@@ -90,7 +109,8 @@ public enum SinkFactory {
     public static func make(_ kind: SinkKind) throws -> any FrameSink {
         switch kind {
         case .readback: ReadbackSink()
-        case .layer, .led: throw SinkError.unimplemented(kind)
+        case .layer: throw SinkError.needsContext(kind)
+        case .led: throw SinkError.unimplemented(kind)
         }
     }
 }

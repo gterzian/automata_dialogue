@@ -45,6 +45,41 @@ final class LayerTests: XCTestCase {
         XCTAssertEqual(gpu, cpuSpans(grid))
     }
 
+    /// The GPU-resident path compacts only the rows each frame adds; the
+    /// accumulated spans must equal a full CPU compaction of the final grid.
+    func testIncrementalSpansMatchFullCPUCompaction() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        let cols = spec.board.width
+        let rows = 40
+        let steps = 150
+        let palette = spec.display.palette
+        let renderer = try LayerRenderer(context: context, pixelFormat: .bgra8Unorm)
+        let simulation = try MetalSimulation(spec: spec, cols: cols, rows: rows, steps: steps, context: context)
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: cols, height: rows, mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .shared
+        let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
+
+        var frames = 0
+        while true {
+            let gpu = try simulation.renderGPU(chunk: 7)
+            try renderer.render(gpu: gpu, palette: palette, into: texture, wait: true)
+            frames += 1
+            if simulation.step >= simulation.totalSteps - 1 { break }
+        }
+        XCTAssertGreaterThan(frames, 1)
+
+        let cpuGrid = CPUAutomatonRenderer().grid(spec: spec, cols: cols, rows: rows, steps: steps)
+        let gpuSpans = renderer.accumulatedSpans().sorted { ($0.row, $0.start) < ($1.row, $1.start) }
+        XCTAssertFalse(gpuSpans.isEmpty)
+        XCTAssertEqual(gpuSpans, cpuSpans(cpuGrid))
+    }
+
     func testRenderFillsSpansWithPaletteColours() throws {
         guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
         let context = try GPUContext()
