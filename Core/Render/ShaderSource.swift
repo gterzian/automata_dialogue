@@ -24,6 +24,7 @@ public enum ShaderSource {
         uint block;
         uint sourceOrigin;
         uint padLeft;
+        uint rowOffset;
     };
 
     // The row being computed is read from a GPU-side head counter that
@@ -102,11 +103,12 @@ public enum ShaderSource {
                     device uchar* colorGrid [[buffer(1)]],
                     constant FitParams& p [[buffer(2)]],
                     uint2 gid [[thread_position_in_grid]]) {
-        if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
+        uint row = p.rowOffset + gid.y;
+        if (gid.x >= p.displayCols || row >= p.displayRows) return;
         uint target = p.displayRows == 1
             ? p.totalSteps - 1
-            : (gid.y * (p.totalSteps - 1)) / (p.displayRows - 1);
-        colorGrid[gid.y * p.displayCols + gid.x] = fit_value(history, p, target, gid.x);
+            : (row * (p.totalSteps - 1)) / (p.displayRows - 1);
+        colorGrid[row * p.displayCols + gid.x] = fit_value(history, p, target, gid.x);
     }
     """
 }

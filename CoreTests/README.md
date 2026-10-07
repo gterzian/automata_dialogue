@@ -18,3 +18,6 @@ What must be covered:
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle.
 - **Transcript** — store append/apply/rebuild, `StreamingRefreshGate`, and
   `HeightCache` behavior.
+- **Render seam** — `ReadbackSink`/`SinkFactory` behavior, `RenderActor` runs
+  off the main thread, and (Metal 4 only) the GPU incremental frames equal
+  `IncrementalRenderer` for a partial run.
