@@ -7,9 +7,10 @@
   eyeball the catalog and to produce golden images.
 - `rater-cli rate <path>...` — run the real MLX agent over a folder of
   reference drawings and print rating, choice, and latency per image, then a
-  summary table. This needs the `Agent` target: the SwiftPM CLI has it only
-  when built with `RATER_AGENT=1`, the Xcode scheme always. See `AGENTS.md`
-  and `Agent/README.md`.
+  summary table. `--model <dir>` (or `RATER_MODEL_PATH`) loads a local snapshot
+  instead of downloading; see `Agent/README.md`. This needs the `Agent` target:
+  the SwiftPM CLI has it only when built with `RATER_AGENT=1`, the Xcode scheme
+  always. See `AGENTS.md`.
 - `rater-cli catalog` — print the catalog and the generated prompt index.
 - `rater-cli hashes` / `rater-cli cells <id> <steps>` — golden row hashes and a
   single row's cells, for kernel debugging.

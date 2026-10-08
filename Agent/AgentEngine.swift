@@ -37,6 +37,10 @@ public actor AgentEngine: AgentRunning {
 
         public var modelID: String
         public var revision: String
+        /// When set, the model is loaded from this local snapshot directory and
+        /// nothing is downloaded. `loadModelContainer` ignores the downloader
+        /// for a `.directory` configuration, so the app can run fully offline.
+        public var modelDirectory: URL?
         public var maxTokens: Int
         public var temperature: Float
         public var downloader: any Downloader
@@ -46,6 +50,7 @@ public actor AgentEngine: AgentRunning {
         public init(
             modelID: String = Configuration.defaultModelID,
             revision: String = "main",
+            modelDirectory: URL? = nil,
             maxTokens: Int = 900,
             temperature: Float = 0.2,
             downloader: any Downloader = HuggingFaceBridges.downloader(),
@@ -54,11 +59,34 @@ public actor AgentEngine: AgentRunning {
         ) {
             self.modelID = modelID
             self.revision = revision
+            self.modelDirectory = modelDirectory
             self.maxTokens = maxTokens
             self.temperature = temperature
             self.downloader = downloader
             self.tokenizerLoader = tokenizerLoader
             self.progressHandler = progressHandler
+        }
+
+        /// Reads `RATER_MODEL_PATH` (a local snapshot directory). When it is
+        /// unset the engine downloads `modelID` through `HubDownloader` instead.
+        public static func fromEnvironment(
+            _ environment: [String: String] = ProcessInfo.processInfo.environment
+        ) -> Configuration {
+            var configuration = Configuration()
+            if let path = environment["RATER_MODEL_PATH"], !path.isEmpty {
+                configuration.modelDirectory = URL(
+                    fileURLWithPath: NSString(string: path).expandingTildeInPath, isDirectory: true)
+            }
+            return configuration
+        }
+
+        /// The configuration `loadModelContainer` resolves: a local snapshot
+        /// directory when set, otherwise a hub id to download.
+        func modelConfiguration() -> ModelConfiguration {
+            if let modelDirectory {
+                return ModelConfiguration(directory: modelDirectory)
+            }
+            return ModelConfiguration(id: modelID, revision: revision)
         }
     }
 
@@ -148,9 +176,7 @@ public actor AgentEngine: AgentRunning {
             try await loadModelContainer(
                 from: configuration.downloader,
                 using: configuration.tokenizerLoader,
-                configuration: ModelConfiguration(
-                    id: configuration.modelID, revision: configuration.revision
-                ),
+                configuration: configuration.modelConfiguration(),
                 progressHandler: configuration.progressHandler
             )
         }

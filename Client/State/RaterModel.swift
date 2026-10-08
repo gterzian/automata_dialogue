@@ -27,7 +27,7 @@ final class RaterModel: ObservableObject {
     /// The real MLX agent when the app is built with the `Agent` target; the
     /// deterministic `HeuristicAgent` otherwise, so the app runs with no model.
     #if canImport(Agent)
-    private let agent: any AgentRunning = AgentEngine()
+    private let agent: any AgentRunning = AgentEngine(configuration: RaterModel.agentConfiguration())
     #else
     private let agent: any AgentRunning = HeuristicAgent()
     #endif
@@ -162,6 +162,22 @@ final class RaterModel: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    #if canImport(Agent)
+    /// `RATER_MODEL_PATH` first, then the `RATERModelPath` user default
+    /// (`defaults write com.rater.app RATERModelPath /path/to/snapshot`), so a
+    /// Finder launch can point at a local model without downloading.
+    private static func agentConfiguration() -> AgentEngine.Configuration {
+        var configuration = AgentEngine.Configuration.fromEnvironment()
+        if configuration.modelDirectory == nil,
+           let path = UserDefaults.standard.string(forKey: "RATERModelPath"),
+           !path.isEmpty {
+            configuration.modelDirectory = URL(
+                fileURLWithPath: NSString(string: path).expandingTildeInPath, isDirectory: true)
+        }
+        return configuration
+    }
+    #endif
 
     /// Runs a `@MainActor` async closure from a synchronous call site.
     private func launch(_ body: @escaping @MainActor () async -> Void) {

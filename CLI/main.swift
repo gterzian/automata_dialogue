@@ -175,6 +175,7 @@ func printUsage() -> Never {
       gpu <id>                        compare the Metal 4 kernels with the CPU
         options: --cols N --rows N --steps N
       rate <path> ...                 run the MLX agent over reference images
+        option: --model <dir> (default: RATER_MODEL_PATH, else download)
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
@@ -188,7 +189,12 @@ func runRate() async throws {
         FileHandle.standardError.write(Data("rate: provide one or more image paths\n".utf8))
         exit(2)
     }
-    let engine = AgentEngine()
+    var configuration = AgentEngine.Configuration.fromEnvironment()
+    if let model = flags(from: arguments)["model"] {
+        configuration.modelDirectory = URL(
+            fileURLWithPath: NSString(string: model).expandingTildeInPath, isDirectory: true)
+    }
+    let engine = AgentEngine(configuration: configuration)
     var rated = 0
     for path in paths {
         let url = URL(fileURLWithPath: path)

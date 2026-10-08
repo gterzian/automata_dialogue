@@ -26,6 +26,15 @@ the two API points the bridges pin:
   model does not spend tokens on a reasoning preamble before the tool calls.
 - The container is loaded once and shared; a failed load is retried on the next
   run. Download and load run off the main actor.
+- **Local snapshots.** `Configuration.modelDirectory`, `rater-cli rate --model
+  <dir>`, and `RATER_MODEL_PATH` all load from a directory instead of the hub.
+  `loadModelContainer` never calls the downloader for a `.directory`
+  configuration, so no network is touched. The directory must be a full Hugging
+  Face snapshot (`config.json`, `*.safetensors` with
+  `model.safetensors.index.json`, `tokenizer.json`, `tokenizer_config.json`,
+  `vocab.json`, `chat_template.jinja`, and the preprocessor JSONs). Download it
+  once, e.g. `huggingface-cli download mlx-community/Qwen3.5-9B-4bit --local-dir
+  <dir>`; the tokenizer's `eos_token` (`<|im_end|>`) supplies the stop token.
 
 ## Ordering
 
@@ -37,9 +46,9 @@ emitted `.failed`.
 
 ## Remaining work
 
-- The engine has not been run against the real weights here (Hugging Face was
-  reachable for the API but the download and the MLX C++/Metal build are large).
-  First real run should confirm open decisions §11.1–§11.3: model choice,
-  image-only turns (empty prompt), and the `qwen3_5` tool-call recovery path.
+- The engine compiles and links with `RATER_AGENT=1`, but has not been run
+  against real weights yet. First real run should confirm open decisions
+  §11.1–§11.3: model choice, image-only turns (empty prompt), and the
+  `qwen3_5` tool-call recovery path.
 - `AgentEngine` is not covered by `CoreTests`; keep run-level tests in `Core`
   against `HeuristicAgent` and test the model only through `rater-cli rate`.
