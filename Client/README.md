@@ -16,9 +16,9 @@ One window, one panel, following the uni03C0 conventions for chrome:
 - Transcript rows (user input, rating card, choice card, assistant sentence,
   error) render in the same panel.
 
-The run uses the MLX `AgentEngine` when the app links the `Agent` target (the
-Xcode project always does); otherwise it uses `Core`'s `HeuristicAgent`, so the
-panel is runnable with no model present. See `Agent/README.md`.
+The run uses the MLX `AgentEngine`. The app only builds through the Xcode
+project, which always links the `Agent` target; there is no model-free
+fallback. See `Agent/README.md`.
 
 The transcript is rendered by an `NSTableView`-backed coordinator (as in
 uni03C0) driven by `Core/Session`. Only the visible window of rows is

@@ -15,6 +15,7 @@ final class MetalTests: XCTestCase {
             ("E30", 401, 200, 200),   // binary, random-looking
             ("T1329", 161, 320, 320), // 3-color totalistic
             ("T177", 601, 300, 300),  // 3-color random
+            ("K2R2-20.seed195", 221, 220, 220), // radius-2 totalistic, seeded
             ("E110", 400, 150, 400),  // right-pinned, board wider than display
         ]
         for testCase in cases {

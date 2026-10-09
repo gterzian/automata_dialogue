@@ -1,7 +1,7 @@
 # AGENTS.md — Automata Rater
 
 Automata Rater: a native macOS app where a local MLX agent rates an input
-(simple / structured / random / complex) and picks one of 32 curated cellular
+(simple / structured / random / complex) and picks one of 45 curated cellular
 automata to display. The design of record is the draft design doc and the two
 artifacts in `artifacts/`.
 
@@ -84,8 +84,8 @@ the file that owns it ("see `Core/Catalog/README.md`") rather than restating it.
 3. **A new prompt stops the running automaton immediately** before the new run
    begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
-   testable; `Core` holds the prompt/schema/dispatcher logic and a
-   deterministic `HeuristicAgent` so the app runs with no model present. See
+   testable; `Core` holds the prompt/schema/dispatcher logic. There is no
+   model-free fallback agent: the app always runs the model. See
    `Core/Agent/README.md`.
 
 ## Concurrency (repo-wide)

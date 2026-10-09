@@ -6,15 +6,16 @@ Metal 4.
 
 What must be covered:
 
-- **Catalog** — exactly 32 unique ids in inventory order; behavior counts
-  (repetition 9, nesting 11, randomness 6, complexity 6); the schema enum, the
-  prompt index, and the catalog ids all agree.
+- **Catalog** — exactly 45 unique ids in inventory order; behavior counts
+  (repetition 12, nesting 14, randomness 10, complexity 9); the dispatcher's
+  label→ids listing and the catalog ids agree.
 - **Programs** — CPU reference row hashes for each entry; closed-form local
-  rules agree with the rule table for all 8 neighborhoods.
-- **Prompt** — `SystemPrompt.build` contains all 32 ids and every rubric
-  section; the prefix stays within budget.
-- **Dispatcher** — ordering (including both calls in one pass), argument and
-  id validation, event emission, loop bound, follow-up for a missing call.
+  rules agree with the rule table for all 8 neighborhoods; the K2R2 code table.
+- **Prompt** — `SystemPrompt.build` contains every rubric section and no
+  catalog id; the prefix stays within budget.
+- **Dispatcher** — ordering (`rate → list → choose` and each call out of
+  order), label-scoped listing, argument and id validation, event emission,
+  loop bound.
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle.
 - **Transcript** — store append/apply/rebuild, `StreamingRefreshGate`, and
   `HeightCache` behavior.

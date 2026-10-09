@@ -7,6 +7,9 @@ public enum GPUProgram: Sendable, Hashable {
     case elementary(rule: UInt8)
     /// Radius 1, `colors` colors; `code` is the base-`colors` totalistic code.
     case totalistic(code: UInt32, colors: UInt8)
+    /// Radius 2, 2 colors; `code` is the 6-bit next-nearest-neighbor
+    /// totalistic code, digit `s` the new color for sum `s` (inventory §1.3).
+    case k2r2(code: UInt16)
 }
 
 /// The seed row of a board. Mirrors `ElementaryCA.Start`; totalistic entries
@@ -14,7 +17,15 @@ public enum GPUProgram: Sendable, Hashable {
 public enum BoardStart: Sendable, Hashable {
     case center
     case rightmost
-    case random(seed: UInt64)
+    /// Each cell is on with `density` (inventory §1.4).
+    case random(seed: UInt64, density: Double = 0.5)
+    /// Random 2-cell blocks, each entirely on or entirely off (inventory §1.4).
+    case randomBlocks(seed: UInt64)
+    /// A fixed block repeated across the row (inventory §1.4).
+    case block([UInt8])
+    /// `number` written in base `colors`, most significant digit first, from
+    /// the center cell (inventory §1.4).
+    case seed(number: Int, colors: Int)
 }
 
 public struct Board: Sendable, Hashable {
@@ -93,6 +104,7 @@ public struct ProgramSpec: Sendable {
         switch gpu {
         case .elementary: 2
         case .totalistic(_, let colors): Int(colors)
+        case .k2r2: 2
         }
     }
 }

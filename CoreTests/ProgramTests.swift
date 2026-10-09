@@ -58,6 +58,26 @@ final class ProgramTests: XCTestCase {
         XCTAssertEqual(program.row().last, 0)
     }
 
+    /// Inventory §1.3: code 20 is `010100`, so sums 2 and 4 give black and
+    /// all other sums give white. Two adjacent black cells set both neighbors'
+    /// and each other's five-cell sum to 2, giving a run four cells wide.
+    func testK2R2TableExtraction() {
+        let row: [UInt8] = [0, 0, 0, 1, 1, 0, 0, 0, 0]
+        var program = K2R2CA(code: 20, width: row.count, row: row)
+        program.step()
+        XCTAssertEqual(program.row(), [0, 0, 1, 1, 1, 1, 0, 0, 0])
+    }
+
+    /// A single black cell sums to 1 everywhere in its neighborhood, so code
+    /// 20 leaves the row empty on the next step.
+    func testK2R2SingleCellDies() {
+        var row = [UInt8](repeating: 0, count: 9)
+        row[4] = 1
+        var program = K2R2CA(code: 20, width: 9, row: row)
+        program.step()
+        XCTAssertEqual(program.row(), [UInt8](repeating: 0, count: 9))
+    }
+
     /// Every catalog reference is deterministic: two fresh programs hash the
     /// same after the same number of steps.
     func testCatalogReferencesAreDeterministic() {
@@ -90,6 +110,9 @@ final class ProgramTests: XCTestCase {
             ("T957", 160, 11192566255924613452),
             ("T966", 160, 16101822695064495244),
             ("T1884", 160, 18321503795442451745),
+            ("E30.block1100", 160, 615673218960636069),
+            ("K2R2-20.seed195", 220, 13209351891583281257),
+            ("T1329.seed916", 300, 2511403021277914069),
             ("E90", 200, 4778698135788584607),
             ("E22", 200, 4778698135788584607),
             ("E60", 200, 5503811919850749983),
@@ -101,18 +124,28 @@ final class ProgramTests: XCTestCase {
             ("T948", 200, 15347415833077877439),
             ("T1749", 200, 11906067471390591036),
             ("T420", 200, 14875601662526370927),
+            ("E90.sparse", 200, 10108808006888323985),
+            ("E126.pairs", 200, 4063800591829441653),
+            ("E184.rand", 200, 14548386552639075464),
             ("E30", 200, 1521513059911051745),
             ("E45", 200, 16526704753940013665),
             ("E73", 200, 13798088140420961612),
             ("T177", 300, 8989692848850490165),
             ("T912", 300, 13411034643568056879),
             ("T2040", 300, 12986489760047039721),
+            ("E90.rand", 200, 4299876937117059375),
+            ("E22.rand", 200, 14849965979033566730),
+            ("E22.seed19", 200, 15578877860320897447),
+            ("E126.rand", 200, 13247624735719521465),
             ("E110", 400, 16141864199417367557),
             ("E54", 300, 17369092390066220023),
             ("T1041", 400, 3545670611698640313),
             ("T1635", 600, 5085765711341694157),
             ("T2049", 600, 18349513846607122993),
             ("T1599", 600, 14285951473571738455),
+            ("E110.rand", 400, 2917164218058808844),
+            ("T1329.seed54889", 400, 2758096440786442988),
+            ("T357.seed28", 300, 7216418007845935533),
         ]
         XCTAssertEqual(goldens.count, Catalog.all.count)
         for golden in goldens {

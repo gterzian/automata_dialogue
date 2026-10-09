@@ -58,7 +58,7 @@ func printCatalog() {
             print("  \(spec.id)  \(spec.title)")
         }
     }
-    print("\n--- prompt index ---")
+    print("\n--- index ---")
     for line in Catalog.promptIndexLines { print(line) }
 }
 
@@ -195,6 +195,12 @@ func runRate() async throws {
             fileURLWithPath: NSString(string: model).expandingTildeInPath, isDirectory: true)
     }
     let engine = AgentEngine(configuration: configuration)
+    // Normalize each input to the model's 512×512 size, as the app does, so an
+    // oversized or malformed image never reaches the preprocessor's far larger
+    // edge limits. The session folder is removed when the run ends.
+    let sessionID = UUID()
+    let directory = ImageImport.sessionDirectory(for: sessionID)
+    defer { ImageImport.removeSessionDirectory(for: sessionID) }
     var rated = 0
     for path in paths {
         let url = URL(fileURLWithPath: path)
@@ -203,7 +209,8 @@ func runRate() async throws {
         var id = "?"
         var failure: String?
         do {
-            for try await event in engine.run(AgentInput(text: "", imageURL: url)) {
+            let normalized = try ImageImport.normalize(url, into: directory)
+            for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {
                 switch event {
                 case .rating(let rating): label = rating.label.rawValue
                 case .choice(let choice): id = choice.id

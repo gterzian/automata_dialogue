@@ -8,17 +8,23 @@ and tests compare row hashes.
 
 - A `RowProgram` owns a width-`W` row and advances it by one `step()`.
   Neighborhoods wrap at both edges.
-- `stateCount` is the number of cell values (2 for elementary rules, 3 for the
-  3-color totalistic rules). Row values are palette indices; index 0 is the
-  background.
+- `stateCount` is the number of cell values (2 for elementary and K2R2 rules,
+  3 for the 3-color totalistic rules). Row values are palette indices; index 0
+  is the background.
 - `SplitMix64` is the harness PRNG. It is bit-for-bit deterministic so a
-  random-start entry (`E54`) matches between CPU and GPU.
+  random-start entry matches between CPU and GPU. Density-one-half rows keep
+  the original `next() & 1` draw; other densities use the top 53 bits, so the
+  recorded goldens do not move when a new density is added.
 
 ## Entries
 
-`ElementaryCA` (Wolfram code, radius 1) and `TotalisticCA` (radius 1, k
-colors, base-k code) are taken verbatim from the inventory, section 1. The
-per-entry rule numbers, widths, heights, and starts live in `Core/Catalog`.
+`ElementaryCA` (Wolfram code, radius 1), `TotalisticCA` (radius 1, k colors,
+base-k code), and `K2R2CA` (2 colors, radius 2, 6-bit code) are taken verbatim
+from the inventory, section 1. The per-entry rule numbers, widths, heights,
+and starts live in `Core/Catalog`. A program built through `ProgramFactory`
+takes its seed row from `BoardStart`, so seeds, blocks, and non-half densities
+are seeded on the CPU and uploaded by the GPU path (`MetalSimulation.reseed`
+reads `spec.makeProgram().row()`).
 
 ## Tests
 

@@ -66,6 +66,23 @@ public enum ShaderSource {
         history[writeRow * p.width + i] = uchar((p.rule / divisor) % p.colors);
     }
 
+    kernel void step_k2r2(device uchar* history [[buffer(0)]],
+                          constant StepParams& p [[buffer(1)]],
+                          device const uint* head [[buffer(2)]],
+                          uint gid [[thread_position_in_grid]]) {
+        if (gid >= p.width) return;
+        uint readRow = *head;
+        uint writeRow = readRow + 1;
+        uint i = gid;
+        uint base = readRow * p.width;
+        uint sum = history[base + (i + p.width - 2) % p.width]
+                 + history[base + (i + p.width - 1) % p.width]
+                 + history[base + i]
+                 + history[base + (i + 1) % p.width]
+                 + history[base + (i + 2) % p.width];
+        history[writeRow * p.width + i] = uchar((p.rule >> sum) & 1u);
+    }
+
     kernel void bump_head(device uint* head [[buffer(0)]],
                           uint gid [[thread_position_in_grid]]) {
         if (gid == 0) { *head = *head + 1; }

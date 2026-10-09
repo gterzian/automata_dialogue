@@ -24,12 +24,12 @@ private func enumStrings(_ value: any Sendable) -> [String]? {
 }
 
 final class ToolSchemaTests: XCTestCase {
-    func testChooseEnumEqualsCatalogIDs() {
+    func testChooseIDHasNoEmbeddedCatalogEnum() {
         let function = schemaObject(ToolSchemas.chooseAutomaton["function"]!)
         let parameters = schemaObject(function!["parameters"]!)
         let properties = schemaObject(parameters!["properties"]!)
         let idField = schemaObject(properties!["id"]!)
-        XCTAssertEqual(enumStrings(idField!["enum"]!), Catalog.ids)
+        XCTAssertNil(idField!["enum"], "the catalog must not be embedded in the schema")
     }
 
     func testRateEnumMatchesRatingLabels() {
@@ -43,20 +43,24 @@ final class ToolSchemaTests: XCTestCase {
     }
 
     func testToolNames() {
-        XCTAssertEqual(ToolSchemas.all.count, 2)
         let names = ToolSchemas.all.compactMap { spec -> String? in
             guard let function = schemaObject(spec["function"]!) else { return nil }
             return function["name"] as? String
         }
-        XCTAssertEqual(names, [ToolSchemas.rateInputName, ToolSchemas.chooseAutomatonName])
+        XCTAssertEqual(
+            names,
+            [ToolSchemas.rateInputName, ToolSchemas.listAutomataName, ToolSchemas.chooseAutomatonName]
+        )
     }
 }
 
 final class SystemPromptTests: XCTestCase {
-    func testContainsEveryCatalogID() {
+    func testDoesNotEmbedTheCatalog() {
         let prompt = SystemPrompt.build()
+        XCTAssertFalse(prompt.contains("Inventory index"))
+        XCTAssertFalse(prompt.contains("Rating to inventory"))
         for id in Catalog.ids {
-            XCTAssertTrue(prompt.contains(id), "prompt is missing \(id)")
+            XCTAssertFalse(prompt.contains(id), "prompt still embeds \(id)")
         }
     }
 
@@ -65,7 +69,6 @@ final class SystemPromptTests: XCTestCase {
         for section in [
             "The four categories", "## Method", "## Output format",
             "## Calibration anchors", "## Handling specific situations",
-            "Rating to inventory", "Inventory index",
         ] {
             XCTAssertTrue(prompt.contains(section), "prompt is missing \(section)")
         }
@@ -80,7 +83,7 @@ final class SystemPromptTests: XCTestCase {
 
     func testPrefixStaysWithinBudget() {
         let tokens = SystemPrompt.estimatedTokenCount(of: SystemPrompt.build())
-        XCTAssertLessThan(tokens, 6000, "system prompt is larger than the ~3k budget")
+        XCTAssertLessThan(tokens, 3000, "system prompt is larger than the ~2.5k budget")
     }
 }
 
@@ -101,6 +104,10 @@ final class ToolDispatcherTests: XCTestCase {
         ])
     }
 
+    private func listCall() -> ToolInvocation {
+        ToolInvocation(name: ToolSchemas.listAutomataName)
+    }
+
     private func chooseCall(_ id: String = "E90") -> ToolInvocation {
         ToolInvocation(name: ToolSchemas.chooseAutomatonName, arguments: [
             "id": .string(id),
@@ -111,6 +118,7 @@ final class ToolDispatcherTests: XCTestCase {
     func testHappyPathEmitsRatingThenChoiceInOrder() async {
         let (dispatcher, box) = makeDispatcher()
         _ = await dispatcher.handle(ratingCall(.structured))
+        _ = await dispatcher.handle(listCall())
         _ = await dispatcher.handle(chooseCall("E90"))
         let events = box.all
         XCTAssertEqual(events.count, 2)
@@ -122,17 +130,41 @@ final class ToolDispatcherTests: XCTestCase {
         XCTAssertEqual(phase, .done)
     }
 
+    func testListReturnsOnlyEntriesForTheLabel() async {
+        let (dispatcher, box) = makeDispatcher()
+        _ = await dispatcher.handle(ratingCall(.simple))
+        let listing = await dispatcher.handle(listCall())
+        XCTAssertTrue(listing.contains("Entries for simple"))
+        for id in await dispatcher.validIDs(for: .simple) {
+            XCTAssertTrue(listing.contains(id), "listing is missing \(id)")
+        }
+        // A nesting id must not appear: the listing is label-scoped.
+        XCTAssertFalse(listing.contains("E90 "))
+        XCTAssertTrue(box.all.count == 1) // rating only; list emits nothing
+    }
+
     func testChooseBeforeRateIsRejectedThenRecovers() async {
         let (dispatcher, box) = makeDispatcher()
         let first = await dispatcher.handle(chooseCall("E90"))
         XCTAssertTrue(first.contains("rate_input comes first"))
         XCTAssertTrue(box.all.isEmpty)
-        // Both calls in one pass, wrong order: the next rate then choice works.
         _ = await dispatcher.handle(ratingCall(.simple))
+        _ = await dispatcher.handle(listCall())
         let second = await dispatcher.handle(chooseCall("E250"))
         XCTAssertTrue(second.contains("Displaying E250"))
         let phase = await dispatcher.phase
         XCTAssertEqual(phase, .done)
+    }
+
+    func testChooseBeforeListIsRejectedThenRecovers() async {
+        let (dispatcher, box) = makeDispatcher()
+        _ = await dispatcher.handle(ratingCall(.simple))
+        let rejected = await dispatcher.handle(chooseCall("E250"))
+        XCTAssertTrue(rejected.contains("list_automata"))
+        XCTAssertTrue(box.all.count == 1) // rating only
+        _ = await dispatcher.handle(listCall())
+        let accepted = await dispatcher.handle(chooseCall("E250"))
+        XCTAssertTrue(accepted.contains("Displaying E250"))
     }
 
     func testInvalidLabelReturnsCorrectiveAndDoesNotEmit() async {
@@ -167,25 +199,27 @@ final class ToolDispatcherTests: XCTestCase {
     func testIDOutsideClassIsRejectedWithValidList() async {
         let (dispatcher, box) = makeDispatcher()
         _ = await dispatcher.handle(ratingCall(.simple))
+        _ = await dispatcher.handle(listCall())
         let message = await dispatcher.handle(chooseCall("E90")) // nesting
         XCTAssertTrue(message.contains("outside the classes for simple"))
         XCTAssertTrue(message.contains("E250"))
         XCTAssertTrue(box.all.count == 1) // only the rating
         let phase = await dispatcher.phase
-        XCTAssertEqual(phase, .rated(.simple))
+        XCTAssertEqual(phase, .listed(.simple))
     }
 
     func testUnknownIDIsRejected() async {
         let (dispatcher, _) = makeDispatcher()
         _ = await dispatcher.handle(ratingCall(.random))
+        _ = await dispatcher.handle(listCall())
         let message = await dispatcher.handle(chooseCall("E999"))
         XCTAssertTrue(message.contains("is not a catalog id"))
     }
 
-    func testLoopBoundFailsOnSixthCall() async {
+    func testLoopBoundFailsOnEighthCall() async {
         let (dispatcher, box) = makeDispatcher()
-        // Five rejected choose-before-rate calls (calls 1–5), then the sixth fails.
-        for _ in 0..<5 {
+        // Seven rejected choose-before-rate calls (calls 1–7), then the eighth fails.
+        for _ in 0..<7 {
             _ = await dispatcher.handle(chooseCall("E90"))
         }
         let failed = await dispatcher.handle(chooseCall("E90"))
@@ -204,52 +238,16 @@ final class ToolDispatcherTests: XCTestCase {
     func testValidIDsPerLabelFollowMapping() async {
         let (dispatcher, _) = makeDispatcher()
         let simple = await dispatcher.validIDs(for: .simple)
-        XCTAssertEqual(simple.count, 9)
+        XCTAssertEqual(simple.count, Catalog.count(of: .repetition))
         XCTAssertTrue(simple.allSatisfy { Catalog.spec(id: $0)?.behavior == .repetition })
         let structured = await dispatcher.validIDs(for: .structured)
-        XCTAssertEqual(structured.count, 20)
+        XCTAssertEqual(
+            structured.count,
+            Catalog.count(of: .nesting) + Catalog.count(of: .repetition)
+        )
         let random = await dispatcher.validIDs(for: .random)
-        XCTAssertEqual(random.count, 6)
+        XCTAssertEqual(random.count, Catalog.count(of: .randomness))
         let complex = await dispatcher.validIDs(for: .complex)
-        XCTAssertEqual(complex.count, 6)
-    }
-}
-
-final class HeuristicAgentTests: XCTestCase {
-    func testEmitsRatingChoiceAndFinishes() async throws {
-        var events: [AgentEvent] = []
-        for try await event in HeuristicAgent().run(AgentInput(text: "a structured row of bars")) {
-            events.append(event)
-        }
-        guard case .rating(let rating) = events.first else {
-            return XCTFail("expected a rating first, got \(events)")
-        }
-        XCTAssertEqual(rating.label, .structured)
-        XCTAssertTrue(events.contains { if case .choice = $0 { return true } else { return false } })
-        XCTAssertTrue(events.contains { if case .finished = $0 { return true } else { return false } })
-    }
-
-    func testChoiceIsAllowedForLabel() async throws {
-        for label in RatingLabel.allCases {
-            var chosen: String?
-            for try await event in HeuristicAgent().run(AgentInput(text: label.rawValue)) {
-                if case .choice(let choice) = event { chosen = choice.id }
-            }
-            let spec = try XCTUnwrap(Catalog.spec(id: chosen ?? ""))
-            XCTAssertTrue(label.allowedBehaviors.contains(spec.behavior), "\(label) chose \(spec.id)")
-        }
-    }
-
-    func testIsDeterministic() async throws {
-        func run() async throws -> [String] {
-            var ids: [String] = []
-            for try await event in HeuristicAgent().run(AgentInput(text: "same input", imageURL: URL(fileURLWithPath: "/tmp/x.png"))) {
-                if case .choice(let choice) = event { ids.append(choice.id) }
-            }
-            return ids
-        }
-        let a = try await run()
-        let b = try await run()
-        XCTAssertEqual(a, b)
+        XCTAssertEqual(complex.count, Catalog.count(of: .complexity))
     }
 }

@@ -24,5 +24,7 @@ xcuserdata/
 # rater-cli default render output
 renders/
 
-# Local model snapshots (large; fetched with `hf download`, never committed)
-Models/
+# Local model snapshots (large; fetched with `hf download`, never committed).
+# Keep the README: it records the verified hashes and the revision pin.
+Models/*
+!Models/README.md

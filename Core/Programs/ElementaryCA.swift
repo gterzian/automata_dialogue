@@ -33,6 +33,16 @@ public struct ElementaryCA: RowProgram {
         scratch = row
     }
 
+    /// Builds from an explicit seed row, for board starts the typed `Start`
+    /// cannot express (seeds, blocks, non-half densities).
+    public init(rule: UInt8, width: Int, row: [UInt8]) {
+        precondition(row.count == width, "seed row must match width")
+        self.rule = rule
+        self.width = width
+        cells = row
+        scratch = row
+    }
+
     public mutating func step() {
         let rule = self.rule
         let width = self.width

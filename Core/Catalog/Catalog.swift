@@ -1,8 +1,8 @@
 import Foundation
 
-/// The curated inventory as one table (design doc §4). Exactly 32 entries, in
-/// the inventory's order; the prompt index and the `choose_automaton` enum are
-/// generated from this table by `ToolSchemas` and `SystemPrompt`.
+/// The curated inventory as one table (design doc §4). Exactly 45 entries, in
+/// the inventory's order; the dispatcher's `list_automata` listing and the CLI
+/// catalog print are generated from this table.
 public enum Catalog {
     public static let all: [ProgramSpec] = makeAll()
 
@@ -16,8 +16,8 @@ public enum Catalog {
 
     public static func spec(id: String) -> ProgramSpec? { byID[id] }
 
-    /// One line per entry, in the format the system-prompt index uses
-    /// (design doc §3.5): `id | title | behavior | look`.
+    /// One line per entry: `id | title | behavior | look`. The CLI catalog
+    /// print uses this.
     public static var promptIndexLines: [String] {
         all.map { "\($0.id) | \($0.title) | \($0.behavior.rawValue) | \($0.look)" }
     }
@@ -38,6 +38,7 @@ public enum Catalog {
         switch gpu {
         case .elementary: 2
         case .totalistic(_, let colors): Int(colors)
+        case .k2r2: 2
         }
     }
 
@@ -99,13 +100,34 @@ public enum Catalog {
         look: String,
         width: Int,
         height: Int,
+        start: BoardStart = .center,
         stepsPerSecond: Double? = nil,
         stepLimit: Int? = nil
     ) -> ProgramSpec {
         make(
             id: id, title: title, behavior: behavior, look: look,
             gpu: .totalistic(code: code, colors: 3),
-            board: Board(width: width, height: height),
+            board: Board(width: width, height: height, start: start),
+            stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
+        )
+    }
+
+    private static func k2r2(
+        _ id: String,
+        _ code: UInt16,
+        title: String,
+        behavior: Behavior,
+        look: String,
+        width: Int,
+        height: Int,
+        start: BoardStart = .center,
+        stepsPerSecond: Double? = nil,
+        stepLimit: Int? = nil
+    ) -> ProgramSpec {
+        make(
+            id: id, title: title, behavior: behavior, look: look,
+            gpu: .k2r2(code: code),
+            board: Board(width: width, height: height, start: start),
             stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
         )
     }
@@ -158,8 +180,23 @@ public enum Catalog {
                 look: "A dark-textured triangle filled with a regular arched, scale-like lattice in black and gray.",
                 width: 321, height: 160
             ),
+            eca(
+                "E30.block1100", 30, title: "Rule 30, block 1100", behavior: .repetition,
+                look: "The block black-black-white-white repeated across the row gives a pattern of period 8 with a spatial period of 4 cells.",
+                width: 320, height: 160, start: .block([1, 1, 0, 0])
+            ),
+            k2r2(
+                "K2R2-20.seed195", 20, title: "K2R2 code 20, seed 195", behavior: .repetition,
+                look: "From the cells black-black-white-white-white-white-black-black a period-22 oscillator forms, 28 cells wide.",
+                width: 221, height: 220, start: .seed(number: 195, colors: 2)
+            ),
+            total(
+                "T1329.seed916", 1329, title: "3-color totalistic 1329, seed 916", behavior: .repetition,
+                look: "From seed 916 a compact object of 17 to 30 cells travels across the white background.",
+                width: 321, height: 300, start: .seed(number: 916, colors: 3)
+            ),
 
-            // MARK: Nesting (11)
+            // MARK: Nesting (14)
             eca(
                 "E90", 90, title: "Rule 90", behavior: .nesting,
                 look: "The Sierpinski triangle: white triangular holes at every scale inside a black lace, symmetric left to right.",
@@ -215,8 +252,23 @@ public enum Catalog {
                 look: "A sparser nested triangle with large clean white regions and a branching rhythm distinct from the 2-color forms.",
                 width: 401, height: 200
             ),
+            eca(
+                "E90.sparse", 90, title: "Rule 90, sparse random row", behavior: .nesting,
+                look: "Sparse speckle at density 0.05 rebuilds itself at steps that are powers of two, so bands of thin speckle repeat at doubling intervals.",
+                width: 1001, height: 200, start: .random(seed: 905, density: 0.05)
+            ),
+            eca(
+                "E126.pairs", 126, title: "Rule 126, 2-cell blocks", behavior: .nesting,
+                look: "Random black-black and white-white 2-cell blocks evolve under rule 126 like rule 90 on pairs, so the block colors reproduce rule 90 every second step.",
+                width: 400, height: 200, start: .randomBlocks(seed: 126)
+            ),
+            eca(
+                "E184.rand", 184, title: "Rule 184, random row", behavior: .nesting,
+                look: "Traffic flow: black cells drift right until blocked, the black density holds at one half, and nested structure appears in the evolution.",
+                width: 400, height: 200, start: .random(seed: 184, density: 0.5)
+            ),
 
-            // MARK: Randomness (6)
+            // MARK: Randomness (10)
             eca(
                 "E30", 30, title: "Rule 30", behavior: .randomness,
                 look: "A clean diagonal left edge and a disordered tangle of black and white with scattered white triangles of every size; the center column is statistically random.",
@@ -247,8 +299,28 @@ public enum Catalog {
                 look: "Random texture broken by dark triangular patches of solid black of various sizes.",
                 width: 601, height: 300
             ),
+            eca(
+                "E90.rand", 90, title: "Rule 90, random row", behavior: .randomness,
+                look: "A random field with white triangles at every size; rule 90 adds shifted copies of its single-cell triangle, so the picture carries the initial row's randomness.",
+                width: 401, height: 200, start: .random(seed: 90, density: 0.5)
+            ),
+            eca(
+                "E22.rand", 22, title: "Rule 22, random row", behavior: .randomness,
+                look: "A random field with white triangles whose black density settles near 0.35, coming from the rule itself.",
+                width: 401, height: 200, start: .random(seed: 22, density: 0.5)
+            ),
+            eca(
+                "E22.seed19", 22, title: "Rule 22, seed 19", behavior: .randomness,
+                look: "From the five cells 10011 the pattern grows a random core of density 0.35 that widens, with repetitive regions on both sides.",
+                width: 401, height: 200, start: .seed(number: 19, colors: 2)
+            ),
+            eca(
+                "E126.rand", 126, title: "Rule 126, random row", behavior: .randomness,
+                look: "A rule that never settles: random texture at density one half with white triangles at all scales.",
+                width: 301, height: 200, start: .random(seed: 1260, density: 0.5)
+            ),
 
-            // MARK: Complex localized structures (6)
+            // MARK: Complex localized structures (9)
             eca(
                 "E110", 110, title: "Rule 110", behavior: .complexity,
                 look: "From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.",
@@ -278,6 +350,21 @@ public enum Catalog {
                 "T1599", 1599, title: "3-color totalistic 1599", behavior: .complexity,
                 look: "From one gray cell the pattern grows irregularly for thousands of steps, then regions die out and bursts of growth recur before resolving into many simple repetitive structures.",
                 width: 1001, height: 600, stepsPerSecond: 1100, stepLimit: 8300
+            ),
+            eca(
+                "E110.rand", 110, title: "Rule 110, random row", behavior: .complexity,
+                look: "Within a few steps a random row organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.",
+                width: 800, height: 400, start: .random(seed: 1100, density: 0.5), stepLimit: 700
+            ),
+            total(
+                "T1329.seed54889", 1329, title: "3-color totalistic 1329, seed 54889", behavior: .complexity,
+                look: "From seed 54889 a complex region widens by about half a cell per step on each side without bound.",
+                width: 1201, height: 400, start: .seed(number: 54889, colors: 3)
+            ),
+            total(
+                "T357.seed28", 357, title: "3-color totalistic 357, seed 28", behavior: .complexity,
+                look: "Code 357 lets most small seeds die out; seed 28 leaves a persistent structure of 8 to 20 cells.",
+                width: 161, height: 300, start: .seed(number: 28, colors: 3)
             ),
         ]
     }

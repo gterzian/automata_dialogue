@@ -26,6 +26,7 @@ public final class GPUContext {
     public let library: any MTLLibrary
     public let stepElementary: any MTLComputePipelineState
     public let stepTotalistic: any MTLComputePipelineState
+    public let stepK2R2: any MTLComputePipelineState
     public let bumpHead: any MTLComputePipelineState
     public let fitPipeline: any MTLComputePipelineState
     public let residency: any MTLResidencySet
@@ -64,6 +65,9 @@ public final class GPUContext {
         )
         self.stepTotalistic = try Self.makePipeline(
             compiler: compiler, library: library, name: "step_totalistic"
+        )
+        self.stepK2R2 = try Self.makePipeline(
+            compiler: compiler, library: library, name: "step_k2r2"
         )
         self.bumpHead = try Self.makePipeline(
             compiler: compiler, library: library, name: "bump_head"

@@ -32,6 +32,19 @@ README chain carry the engineering rules.
    lightweight overlay/history strip.
 3. **A new prompt immediately stops the running automaton.** Sending a new
    input cancels/stops the current render before the new run starts.
+4. **No model-free fallback agent.** `HeuristicAgent` is removed. The app
+   always runs the MLX model; there is no deterministic substitute path.
+5. **Three-tool, catalog-on-demand flow.** The system prompt no longer embeds
+   the rating→inventory table or the inventory index, and
+   `choose_automaton.id` is no longer a schema enum of every id. The order is
+   `rate_input` → `list_automata` (returns only the entries for the recorded
+   label) → `choose_automaton`. Rationale: the prompt stays small and cacheable
+   and its token cost does not grow with the inventory.
+6. **45-entry catalog with initial-condition variants.** The inventory grew
+   from 32 to 45; the new entries are the same rules from different seeds,
+   blocks, or random rows, presented as separate choices. This adds radius-2
+   `K2R2CA`, a `.k2r2` GPU kernel, and the `.seed`/`.block`/`.randomBlocks`/
+   `.random(density:)` board starts.
 
 ### Environment findings
 
@@ -58,6 +71,10 @@ README chain carry the engineering rules.
   (`swift-plugin-server`) is blocked the same way, so the `Client` target
   cannot be fully type-checked here; verify with `./run.sh` where `xcodebuild`
   works.
+- Mixing a `RATER_AGENT=1` build with a plain one can leave `.build/out`
+  stale: `swift build` then fails with `clang dependency scanning failure`
+  naming `cLogSupport`/`yyjson`/`Cmlx`. `rm -rf .build/out` recovers the plain
+  path; `.build/checkouts` is kept, so no re-fetch is needed.
 
 ### Status
 
@@ -67,13 +84,13 @@ Legend: [x] done / verified, [~] partial, [ ] pending.
   rater-cli), `run.sh`, `.gitignore`, `Package.swift`, `AGENTS.md` + README
   chain.
 - [x] **P1 catalog + CPU programs** — `ProgramSpec`/`GPUProgram`/`Behavior`/
-  `Board`/`DisplayHints`/`Palette`, all 32 entries, `SplitMix64`,
-  `ElementaryCA`, `TotalisticCA`, `RowHash`. Golden row hashes for all 32.
-  Note: E90/E22 and E150/E105 coincide at even steps — a real property of the
+  `Board`/`DisplayHints`/`Palette`, all 45 entries, `SplitMix64`,
+  `ElementaryCA`, `TotalisticCA`, `K2R2CA`, `RowHash`. Golden row hashes for all
+  45. Note: E90/E22 and E150/E105 coincide at even steps — a real property of the
   rules (documented in `ProgramTests`).
 - [x] **P2 agent logic (pure)** — `Rating`, `Choice`, `AgentEvent`,
   `AgentInput`, `ToolInvocation`, `ToolSchemas`, `ToolDispatcher` actor,
-  `SystemPrompt`, `HeuristicAgent`.
+  `SystemPrompt`, `AgentRunning`.
 - [x] **P3 import** — `ImageAttachment`, `ImageImport.normalize` (aspect-fit
   to a 512×512 PNG), temp-folder layout and purge.
 - [x] **P4 session** — `TranscriptEntry`, `TranscriptStore` (append-only JSONL,
@@ -118,6 +135,26 @@ Legend: [x] done / verified, [~] partial, [ ] pending.
   `rater-cli rate --model <dir>`, or `RATER_MODEL_PATH`; no downloader is
   invoked for a `.directory` configuration. Compiles and links with
   `RATER_AGENT=1`; the real-model run is pending weights.
+- [x] **P9 catalog-on-demand flow + 45-entry catalog** — removed
+  `HeuristicAgent`; added the `list_automata` tool and the
+  `rated → listed → done` dispatcher phases; stripped the catalog from the
+  system prompt and the `choose_automaton` schema; added the 13
+  initial-condition entries and the radius-2 `K2R2CA` (`step_k2r2`), with
+  `.seed`/`.block`/`.randomBlocks`/`.random(density:)` starts. Goldens refreshed
+  for 45; GPU-vs-CPU passes for `K2R2-20.seed195`.
+- [x] **P10 model-file security review** — verified both local snapshots
+  against the hub hashes recorded in their `.cache/huggingface/` trees: all
+  three safetensors SHA-256 match `lfs_sha256`, every non-LFS file matches its
+  git `blob_id`, and each index file maps exactly onto the shard tensors. The
+  safetensors headers are well-formed (no bad or overlapping offsets, no
+  trailing bytes), neither snapshot defines remote code (`auto_map`/
+  `trust_remote_code`), and both `chat_template.jinja` files are the stock
+  Qwen template byte-for-byte. Hardened the two findings: `rater-cli rate` now
+  normalizes inputs through `ImageImport.normalize` (the app already did), so
+  an oversized or malformed image never reaches the preprocessor's large edge
+  limits; and the default hub download is pinned to the 9B snapshot commit
+  (`Configuration.pinnedRevision(for:)`) instead of the mutable `main`. The
+  verified hashes and the pinning convention are recorded in `Models/README.md`.
 
 Test count: **76 tests, 0 failures** (`swift test --disable-sandbox`),
 including the Metal 4 readback comparison, the GPU incremental-vs-`IncrementalRenderer`
@@ -183,16 +220,20 @@ intent and for anything not built yet.
 ### 1. Product intent
 
 - One app: an input is rated **simple / structured / random / complex** and
-  matched to one of 32 curated automata whose *look* fits; the automaton is
+  matched to one of 45 curated automata whose *look* fits; the automaton is
   shown live. Flow: attach an image (drag-and-drop) → normalize to 512×512 →
-  send → the agent rates, then chooses → the panel renders the entry.
+  send → the agent rates, lists the matching entries, then chooses → the panel
+  renders the entry.
 - The rating is a judgment about the input's **structure**, not its subject:
   a few primitives (simple), a short generating rule (structured), no
   compressible rule (random), or simple primitives producing emergent
   structure (complex). The four labels map to four inventory classes, which is
   intentionally coarse so the model has a small, reliable choice.
-- The two tool calls are ordered (rate, then choose) because the rating must be
-  visible before the choice and the UI depends on that order.
+- The catalog is fetched on demand. `rate_input` records the label,
+  `list_automata` returns only the entries that label allows, and
+  `choose_automaton` takes one id from that list. The system prompt carries no
+  catalog, so its tokens do not grow with the inventory. The user-visible order
+  (rating card, then choice card) is unchanged.
 
 ### 2. Architecture guidance
 
@@ -216,9 +257,10 @@ intent and for anything not built yet.
 - **Invariants that must not regress.** The user-visible order (rating card,
   then choice card) is identical on every run whatever the model does. The
   dispatcher **never throws** — a throw from the tool closure ends the stream —
-  so every validation outcome is a returned corrective string. The sixth tool
-  call without a choice fails the run. The `choose_automaton` id enum is
-  generated from the catalog. Details and messages: `ToolDispatcher.swift`.
+  so every validation outcome is a returned corrective string. The eighth tool
+  call without a choice fails the run. The catalog reaches the model only
+  through the `list_automata` result; it is never embedded in the system prompt
+  or a tool schema. Details and messages: `ToolDispatcher.swift`.
 - **Model constraints.** `Qwen3.5-9B-4bit` default, 4B fallback for 16 GB;
   thinking disabled; temperature 0.2; the image is 512×512. Rationale: local,
   small, vision-capable of the rating task.
@@ -231,17 +273,17 @@ intent and for anything not built yet.
 
 ### 4. Catalog guidance
 
-- **One table, three consumers.** `ProgramSpec` drives the renderer, the prompt
-  index, and the tool-schema enum. Never hand-maintain a generated list; a test
-  asserts the three agree. Add an entry by adding one `ProgramSpec` and
-  refreshing goldens (`rater-cli hashes`).
+- **One table, two consumers.** `ProgramSpec` drives the renderer and the
+  `list_automata` listing (the CLI `catalog` debug print is generated from it
+  too). Never hand-maintain a generated list. Add an entry by adding one
+  `ProgramSpec` and refreshing goldens (`rater-cli hashes`).
 - `look` is the **matching text** the model sees; keep it to one sentence and
   derived from the inventory's *Look* paragraph.
 - The rating→classes mapping lives on `RatingLabel.allowedBehaviors`. The
   intent is to widen it only if a real evaluation shows the current mapping
   mis-fits (§11.5).
-- Behavior counts (9/11/6/6) and the inventory's widths/starts are fixed by the
-  artifact; tests enforce them.
+- Behavior counts (12/14/10/9) and the inventory's widths/starts are fixed by
+  the artifact; tests enforce them.
 
 ### 5. UI guidance (single panel — deviation 2)
 

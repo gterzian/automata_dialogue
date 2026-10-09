@@ -137,6 +137,10 @@ public final class MetalSimulation {
             pipeline = context.stepTotalistic
             rule = code
             colors = UInt32(colorCount)
+        case .k2r2(let codeValue):
+            pipeline = context.stepK2R2
+            rule = UInt32(codeValue)
+            colors = 0
         }
 
         self.spec = spec

@@ -17,13 +17,12 @@ for the app.
 
 ## Layout
 
-- `Catalog/` — the 32 `ProgramSpec` entries, behavior classes, GPU program
-  descriptors, palettes, and the prompt index. See `Catalog/README.md`.
+- `Catalog/` — the 45 `ProgramSpec` entries, behavior classes, GPU program
+  descriptors, palettes, and the catalog index. See `Catalog/README.md`.
 - `Programs/` — CPU reference implementations and the PRNG. See
   `Programs/README.md`.
 - `Agent/` — rating/choice types, tool schemas, the dispatcher state machine,
-  system-prompt assembly, and the deterministic heuristic agent. See
-  `Agent/README.md`.
+  and system-prompt assembly. See `Agent/README.md`.
 - `Import/` — dragged-in image attachments and normalization to the model's
   512×512 input. See `Import/README.md`.
 - `Session/` — transcript entries, the append-only store, the streaming

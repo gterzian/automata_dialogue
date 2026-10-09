@@ -1,17 +1,13 @@
 import Foundation
 
 /// Assembles the single immutable system prompt at launch (design doc §3.5):
-/// the procedure, the rating rubric, and the rating→inventory table plus the
-/// generated index. The prefix is identical for every run, so it is the
-/// candidate for a prefilled KV cache.
+/// the procedure and the rating rubric. The catalog is not embedded; the model
+/// gets only the entries for its label from `list_automata`, so the prompt is a
+/// small, identical, cacheable prefix and the token cost does not grow with the
+/// inventory.
 public enum SystemPrompt {
-    public static func build(catalog: [ProgramSpec] = Catalog.all) -> String {
-        [
-            procedure,
-            rubric,
-            mappingSection(catalog: catalog),
-            indexSection(catalog: catalog),
-        ].joined(separator: "\n\n")
+    public static func build() -> String {
+        [procedure, rubric].joined(separator: "\n\n")
     }
 
     /// Rough token estimate at ~4 characters/token, for the budget test.
@@ -22,7 +18,7 @@ public enum SystemPrompt {
     // MARK: - Procedure
 
     public static let procedure = """
-    You process one input at a time with two tools. For every input, first call `rate_input`, then call `choose_automaton`, in that order. Rate the input with the rubric below. Then choose the inventory entry whose look matches the input's character within the classes mapped to your rating. After both tool results arrive, reply with one sentence naming the label and the chosen entry.
+    You process one input at a time with three tools, in this order. First call `rate_input` to rate the input with the rubric below. Then call `list_automata` to get the entries available for the label you recorded. Then call `choose_automaton` with one id from that list. After the choice is recorded, reply with one sentence naming the label and the chosen entry.
     """
 
     // MARK: - Rubric
@@ -103,31 +99,4 @@ public enum SystemPrompt {
     - Give a direct label. When two labels fit, pick the closer one and name the other in the borderline note.
     - Match the reasoning to the evidence available, and state confidence honestly.
     """
-
-    // MARK: - Rating to inventory
-
-    public static func mappingSection(catalog: [ProgramSpec]) -> String {
-        var lines = [
-            "## Rating to inventory",
-            "",
-            "Choose the entry by visual character (symmetry, direction of growth, background stripes, density, scale of detail). Use the entry's look line as the matching text.",
-            "",
-            "| Rating | Classes | Entries |",
-            "| --- | --- | --- |",
-        ]
-        for label in RatingLabel.allCases {
-            let allowed = Set(label.allowedBehaviors)
-            let ids = catalog.filter { allowed.contains($0.behavior) }.map(\.id)
-            lines.append("| \(label.rawValue) | \(label.allowedBehaviors.map(\.rawValue).joined(separator: ", ")) | \(ids.joined(separator: ", ")) |")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    public static func indexSection(catalog: [ProgramSpec]) -> String {
-        var lines = ["## Inventory index", "", "id | title | class | look", "--- | --- | --- | ---"]
-        for spec in catalog {
-            lines.append("\(spec.id) | \(spec.title) | \(spec.behavior.rawValue) | \(spec.look)")
-        }
-        return lines.joined(separator: "\n")
-    }
 }

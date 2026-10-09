@@ -16,6 +16,15 @@ public struct TotalisticCA: RowProgram {
     private var scratch: [UInt8]
 
     public init(code: Int, colors: Int = 3, width: Int, startColor: UInt8 = 1) {
+        var row = [UInt8](repeating: 0, count: width)
+        row[width / 2] = startColor
+        self.init(code: code, colors: colors, width: width, row: row)
+    }
+
+    /// Builds from an explicit seed row, for board starts the single-cell start
+    /// cannot express (seeds, blocks, random rows).
+    public init(code: Int, colors: Int = 3, width: Int, row: [UInt8]) {
+        precondition(row.count == width, "seed row must match width")
         self.code = code
         self.colors = colors
         self.width = width
@@ -26,8 +35,6 @@ public struct TotalisticCA: RowProgram {
             rest /= colors
         }
         table = t
-        var row = [UInt8](repeating: 0, count: width)
-        row[width / 2] = startColor
         cells = row
         scratch = row
     }

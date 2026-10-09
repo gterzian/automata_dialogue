@@ -35,6 +35,16 @@ public actor AgentEngine: AgentRunning {
         public static let defaultModelID = "mlx-community/Qwen3.5-9B-4bit"
         public static let fallbackModelID = "mlx-community/Qwen3.5-4B-4bit"
 
+        /// The snapshot commit a download resolves to when the caller does not
+        /// pin one. A mutable ref like `main` would let the hub serve different
+        /// weights on a later run; the commit keeps the download reproducible.
+        /// Only the default is pinned — its hash is verified in
+        /// `Models/README.md`. An unrecognized id (including `fallbackModelID`)
+        /// stays on `main`.
+        static func pinnedRevision(for modelID: String) -> String {
+            modelID == defaultModelID ? "8b2b98c00a6b4d291155e4890773ca8f769aee53" : "main"
+        }
+
         public var modelID: String
         public var revision: String
         /// When set, the model is loaded from this local snapshot directory and
@@ -49,7 +59,7 @@ public actor AgentEngine: AgentRunning {
 
         public init(
             modelID: String = Configuration.defaultModelID,
-            revision: String = "main",
+            revision: String? = nil,
             modelDirectory: URL? = nil,
             maxTokens: Int = 900,
             temperature: Float = 0.2,
@@ -58,7 +68,7 @@ public actor AgentEngine: AgentRunning {
             progressHandler: @escaping @Sendable (Progress) -> Void = { _ in }
         ) {
             self.modelID = modelID
-            self.revision = revision
+            self.revision = revision ?? Configuration.pinnedRevision(for: modelID)
             self.modelDirectory = modelDirectory
             self.maxTokens = maxTokens
             self.temperature = temperature

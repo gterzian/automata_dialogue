@@ -21,7 +21,9 @@ the two API points the bridges pin:
 - Default `mlx-community/Qwen3.5-9B-4bit`; `Qwen3.5-4B-4bit` is the 16 GB
   fallback (`Configuration.defaultModelID` / `fallbackModelID`). A registry
   entry is not required: `ModelConfiguration(id:)` plus the `qwen3_5` model
-  type supplies the `.qwen35` tool-call format.
+  type supplies the `.qwen35` tool-call format. The default download is pinned
+  to a snapshot commit (`Configuration.pinnedRevision(for:)`);
+  `Models/README.md` records it and the verified weight hashes.
 - Thinking is off (`additionalContext: ["enable_thinking": false]`), so the
   model does not spend tokens on a reasoning preamble before the tool calls.
 - The container is loaded once and shared; a failed load is retried on the next
@@ -51,4 +53,4 @@ emitted `.failed`.
   §11.1–§11.3: model choice, image-only turns (empty prompt), and the
   `qwen3_5` tool-call recovery path.
 - `AgentEngine` is not covered by `CoreTests`; keep run-level tests in `Core`
-  against `HeuristicAgent` and test the model only through `rater-cli rate`.
+  against `ToolDispatcher` and test the model only through `rater-cli rate`.

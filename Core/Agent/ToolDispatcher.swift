@@ -1,9 +1,9 @@
 import Foundation
 
-/// Enforces the rating→choice order and validates arguments, one instance per
-/// run (design doc §3.4). The package's validation default is `.permissive`,
-/// so schema violations reach here; **every outcome is a returned string**,
-/// never a throw, because a throw from the tool closure ends the stream.
+/// Enforces the rate→list→choose order and validates arguments, one instance
+/// per run. The package's validation default is `.permissive`, so schema
+/// violations reach here; **every outcome is a returned string**, never a
+/// throw, because a throw from the tool closure ends the stream.
 ///
 /// An actor because the engine calls `handle` from an `@Sendable` tool-dispatch
 /// closure; the actor serializes the calls a single run makes.
@@ -11,13 +11,16 @@ public actor ToolDispatcher {
     public enum Phase: Sendable, Equatable {
         case awaitingRating
         case rated(RatingLabel)
+        case listed(RatingLabel)
         case done
 
         public var isDone: Bool { self == .done }
     }
 
-    /// The sixth call without reaching `done` fails the run (design doc §3.4).
-    public static let maxCalls = 6
+    /// The catalog never reaches the model except through `list_automata`, so
+    /// a run that loops instead of choosing is cut off here. Three calls are
+    /// the happy path; the rest is retry headroom.
+    public static let maxCalls = 8
 
     public private(set) var phase: Phase = .awaitingRating
     public private(set) var callCount = 0
@@ -64,10 +67,12 @@ public actor ToolDispatcher {
         switch invocation.name {
         case ToolSchemas.rateInputName:
             return handleRate(invocation)
+        case ToolSchemas.listAutomataName:
+            return handleList()
         case ToolSchemas.chooseAutomatonName:
             return handleChoose(invocation)
         default:
-            return "Unknown tool \(invocation.name). Call \(ToolSchemas.rateInputName) first, then \(ToolSchemas.chooseAutomatonName)."
+            return "Unknown tool \(invocation.name). Call \(ToolSchemas.rateInputName) first, then \(ToolSchemas.listAutomataName), then \(ToolSchemas.chooseAutomatonName)."
         }
     }
 
@@ -75,7 +80,7 @@ public actor ToolDispatcher {
 
     private func handleRate(_ invocation: ToolInvocation) -> String {
         guard case .awaitingRating = phase else {
-            return "\(ToolSchemas.rateInputName) has already been recorded. Call \(ToolSchemas.chooseAutomatonName) next."
+            return "\(ToolSchemas.rateInputName) has already been recorded. Call \(ToolSchemas.listAutomataName) next."
         }
 
         let labels = RatingLabel.allCases.map(\.rawValue).joined(separator: ", ")
@@ -106,7 +111,30 @@ public actor ToolDispatcher {
         self.rating = rating
         phase = .rated(label)
         emit(.rating(rating))
-        return "Rating recorded: \(label.rawValue). Call \(ToolSchemas.chooseAutomatonName) next."
+        return "Rating recorded: \(label.rawValue). Call \(ToolSchemas.listAutomataName) next."
+    }
+
+    // MARK: - list_automata
+
+    private func handleList() -> String {
+        switch phase {
+        case .awaitingRating:
+            return "\(ToolSchemas.rateInputName) comes first. Call \(ToolSchemas.rateInputName) for this input, then \(ToolSchemas.listAutomataName)."
+        case .done:
+            return "\(ToolSchemas.chooseAutomatonName) has already been called."
+        case .rated(let label), .listed(let label):
+            phase = .listed(label)
+            let ids = validIDsByLabel[label] ?? []
+            var lines = [
+                "Entries for \(label.rawValue) (\(ids.count)). id | title | look",
+            ]
+            for id in ids {
+                guard let spec = specsByID[id] else { continue }
+                lines.append("\(spec.id) | \(spec.title) | \(spec.look)")
+            }
+            lines.append("Call \(ToolSchemas.chooseAutomatonName) with one id from this list.")
+            return lines.joined(separator: "\n")
+        }
     }
 
     // MARK: - choose_automaton
@@ -114,10 +142,12 @@ public actor ToolDispatcher {
     private func handleChoose(_ invocation: ToolInvocation) -> String {
         switch phase {
         case .awaitingRating:
-            return "\(ToolSchemas.rateInputName) comes first. Call \(ToolSchemas.rateInputName) for this input, then \(ToolSchemas.chooseAutomatonName)."
+            return "\(ToolSchemas.rateInputName) comes first. Call \(ToolSchemas.rateInputName) for this input, then \(ToolSchemas.listAutomataName)."
+        case .rated(let label):
+            return "Call \(ToolSchemas.listAutomataName) before choosing, to get the entries for \(label.rawValue)."
         case .done:
             return "\(ToolSchemas.chooseAutomatonName) has already been called."
-        case .rated(let label):
+        case .listed(let label):
             let valid = validIDsByLabel[label] ?? []
             guard let id = invocation.string("id"), !id.isEmpty else {
                 return "id is required. Valid ids for \(label.rawValue): \(valid.joined(separator: ", "))."

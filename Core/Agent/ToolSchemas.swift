@@ -1,15 +1,16 @@
 import Foundation
 
-/// The two tool declarations, built as `[String: any Sendable]` values that
-/// match `mlx-swift-lm`'s `ToolSpec` shape (design doc §3.3). The
-/// `choose_automaton` id enum is generated from the catalog, so schema and
-/// catalog stay in step.
+/// The three tool declarations, built as `[String: any Sendable]` values that
+/// match `mlx-swift-lm`'s `ToolSpec` shape. The catalog is **not** embedded in
+/// any schema: the model learns the allowed ids from the `list_automata` tool
+/// result, so the per-session token cost stays flat as the catalog grows.
 public enum ToolSchemas {
     public static let rateInputName = "rate_input"
+    public static let listAutomataName = "list_automata"
     public static let chooseAutomatonName = "choose_automaton"
 
     public static var all: [[String: any Sendable]] {
-        [rateInput, chooseAutomaton]
+        [rateInput, listAutomata, chooseAutomaton]
     }
 
     public static var rateInput: [String: any Sendable] {
@@ -29,14 +30,23 @@ public enum ToolSchemas {
         )
     }
 
+    public static var listAutomata: [String: any Sendable] {
+        function(
+            name: listAutomataName,
+            description: "List the automata available for the label you just recorded. Call this second.",
+            properties: [:],
+            required: []
+        )
+    }
+
     public static var chooseAutomaton: [String: any Sendable] {
         let properties: [String: any Sendable] = [
-            "id": field("string", description: nil, enumValues: Catalog.ids),
+            "id": field("string", description: "An id from the list_automata result.", enumValues: nil),
             "rationale": field("string", description: "One sentence linking the entry's look to the input.", enumValues: nil),
         ]
         return function(
             name: chooseAutomatonName,
-            description: "Pick the inventory entry to display. Call this second, after rate_input.",
+            description: "Pick the inventory entry to display. Call this third, after list_automata.",
             properties: properties,
             required: ["id", "rationale"]
         )

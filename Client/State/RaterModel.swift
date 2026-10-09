@@ -2,10 +2,7 @@ import AppKit
 import Combine
 import Core
 import CoreGraphics
-
-#if canImport(Agent)
 import Agent
-#endif
 
 /// App state for the single panel: the transcript, the current automaton
 /// animation, and the agent run. A new prompt stops the running automaton
@@ -24,13 +21,9 @@ final class RaterModel: ObservableObject {
     @Published var attachmentError: String?
 
     private let store = TranscriptStore()
-    /// The real MLX agent when the app is built with the `Agent` target; the
-    /// deterministic `HeuristicAgent` otherwise, so the app runs with no model.
-    #if canImport(Agent)
+    /// The MLX agent. The app only builds through the Xcode project, which
+    /// always includes the `Agent` target.
     private let agent: any AgentRunning = AgentEngine(configuration: RaterModel.agentConfiguration())
-    #else
-    private let agent: any AgentRunning = HeuristicAgent()
-    #endif
     private let sessionID = UUID()
     private var animationTask: Task<Void, Never>?
     private var renderer: IncrementalRenderer?
@@ -163,7 +156,6 @@ final class RaterModel: ObservableObject {
 
     // MARK: - Helpers
 
-    #if canImport(Agent)
     /// `RATER_MODEL_PATH` first, then the `RATERModelPath` user default
     /// (`defaults write com.rater.app RATERModelPath /path/to/snapshot`), so a
     /// Finder launch can point at a local model without downloading.
@@ -177,7 +169,6 @@ final class RaterModel: ObservableObject {
         }
         return configuration
     }
-    #endif
 
     /// Runs a `@MainActor` async closure from a synchronous call site.
     private func launch(_ body: @escaping @MainActor () async -> Void) {

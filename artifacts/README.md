@@ -2,7 +2,7 @@
 
 Source material and the working record.
 
-- `Curated Inventory of Cellular Automata.md` — the 32 entries: types, looks,
+- `Curated Inventory of Cellular Automata.md` — the 45 entries: types, looks,
   starts, and the CPU `Program` source. `Core/Catalog` and `Core/Programs` are
   built from this.
 - `System prompt_ rating inputs as simple, structured, random, or complex.md` —
