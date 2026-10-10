@@ -118,7 +118,7 @@ schemes:
       targets:
         Client: all
     run:
-      config: Debug
+      config: Release
   CoreTests:
     build:
       targets:

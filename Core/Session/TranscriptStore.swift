@@ -69,11 +69,6 @@ public final class TranscriptStore: @unchecked Sendable {
     @discardableResult
     public func apply(_ event: AgentEvent) -> Mutation {
         switch event {
-        case .rating(let rating):
-            let entry = TranscriptEntry(id: UUID().uuidString, kind: .rating(rating))
-            lock.withLock { storage.append(entry) }
-            persist(entry)
-            return .appended(id: entry.id)
         case .choice(let choice):
             let entry = TranscriptEntry(id: UUID().uuidString, kind: .choice(choice))
             lock.withLock { storage.append(entry) }
@@ -148,7 +143,9 @@ public final class TranscriptStore: @unchecked Sendable {
         }
         guard let handle = try? FileHandle(forWritingTo: transcriptURL) else { return }
         defer { try? handle.close() }
-        try? handle.seekToEnd()
+        // Append: a failed seek means we cannot trust the offset, so skip the
+        // entry rather than overwrite earlier lines from offset zero.
+        guard (try? handle.seekToEnd()) != nil else { return }
         try? handle.write(contentsOf: data)
         try? handle.write(contentsOf: Data("\n".utf8))
     }

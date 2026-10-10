@@ -1,7 +1,7 @@
 import Foundation
 
-/// The four behavior classes of the inventory, used both by the catalog and by
-/// the rating→inventory mapping (design doc §3.5).
+/// The four behavior classes of the inventory, used by the catalog and the
+/// system prompt.
 public enum Behavior: String, Sendable, Hashable, CaseIterable, Codable {
     case repetition
     case nesting

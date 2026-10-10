@@ -123,12 +123,16 @@ public enum ImageImport {
         return context.makeImage()
     }
 
-    /// Removes session folders at launch that no open session owns.
+    /// Removes session folders at launch that no open session owns. `root`
+    /// defaults to `<tmp>/Rater`; it is a parameter so the test suite can purge
+    /// a scoped directory instead of deleting the live session folder of a
+    /// concurrently running process.
     public static func purgeStaleSessions(
         keeping sessionIDs: Set<UUID>,
+        root: URL? = nil,
         fileManager: FileManager = .default
     ) {
-        let root = fileManager.temporaryDirectory.appendingPathComponent("Rater", isDirectory: true)
+        let root = root ?? fileManager.temporaryDirectory.appendingPathComponent("Rater", isDirectory: true)
         guard let children = try? fileManager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
         ) else { return }

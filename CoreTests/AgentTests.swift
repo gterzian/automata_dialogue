@@ -1,253 +1,145 @@
 import XCTest
 @testable import Core
 
-/// Thread-safe event sink for the dispatcher's `@Sendable` emit closure.
-final class EventBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var events: [AgentEvent] = []
-    func append(_ event: AgentEvent) {
-        lock.lock(); defer { lock.unlock() }
-        events.append(event)
-    }
-    var all: [AgentEvent] {
-        lock.lock(); defer { lock.unlock() }
-        return events
-    }
-}
-
-private func schemaObject(_ value: any Sendable) -> [String: any Sendable]? {
-    value as? [String: any Sendable]
-}
-
-private func enumStrings(_ value: any Sendable) -> [String]? {
-    value as? [String]
-}
-
-final class ToolSchemaTests: XCTestCase {
-    func testChooseIDHasNoEmbeddedCatalogEnum() {
-        let function = schemaObject(ToolSchemas.chooseAutomaton["function"]!)
-        let parameters = schemaObject(function!["parameters"]!)
-        let properties = schemaObject(parameters!["properties"]!)
-        let idField = schemaObject(properties!["id"]!)
-        XCTAssertNil(idField!["enum"], "the catalog must not be embedded in the schema")
-    }
-
-    func testRateEnumMatchesRatingLabels() {
-        let function = schemaObject(ToolSchemas.rateInput["function"]!)
-        let parameters = schemaObject(function!["parameters"]!)
-        let properties = schemaObject(parameters!["properties"]!)
-        let labelField = schemaObject(properties!["label"]!)
-        XCTAssertEqual(enumStrings(labelField!["enum"]!), RatingLabel.allCases.map(\.rawValue))
-        let confidenceField = schemaObject(properties!["confidence"]!)
-        XCTAssertEqual(enumStrings(confidenceField!["enum"]!), RatingConfidence.allCases.map(\.rawValue))
-    }
-
-    func testToolNames() {
-        let names = ToolSchemas.all.compactMap { spec -> String? in
-            guard let function = schemaObject(spec["function"]!) else { return nil }
-            return function["name"] as? String
-        }
-        XCTAssertEqual(
-            names,
-            [ToolSchemas.rateInputName, ToolSchemas.listAutomataName, ToolSchemas.chooseAutomatonName]
-        )
-    }
-}
-
 final class SystemPromptTests: XCTestCase {
-    func testDoesNotEmbedTheCatalog() {
+    func testEmbedsEveryCatalogID() {
         let prompt = SystemPrompt.build()
-        XCTAssertFalse(prompt.contains("Inventory index"))
-        XCTAssertFalse(prompt.contains("Rating to inventory"))
         for id in Catalog.ids {
-            XCTAssertFalse(prompt.contains(id), "prompt still embeds \(id)")
+            XCTAssertTrue(prompt.contains(id), "prompt is missing \(id)")
         }
     }
 
-    func testContainsEverySection() {
+    func testEachEntryCarriesItsClass() {
         let prompt = SystemPrompt.build()
-        for section in [
-            "The four categories", "## Method", "## Output format",
-            "## Calibration anchors", "## Handling specific situations",
-        ] {
-            XCTAssertTrue(prompt.contains(section), "prompt is missing \(section)")
+        for spec in Catalog.all {
+            XCTAssertTrue(
+                prompt.contains("\(spec.id) | \(spec.behavior.rawValue) | \(spec.look)"),
+                "prompt is missing the class line for \(spec.id)"
+            )
         }
     }
 
-    func testDropsMultiInputSummaryAndConversationalStyle() {
+    func testDescribesTheFourClasses() {
         let prompt = SystemPrompt.build()
-        XCTAssertFalse(prompt.contains("For several inputs"))
-        XCTAssertFalse(prompt.contains("continuation, a variation"))
-        XCTAssertFalse(prompt.contains("When a user disagrees"))
+        for behavior in Behavior.allCases {
+            XCTAssertTrue(
+                prompt.contains("- \(behavior.rawValue):"),
+                "prompt is missing the \(behavior.rawValue) description"
+            )
+        }
+    }
+
+    func testStatesTheAnswerFormat() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains("id: <one id from the list>"))
+        XCTAssertTrue(prompt.contains("reason: <one sentence naming the class you matched and why it fits>"))
+    }
+
+    func testSaysToMatchByBehaviorNotLikeness() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains("Do not look for an automaton that resembles the image."))
+        XCTAssertTrue(prompt.contains("the match is conceptual, not visual"))
+    }
+
+    func testDropsTheRetiredRatingRubric() {
+        let prompt = SystemPrompt.build()
+        for retired in ["rate_and_choose", "confidence", "borderline", "## Method", "## Calibration anchors"] {
+            XCTAssertFalse(prompt.contains(retired), "prompt still mentions \(retired)")
+        }
     }
 
     func testPrefixStaysWithinBudget() {
         let tokens = SystemPrompt.estimatedTokenCount(of: SystemPrompt.build())
-        XCTAssertLessThan(tokens, 3000, "system prompt is larger than the ~2.5k budget")
+        XCTAssertLessThan(tokens, 5000, "system prompt is larger than the ~4k budget")
     }
 }
 
-final class ToolDispatcherTests: XCTestCase {
-    private func makeDispatcher() -> (ToolDispatcher, EventBox) {
-        let box = EventBox()
-        let dispatcher = ToolDispatcher(catalog: Catalog.all) { box.append($0) }
-        return (dispatcher, box)
+final class ChoiceParserTests: XCTestCase {
+    func testParsesIDAndReasonFields() {
+        let response = "id: E90\nreason: nested Sierpinski holes match the drawing"
+        let choice = ChoiceParser.choice(from: response)
+        XCTAssertEqual(choice?.id, "E90")
+        XCTAssertEqual(choice?.rationale, "nested Sierpinski holes match the drawing")
     }
 
-    private func ratingCall(_ label: RatingLabel = .structured) -> ToolInvocation {
-        ToolInvocation(name: ToolSchemas.rateInputName, arguments: [
-            "label": .string(label.rawValue),
-            "confidence": .string(RatingConfidence.high.rawValue),
-            "primitives": .string("bars"),
-            "description": .string("five bars"),
-            "reason": .string("one repeated unit"),
-        ])
+    func testParsesMarkdownEmphasis() {
+        let response = "**id:** E110\n**reason:** one-sided growth"
+        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "E110")
     }
 
-    private func listCall() -> ToolInvocation {
-        ToolInvocation(name: ToolSchemas.listAutomataName)
+    func testParsesBulletedFields() {
+        let response = "- id: E90\n- reason: nested holes"
+        let choice = ChoiceParser.choice(from: response)
+        XCTAssertEqual(choice?.id, "E90")
+        XCTAssertEqual(choice?.rationale, "nested holes")
     }
 
-    private func chooseCall(_ id: String = "E90") -> ToolInvocation {
-        ToolInvocation(name: ToolSchemas.chooseAutomatonName, arguments: [
-            "id": .string(id),
-            "rationale": .string("nested"),
-        ])
+    func testFallsBackToAnIDInProse() {
+        let response = "I would display E54 because it has moving structures."
+        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "E54")
     }
 
-    func testHappyPathEmitsRatingThenChoiceInOrder() async {
-        let (dispatcher, box) = makeDispatcher()
-        _ = await dispatcher.handle(ratingCall(.structured))
-        _ = await dispatcher.handle(listCall())
-        _ = await dispatcher.handle(chooseCall("E90"))
-        let events = box.all
-        XCTAssertEqual(events.count, 2)
-        guard case .rating(let rating) = events[0] else { return XCTFail("first event is not rating") }
-        XCTAssertEqual(rating.label, .structured)
-        guard case .choice(let choice) = events[1] else { return XCTFail("second event is not choice") }
-        XCTAssertEqual(choice.id, "E90")
-        let phase = await dispatcher.phase
-        XCTAssertEqual(phase, .done)
+    func testPrefersTheLongestIDMatch() {
+        let response = "The entry E90.sparse matches the sparse speckle."
+        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "E90.sparse")
     }
 
-    func testListReturnsOnlyEntriesForTheLabel() async {
-        let (dispatcher, box) = makeDispatcher()
-        _ = await dispatcher.handle(ratingCall(.simple))
-        let listing = await dispatcher.handle(listCall())
-        XCTAssertTrue(listing.contains("Entries for simple"))
-        for id in await dispatcher.validIDs(for: .simple) {
-            XCTAssertTrue(listing.contains(id), "listing is missing \(id)")
-        }
-        // A nesting id must not appear: the listing is label-scoped.
-        XCTAssertFalse(listing.contains("E90 "))
-        XCTAssertTrue(box.all.count == 1) // rating only; list emits nothing
+    func testMatchesAnIDWithTrailingPunctuation() {
+        XCTAssertEqual(ChoiceParser.choice(from: "id: E90.\nreason: holes")?.id, "E90")
+        XCTAssertEqual(ChoiceParser.choice(from: "The Sierpinski entry is E90.")?.id, "E90")
     }
 
-    func testChooseBeforeRateIsRejectedThenRecovers() async {
-        let (dispatcher, box) = makeDispatcher()
-        let first = await dispatcher.handle(chooseCall("E90"))
-        XCTAssertTrue(first.contains("rate_input comes first"))
-        XCTAssertTrue(box.all.isEmpty)
-        _ = await dispatcher.handle(ratingCall(.simple))
-        _ = await dispatcher.handle(listCall())
-        let second = await dispatcher.handle(chooseCall("E250"))
-        XCTAssertTrue(second.contains("Displaying E250"))
-        let phase = await dispatcher.phase
-        XCTAssertEqual(phase, .done)
+    func testDoesNotMatchAnIDInsideAWord() {
+        XCTAssertNil(ChoiceParser.choice(from: "prefixE90suffix"))
     }
 
-    func testChooseBeforeListIsRejectedThenRecovers() async {
-        let (dispatcher, box) = makeDispatcher()
-        _ = await dispatcher.handle(ratingCall(.simple))
-        let rejected = await dispatcher.handle(chooseCall("E250"))
-        XCTAssertTrue(rejected.contains("list_automata"))
-        XCTAssertTrue(box.all.count == 1) // rating only
-        _ = await dispatcher.handle(listCall())
-        let accepted = await dispatcher.handle(chooseCall("E250"))
-        XCTAssertTrue(accepted.contains("Displaying E250"))
+    func testReturnsNilWhenNoCatalogIDAppears() {
+        XCTAssertNil(ChoiceParser.choice(from: "I cannot decide."))
     }
 
-    func testInvalidLabelReturnsCorrectiveAndDoesNotEmit() async {
-        let (dispatcher, box) = makeDispatcher()
-        let bad = ToolInvocation(name: ToolSchemas.rateInputName, arguments: [
-            "label": .string("chaotic"),
-            "confidence": .string("high"),
-            "primitives": .string("x"),
-            "description": .string("y"),
-            "reason": .string("z"),
-        ])
-        let message = await dispatcher.handle(bad)
-        XCTAssertTrue(message.contains("label must be one of"))
-        XCTAssertTrue(box.all.isEmpty)
-        let phase = await dispatcher.phase
-        XCTAssertEqual(phase, .awaitingRating)
+    func testIgnoresAnUnknownID() {
+        XCTAssertNil(ChoiceParser.choice(from: "id: E999\nreason: none"))
     }
 
-    func testMissingRequiredFieldIsCorrective() async {
-        let (dispatcher, box) = makeDispatcher()
-        let bad = ToolInvocation(name: ToolSchemas.rateInputName, arguments: [
-            "label": .string("simple"),
-            "confidence": .string("high"),
-            "primitives": .string("x"),
-            "reason": .string("z"),
-        ])
-        let message = await dispatcher.handle(bad)
-        XCTAssertTrue(message.contains("description is required"))
-        XCTAssertTrue(box.all.isEmpty)
+    func testIDFieldWinsOverAnIDInTheReason() {
+        let response = "id: T237\nreason: unlike E110, the holes are large"
+        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "T237")
     }
 
-    func testIDOutsideClassIsRejectedWithValidList() async {
-        let (dispatcher, box) = makeDispatcher()
-        _ = await dispatcher.handle(ratingCall(.simple))
-        _ = await dispatcher.handle(listCall())
-        let message = await dispatcher.handle(chooseCall("E90")) // nesting
-        XCTAssertTrue(message.contains("outside the classes for simple"))
-        XCTAssertTrue(message.contains("E250"))
-        XCTAssertTrue(box.all.count == 1) // only the rating
-        let phase = await dispatcher.phase
-        XCTAssertEqual(phase, .listed(.simple))
+    func testIsCaseInsensitive() {
+        XCTAssertEqual(ChoiceParser.choice(from: "ID: e250")?.id, "E250")
+        XCTAssertEqual(ChoiceParser.choice(from: "id: e110")?.id, "E110")
+    }
+}
+
+final class ChoiceHistoryTests: XCTestCase {
+    func testIsEmptyUntilAChoiceIsRecorded() {
+        XCTAssertTrue(ChoiceHistory().excludedIDs.isEmpty)
+        XCTAssertEqual(ChoiceHistory().userTurn(""), "")
+        XCTAssertEqual(ChoiceHistory().userTurn("look"), "look")
     }
 
-    func testUnknownIDIsRejected() async {
-        let (dispatcher, _) = makeDispatcher()
-        _ = await dispatcher.handle(ratingCall(.random))
-        _ = await dispatcher.handle(listCall())
-        let message = await dispatcher.handle(chooseCall("E999"))
-        XCTAssertTrue(message.contains("is not a catalog id"))
+    func testKeepsOnlyTheMostRecentChoices() {
+        var history = ChoiceHistory()
+        for index in 0..<(ChoiceHistory.limit + 5) { history.record("id\(index)") }
+        XCTAssertEqual(history.excludedIDs.count, ChoiceHistory.limit)
+        XCTAssertEqual(history.excludedIDs.first, "id5")
+        XCTAssertEqual(history.excludedIDs.last, "id\(ChoiceHistory.limit + 4)")
     }
 
-    func testLoopBoundFailsOnEighthCall() async {
-        let (dispatcher, box) = makeDispatcher()
-        // Seven rejected choose-before-rate calls (calls 1–7), then the eighth fails.
-        for _ in 0..<7 {
-            _ = await dispatcher.handle(chooseCall("E90"))
-        }
-        let failed = await dispatcher.handle(chooseCall("E90"))
-        XCTAssertTrue(failed.contains("Too many tool calls"))
-        let didFail = await dispatcher.didFail
-        XCTAssertTrue(didFail)
-        XCTAssertTrue(box.all.contains { if case .failed = $0 { return true } else { return false } })
+    func testUserTurnAppendsTheExclusionNote() {
+        var history = ChoiceHistory()
+        history.record("E90")
+        history.record("E110")
+        let turn = history.userTurn("")
+        XCTAssertTrue(turn.contains("Do not choose these ids"))
+        XCTAssertTrue(turn.contains("E90, E110"))
+        XCTAssertTrue(turn.contains("Choose a different automaton of the same class."))
     }
 
-    func testUnknownToolIsCorrective() async {
-        let (dispatcher, _) = makeDispatcher()
-        let message = await dispatcher.handle(ToolInvocation(name: "delete_everything"))
-        XCTAssertTrue(message.contains("Unknown tool"))
-    }
-
-    func testValidIDsPerLabelFollowMapping() async {
-        let (dispatcher, _) = makeDispatcher()
-        let simple = await dispatcher.validIDs(for: .simple)
-        XCTAssertEqual(simple.count, Catalog.count(of: .repetition))
-        XCTAssertTrue(simple.allSatisfy { Catalog.spec(id: $0)?.behavior == .repetition })
-        let structured = await dispatcher.validIDs(for: .structured)
-        XCTAssertEqual(
-            structured.count,
-            Catalog.count(of: .nesting) + Catalog.count(of: .repetition)
-        )
-        let random = await dispatcher.validIDs(for: .random)
-        XCTAssertEqual(random.count, Catalog.count(of: .randomness))
-        let complex = await dispatcher.validIDs(for: .complex)
-        XCTAssertEqual(complex.count, Catalog.count(of: .complexity))
+    func testUserTurnKeepsTheSubmittedTextFirst() {
+        var history = ChoiceHistory()
+        history.record("E90")
+        XCTAssertTrue(history.userTurn("look").hasPrefix("look\n\n"))
     }
 }

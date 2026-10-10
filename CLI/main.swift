@@ -14,6 +14,11 @@ let command = arguments.first ?? "catalog"
 
 // MARK: - Flag parsing
 
+/// Flag names that never take a value; every other `--name` consumes the next
+/// token when that token is not itself a flag. Without this, a boolean flag at
+/// the end of the arguments would swallow the following path.
+let booleanFlags: Set<String> = ["all", "quiet", "show-prompt"]
+
 /// Parses `--key value` pairs from the arguments after `command`.
 func flags(from args: [String]) -> [String: String] {
     var result: [String: String] = [:]
@@ -22,7 +27,7 @@ func flags(from args: [String]) -> [String: String] {
         let token = args[index]
         if token.hasPrefix("--") {
             let key = String(token.dropFirst(2))
-            if index + 1 < args.count, !args[index + 1].hasPrefix("--") {
+            if !booleanFlags.contains(key), index + 1 < args.count, !args[index + 1].hasPrefix("--") {
                 result[key] = args[index + 1]
                 index += 2
                 continue
@@ -38,11 +43,17 @@ func positional(from args: [String]) -> [String] {
     var result: [String] = []
     var index = 1
     while index < args.count {
-        if !args[index].hasPrefix("--") {
-            result.append(args[index])
+        let token = args[index]
+        if !token.hasPrefix("--") {
+            result.append(token)
             index += 1
         } else {
-            index += (index + 1 < args.count && !args[index + 1].hasPrefix("--")) ? 2 : 1
+            let key = String(token.dropFirst(2))
+            if !booleanFlags.contains(key), index + 1 < args.count, !args[index + 1].hasPrefix("--") {
+                index += 2
+            } else {
+                index += 1
+            }
         }
     }
     return result
@@ -174,25 +185,81 @@ func printUsage() -> Never {
         options: --cols N --rows N --steps N
       gpu <id>                        compare the Metal 4 kernels with the CPU
         options: --cols N --rows N --steps N
-      rate <path> ...                 run the MLX agent over reference images
-        option: --model <dir> (default: RATER_MODEL_PATH, else download)
+      rate <path|dir> ...               run the MLX agent over reference images
+        a directory contributes its top-level images
+        options: --model <dir> [--quiet] [--show-prompt]
+        (--model default: RATER_MODEL_PATH, else download)
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
 }
 
 #if canImport(Agent)
-/// Runs the real agent over each image and prints `name<TAB>label<TAB>id<TAB>seconds`.
+/// The image files a set of CLI arguments names. A file is taken as-is; a
+/// directory contributes its top-level image files, sorted naturally, so
+/// `rate artifacts/` rates every drawing in the folder.
+func imagePaths(from inputs: [String]) -> [String] {
+    let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "heic", "heif", "tif", "tiff", "gif", "bmp", "webp",
+    ]
+    var paths: [String] = []
+    for input in inputs {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: input, isDirectory: &isDirectory) else {
+            FileHandle.standardError.write(Data("rate: no such file or directory: \(input)\n".utf8))
+            exit(2)
+        }
+        guard isDirectory.boolValue else {
+            paths.append(input)
+            continue
+        }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: input)) ?? []
+        let images = names
+            .filter { imageExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        if images.isEmpty {
+            FileHandle.standardError.write(Data("rate: no images in \(input)\n".utf8))
+        }
+        paths.append(contentsOf: images.map { (input as NSString).appendingPathComponent($0) })
+    }
+    return paths
+}
+
+/// Runs the real agent over each image and prints `name<TAB>id<TAB>seconds`.
+/// Debug output is on by default (the resolved model, the prompt size, the
+/// model's raw answer, and the parsed class per image); `--quiet` keeps only
+/// the summary lines. `--show-prompt` adds the full system prompt.
 func runRate() async throws {
-    let paths = positional(from: arguments)
-    guard !paths.isEmpty else {
-        FileHandle.standardError.write(Data("rate: provide one or more image paths\n".utf8))
+    let inputs = positional(from: arguments)
+    guard !inputs.isEmpty else {
+        FileHandle.standardError.write(Data("rate: provide one or more image paths or directories\n".utf8))
         exit(2)
     }
+    let paths = imagePaths(from: inputs)
+    guard !paths.isEmpty else {
+        FileHandle.standardError.write(Data("rate: no images found\n".utf8))
+        exit(2)
+    }
+    let flags = flags(from: arguments)
+    let verbose = flags["quiet"] == nil
     var configuration = AgentEngine.Configuration.fromEnvironment()
-    if let model = flags(from: arguments)["model"] {
+    if let model = flags["model"] {
         configuration.modelDirectory = URL(
             fileURLWithPath: NSString(string: model).expandingTildeInPath, isDirectory: true)
+    }
+    if verbose {
+        if let directory = configuration.modelDirectory {
+            print("[debug] model: directory \(directory.path)")
+        } else {
+            print("[debug] model: hub \(configuration.modelID) @ \(configuration.revision)")
+        }
+        let prompt = SystemPrompt.build()
+        print("[debug] system prompt: \(prompt.count) chars, ~\(SystemPrompt.estimatedTokenCount(of: prompt)) tokens")
+        if flags["show-prompt"] != nil {
+            print("[debug] --- system prompt ---")
+            print(prompt)
+            print("[debug] --- end system prompt ---")
+        }
     }
     let engine = AgentEngine(configuration: configuration)
     // Normalize each input to the model's 512×512 size, as the app does, so an
@@ -201,35 +268,45 @@ func runRate() async throws {
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     defer { ImageImport.removeSessionDirectory(for: sessionID) }
-    var rated = 0
+    var chosen = 0
     for path in paths {
         let url = URL(fileURLWithPath: path)
         let start = Date()
-        var label = "?"
-        var id = "?"
+        var response = ""
+        var choice: Choice?
         var failure: String?
         do {
             let normalized = try ImageImport.normalize(url, into: directory)
+            if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
             for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {
                 switch event {
-                case .rating(let rating): label = rating.label.rawValue
-                case .choice(let choice): id = choice.id
+                case .text(let text): response = text
+                case .choice(let picked): choice = picked
                 case .failed(let message): failure = message
-                case .text, .finished: break
+                case .finished: break
                 }
             }
         } catch {
             failure = error.localizedDescription
         }
         let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
+        if verbose {
+            print("[debug] \(url.lastPathComponent) answer after \(seconds)s:")
+            print(response.isEmpty ? "[debug]   (empty response)" : response)
+            if let choice, let spec = Catalog.spec(id: choice.id) {
+                print("[debug]   parsed \(choice.id) [\(spec.behavior.rawValue)] \(spec.title)")
+            }
+        }
         if let failure {
             print("\(url.lastPathComponent)\tFAILED\t\(failure)\t\(seconds)s")
+        } else if let choice {
+            chosen += 1
+            print("\(url.lastPathComponent)\t\(choice.id)\t\(seconds)s")
         } else {
-            rated += 1
-            print("\(url.lastPathComponent)\t\(label)\t\(id)\t\(seconds)s")
+            print("\(url.lastPathComponent)\tFAILED\tno catalog id\t\(seconds)s")
         }
     }
-    print("\n\(rated)/\(paths.count) rated")
+    print("\n\(chosen)/\(paths.count) chosen")
 }
 #endif
 

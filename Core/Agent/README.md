@@ -6,54 +6,55 @@ The pure agent logic: nothing here links MLX. The MLX VLM wrapper
 ## Per-input model
 
 Each submitted input is one self-contained run: system prompt, one user turn
-(image and optional text), then the three tool calls. The full session history is
-shown in the transcript, but the model context holds only the current input,
+(image and optional text), then one plain-text answer. The full session history
+is shown in the transcript, but the model context holds only the current input,
 so latency is constant and the system prompt is a stable cacheable prefix.
 
-## Tools and ordering
+## One answer, no tool call
 
-Three tools in a fixed order. `ToolDispatcher` is a small state machine, one per
-run:
+There is no tool schema and no second generation round. The prompt asks for two
+lines:
 
 ```
-awaitingRating ──rate_input(valid)──► rated(label) ──list_automata──► listed(label) ──choose_automaton(valid)──► done
+id: <one id from the list>
+reason: <one sentence>
 ```
 
-- The catalog is **never** in the prompt or a tool schema. `list_automata`
-  returns only the entries whose `Behavior` the label allows, so the model
-  sees a small, label-scoped list and the token cost does not grow with the
-  inventory. `choose_automaton.id` is a plain string validated by the
-  dispatcher.
-- The package's validation default is `.permissive`, so schema violations
-  reach the dispatcher. **The dispatcher validates arguments itself and always
-  returns a corrective string** — it never throws, because a throw from the
-  tool closure ends the stream with an error.
-- `choose_automaton` before `list_automata` returns an ordering message, so the
-  model must read the candidate list before choosing.
-- An id outside the behaviors allowed for the label returns the valid id list.
-- After `done`, the agent writes one closing sentence.
-- The dispatcher counts calls; at the eighth call without reaching `done` it
-  emits `.failed` and the engine cancels.
+`ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
+and otherwise taking the first catalog id anywhere in the text (longest match
+first, so `E90.sparse` beats `E90`). The engine gives one **repair turn**: if the
+first answer names no usable id (unknown, or recently used), it appends a
+correction and asks again, and only a second miss ends the run in `.failed`.
+Text beyond the two fields is ignored. The parser is pure, so the MLX engine and
+the tests share one implementation.
 
-The user-visible order (rating card, then choice card) is identical on every
-run whatever the model does.
+## No repeats
+
+The dialogue must not replay the same automaton. The engine carries a
+`ChoiceHistory` of the last 20 chosen ids across runs and, before each run,
+builds the user turn with `ChoiceHistory.userTurn(_:)`, which appends "do not
+choose these ids" to the text. That note rides with the image in the user turn,
+so the system prompt stays a cacheable prefix. The engine treats an excluded id
+the same as an unknown one: it triggers the one repair turn, then records the
+accepted id.
 
 ## Prompt
 
-`SystemPrompt.build()` joins two parts into one immutable string: the short
-procedure (rate, list, choose) and the verbatim rating rubric (with the *Output
-format* section reframed to the `rate_input` fields and the multi-input summary
-dropped). See the rubric artifact for the source text. Keep the catalog out of
-this string — it belongs in the `list_automata` result.
+`SystemPrompt.build()` joins three parts into one immutable string: the four
+behavior classes described plainly, the flat catalog
+(`Catalog.promptIndexLines`, one line per entry as `id | class | look`), and the
+answer format. Each entry carries its own class instead of being grouped, so
+the model does not have to map a separate class table onto a listing. The string
+is identical on every run, so it is a cacheable prefix; keep `look` one line
+each.
 
 ## Events
 
-`AgentEvent`: `.text` (closing sentence, batched by the UI), `.rating`,
-`.choice`, `.finished`, `.failed`. `AgentInput` carries `text` and an optional
-`imageURL`.
+`AgentEvent`: `.text` (the model's full answer, batched by the UI), `.choice`,
+`.finished`, `.failed`. `AgentInput` carries `text` and an optional `imageURL`.
 
 ## Tests
 
-Ordering (`rate → list → choose`, and each call out of order), label-scoped
-listing, argument/id validation, event emission, loop bound, and
-`RejectedToolCallError` handling.
+Choice parsing (the `id:` field, markdown, fallback to prose, the longest-id
+match, an unknown id), the prompt's class descriptions and per-entry class
+lines, and the prompt budget.

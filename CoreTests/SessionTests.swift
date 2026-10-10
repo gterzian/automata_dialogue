@@ -2,35 +2,32 @@ import XCTest
 @testable import Core
 
 final class TranscriptStoreTests: XCTestCase {
-    private func rating(_ label: RatingLabel = .structured) -> Rating {
-        Rating(label: label, confidence: .high, primitives: "bars", description: "five bars", reason: "repetition")
+    private func choice(_ id: String = "E90") -> Choice {
+        Choice(id: id, rationale: "nested")
     }
 
-    func testApplyRatingAndChoiceAppendsInOrder() {
+    func testApplyChoiceAppends() {
         let store = TranscriptStore()
-        _ = store.apply(.rating(rating(.random)))
-        _ = store.apply(.choice(Choice(id: "E30", rationale: "tangle")))
-        XCTAssertEqual(store.count, 2)
-        guard case .rating(let r) = store.entry(at: 0)?.kind else { return XCTFail("expected rating") }
-        XCTAssertEqual(r.label, .random)
-        guard case .choice(let c) = store.entry(at: 1)?.kind else { return XCTFail("expected choice") }
+        _ = store.apply(.choice(choice("E30")))
+        XCTAssertEqual(store.count, 1)
+        guard case .choice(let c) = store.entry(at: 0)?.kind else { return XCTFail("expected choice") }
         XCTAssertEqual(c.id, "E30")
     }
 
     func testStreamingTextAccumulatesInOneRowThenSettles() {
         let store = TranscriptStore()
-        _ = store.apply(.text("structured: "))
-        _ = store.apply(.text("displaying E90."))
+        _ = store.apply(.text("id: E90 "))
+        _ = store.apply(.text("reason: nested"))
         XCTAssertEqual(store.count, 1)
         guard case .assistantMessage(let text, true) = store.entry(at: 0)?.kind else {
             return XCTFail("expected streaming assistant row")
         }
-        XCTAssertEqual(text, "structured: displaying E90.")
+        XCTAssertEqual(text, "id: E90 reason: nested")
         _ = store.apply(.finished)
         guard case .assistantMessage(let final, false) = store.entry(at: 0)?.kind else {
             return XCTFail("expected settled row")
         }
-        XCTAssertEqual(final, "structured: displaying E90.")
+        XCTAssertEqual(final, "id: E90 reason: nested")
         XCTAssertEqual(store.count, 1)
     }
 
@@ -51,9 +48,9 @@ final class TranscriptStoreTests: XCTestCase {
     func testAppendUserInputAndSearch() {
         let store = TranscriptStore()
         store.append(.userInput(text: "a tangled polyline", imagePath: "/tmp/x.png"))
-        store.append(.rating(rating(.random)))
+        store.append(.choice(choice("E30")))
         XCTAssertEqual(store.search("polyline"), [0])
-        XCTAssertEqual(store.search("rand"), [1])
+        XCTAssertEqual(store.search("E30"), [1])
         XCTAssertTrue(store.search("missing").isEmpty)
     }
 
@@ -65,7 +62,7 @@ final class TranscriptStoreTests: XCTestCase {
 
         let store = TranscriptStore(transcriptURL: url)
         store.append(.userInput(text: "hello", imagePath: nil))
-        _ = store.apply(.rating(rating(.simple)))
+        _ = store.apply(.choice(choice("E90")))
         _ = store.apply(.text("done"))
         _ = store.apply(.finished)
 

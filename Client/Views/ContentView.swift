@@ -45,11 +45,6 @@ struct ContentView: View {
             if let spec = model.currentSpec {
                 Label("\(spec.id) · \(spec.title)", systemImage: "square.grid.3x3")
                     .font(.system(size: 13, weight: .semibold))
-                if let rating = model.latestRating {
-                    Text(rating.label.rawValue)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
                 Spacer()
                 Button {
                     model.replay()
@@ -162,12 +157,6 @@ struct TranscriptRowView: View {
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 .frame(maxWidth: 460, alignment: .trailing)
             }
-        case .rating(let rating):
-            card(
-                title: "\(rating.label.rawValue) · \(rating.confidence.rawValue)",
-                icon: "tag",
-                detail: rating.description
-            )
         case .choice(let choice):
             let title = Catalog.spec(id: choice.id)?.title ?? choice.id
             card(title: "\(choice.id) · \(title)", icon: "square.grid.3x3", detail: choice.rationale)

@@ -1,7 +1,7 @@
 import Foundation
 
 /// The curated inventory as one table (design doc §4). Exactly 45 entries, in
-/// the inventory's order; the dispatcher's `list_automata` listing and the CLI
+/// the inventory's order; the system prompt's automata listing and the CLI
 /// catalog print are generated from this table.
 public enum Catalog {
     public static let all: [ProgramSpec] = makeAll()
@@ -16,10 +16,10 @@ public enum Catalog {
 
     public static func spec(id: String) -> ProgramSpec? { byID[id] }
 
-    /// One line per entry: `id | title | behavior | look`. The CLI catalog
-    /// print uses this.
+    /// One line per entry: `id | class | look`. The system prompt embeds the
+    /// flat list, so each entry carries its class instead of being grouped.
     public static var promptIndexLines: [String] {
-        all.map { "\($0.id) | \($0.title) | \($0.behavior.rawValue) | \($0.look)" }
+        all.map { "\($0.id) | \($0.behavior.rawValue) | \($0.look)" }
     }
 
     public static func count(of behavior: Behavior) -> Int {

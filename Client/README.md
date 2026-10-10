@@ -13,8 +13,8 @@ One window, one panel, following the uni03C0 conventions for chrome:
   file onto the input to attach it.** There is no in-app drawing surface.
 - A submitted prompt immediately stops any running automaton, then starts a
   new agent run.
-- Transcript rows (user input, rating card, choice card, assistant sentence,
-  error) render in the same panel.
+- Transcript rows (user input, choice card, assistant sentence, error) render
+  in the same panel.
 
 The run uses the MLX `AgentEngine`. The app only builds through the Xcode
 project, which always links the `Agent` target; there is no model-free

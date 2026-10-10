@@ -74,18 +74,16 @@ final class ImageImportTests: XCTestCase {
         let kept = UUID()
         let stale = UUID()
         let fileManager = FileManager.default
-        // Build the purge around the real temp root by creating folders there.
-        let root = fileManager.temporaryDirectory.appendingPathComponent("Rater", isDirectory: true)
-        try fileManager.createDirectory(at: root.appendingPathComponent(kept.uuidString), withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: root.appendingPathComponent(stale.uuidString), withIntermediateDirectories: true)
-        defer {
-            try? fileManager.removeItem(at: root.appendingPathComponent(kept.uuidString))
-            try? fileManager.removeItem(at: root.appendingPathComponent(stale.uuidString))
-        }
+        // A scoped root: purging the real `<tmp>/Rater` would delete the
+        // session folder of a concurrently running rater-cli or app process.
+        try fileManager.createDirectory(
+            at: tempRoot.appendingPathComponent(kept.uuidString), withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: tempRoot.appendingPathComponent(stale.uuidString), withIntermediateDirectories: true)
 
-        ImageImport.purgeStaleSessions(keeping: [kept], fileManager: fileManager)
+        ImageImport.purgeStaleSessions(keeping: [kept], root: tempRoot, fileManager: fileManager)
 
-        XCTAssertTrue(fileManager.fileExists(atPath: root.appendingPathComponent(kept.uuidString).path))
-        XCTAssertFalse(fileManager.fileExists(atPath: root.appendingPathComponent(stale.uuidString).path))
+        XCTAssertTrue(fileManager.fileExists(atPath: tempRoot.appendingPathComponent(kept.uuidString).path))
+        XCTAssertFalse(fileManager.fileExists(atPath: tempRoot.appendingPathComponent(stale.uuidString).path))
     }
 }

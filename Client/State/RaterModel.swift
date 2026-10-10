@@ -16,7 +16,6 @@ final class RaterModel: ObservableObject {
     @Published private(set) var status = ""
     @Published private(set) var automatonImage: CGImage?
     @Published private(set) var currentSpec: ProgramSpec?
-    @Published private(set) var latestRating: Rating?
     @Published private(set) var latestChoice: Choice?
     @Published var attachmentError: String?
 
@@ -60,7 +59,6 @@ final class RaterModel: ObservableObject {
     func send() {
         guard canSend else { return }
         stopAutomaton()
-        latestRating = nil
         latestChoice = nil
         let text = inputText
         let imageURL = attachment?.url
@@ -73,7 +71,7 @@ final class RaterModel: ObservableObject {
 
     private func run(text: String, imageURL: URL?) {
         isRunning = true
-        status = "rating input…"
+        status = "choosing automaton…"
         let input = AgentInput(text: text, imageURL: imageURL)
         launch {
             do {
@@ -92,9 +90,6 @@ final class RaterModel: ObservableObject {
     private func handle(_ event: AgentEvent) {
         store.apply(event)
         switch event {
-        case .rating(let rating):
-            latestRating = rating
-            status = "choosing automaton…"
         case .choice(let choice):
             latestChoice = choice
             if let spec = Catalog.spec(id: choice.id) {

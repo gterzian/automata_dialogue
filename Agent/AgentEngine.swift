@@ -3,46 +3,47 @@ import Foundation
 import MLXLMCommon
 import MLXVLM
 
-/// Failures specific to driving the model. Validation outcomes are never errors:
-/// `ToolDispatcher` returns corrective strings, so only these two conditions
-/// end a run.
+/// A malformed model id reaching the downloader. Validation outcomes are never
+/// errors: a reply without a catalog id is emitted as `.failed`, not thrown.
 public enum AgentEngineError: Error, LocalizedError {
     case invalidRepositoryID(String)
-    case toolCallLimit
 
     public var errorDescription: String? {
         switch self {
         case .invalidRepositoryID(let id):
             "Invalid Hugging Face repository id: \(id). Expected \"namespace/name\"."
-        case .toolCallLimit:
-            "The model exceeded the tool-call limit before choosing an automaton."
         }
     }
 }
 
 /// The MLX VLM implementation of `AgentRunning` (design doc §3, §11.6). Each run
 /// is one self-contained turn: a fresh `ChatSession` carries the immutable system
-/// prompt, the current input, and the tool exchange, so latency is constant and
-/// the prompt prefix is cacheable. The model container is loaded once and shared
-/// across runs.
+/// prompt, the current input, and a single plain-text answer, so latency is
+/// constant and the prompt prefix is cacheable. The model container is loaded
+/// once and shared across runs.
 ///
-/// The `toolDispatch` closure converts `mlx-swift-lm`'s `ToolCall` into `Core`'s
-/// `ToolInvocation` and hands it to the shared `ToolDispatcher`, which emits the
-/// rating and choice cards and returns a corrective string for anything invalid.
+/// There is no tool call and no second generation round: the model replies with
+/// an `id:` line, and `ChoiceParser` reads the chosen entry out of the text. A
+/// reply without a catalog id fails the run.
 public actor AgentEngine: AgentRunning {
     public struct Configuration: Sendable {
-        /// Default for the target machines; the 4B entry is the 16 GB fallback.
-        public static let defaultModelID = "mlx-community/Qwen3.5-9B-4bit"
-        public static let fallbackModelID = "mlx-community/Qwen3.5-4B-4bit"
+        /// The smallest model that held up on the reference set: fast enough to
+        /// feel like a dialogue and strong enough to honour the no-repeat list.
+        /// The 9B is more capable but too slow; the 2B cannot follow the list.
+        /// See `Agent/README.md`.
+        public static let defaultModelID = "mlx-community/Qwen3.5-4B-MLX-4bit"
 
         /// The snapshot commit a download resolves to when the caller does not
         /// pin one. A mutable ref like `main` would let the hub serve different
-        /// weights on a later run; the commit keeps the download reproducible.
-        /// Only the default is pinned — its hash is verified in
-        /// `Models/README.md`. An unrecognized id (including `fallbackModelID`)
+        /// weights on a later run; the commits keep the download reproducible.
+        /// Both hashes are verified in `Models/README.md`. An unrecognized id
         /// stays on `main`.
         static func pinnedRevision(for modelID: String) -> String {
-            modelID == defaultModelID ? "8b2b98c00a6b4d291155e4890773ca8f769aee53" : "main"
+            switch modelID {
+            case "mlx-community/Qwen3.5-4B-MLX-4bit": "32f3e8ecf65426fc3306969496342d504bfa13f3"
+            case "mlx-community/Qwen3.5-9B-4bit": "8b2b98c00a6b4d291155e4890773ca8f769aee53"
+            default: "main"
+            }
         }
 
         public var modelID: String
@@ -103,6 +104,18 @@ public actor AgentEngine: AgentRunning {
     private let configuration: Configuration
     /// One load shared by every run; cleared on failure so a later run retries.
     private var containerTask: Task<ModelContainer, Error>?
+    /// Recent choices, carried across runs. `perform` turns it into the
+    /// user-turn exclusion note, so the dialogue never repeats an automaton.
+    private var history = ChoiceHistory()
+
+    /// One repair turn when the model's answer names no usable id (an unknown
+    /// id, or one the harness excluded). The session still holds the image, so
+    /// the retry sees the same input.
+    private static let repairPrompt = """
+    Your previous answer did not name a usable id. Reply with exactly two lines and nothing else:
+    id: <one id from the list, not one of the recently used ids>
+    reason: <one sentence naming the class you matched and why it fits>
+    """
 
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
@@ -122,10 +135,9 @@ public actor AgentEngine: AgentRunning {
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async {
         do {
+            let excluded = Set(history.excludedIDs)
+            let prompt = history.userTurn(input.text)
             let container = try await modelContainer()
-            let dispatcher = ToolDispatcher(catalog: Catalog.all) { event in
-                continuation.yield(event)
-            }
             let session = ChatSession(
                 container,
                 instructions: SystemPrompt.build(),
@@ -133,48 +145,40 @@ public actor AgentEngine: AgentRunning {
                     maxTokens: configuration.maxTokens,
                     temperature: configuration.temperature
                 ),
-                additionalContext: ["enable_thinking": false],
-                tools: ToolSchemas.all,
-                toolDispatch: { call in
-                    let result = await dispatcher.handle(Self.invocation(from: call))
-                    if await dispatcher.didFail {
-                        // The dispatcher already emitted `.failed`; ending the
-                        // stream stops the model from looping on the limit.
-                        throw AgentEngineError.toolCallLimit
-                    }
-                    return result
-                }
+                // Thinking is off, so the model answers instead of spending
+                // tokens on a reasoning preamble before the `id:` line.
+                additionalContext: ["enable_thinking": false]
             )
 
-            let images = input.imageURL.map { [UserInput.Image.url($0)] } ?? []
-            var closingSentence = ""
-            for try await chunk in session.streamResponse(to: input.text, images: images) {
-                // Buffer the assistant text so the closing sentence always lands
-                // after the rating and choice cards, whatever the model emits
-                // before its tool calls.
-                closingSentence += chunk
+            let image = input.imageURL.map { UserInput.Image.url($0) }
+            var response = try await session.respond(to: prompt, image: image)
+            var choice = Self.allowed(ChoiceParser.choice(from: response), excluding: excluded)
+            // One repair turn if the model named no usable id (an unknown id,
+            // or one the history excluded); the dispatcher-era repair, kept as
+            // a single retry. The session still holds the image.
+            if choice == nil, !response.isEmpty {
+                response = try await session.respond(to: Self.repairPrompt)
+                choice = Self.allowed(ChoiceParser.choice(from: response), excluding: excluded)
             }
+            if !response.isEmpty { continuation.yield(.text(response)) }
 
-            let phase = await dispatcher.phase
-            if await dispatcher.didFail {
-                continuation.finish()
-            } else if phase.isDone {
-                if !closingSentence.isEmpty { continuation.yield(.text(closingSentence)) }
+            if let choice {
+                history.record(choice.id)
+                continuation.yield(.choice(choice))
                 continuation.yield(.finished)
-                continuation.finish()
             } else {
-                continuation.yield(.failed("the model finished without rating and choosing"))
-                continuation.finish()
+                continuation.yield(.failed("the model did not name a catalog id"))
             }
+            continuation.finish()
         } catch {
-            if let agentError = error as? AgentEngineError, case .toolCallLimit = agentError {
-                // `.failed` was emitted by the dispatcher.
-                continuation.finish()
-            } else {
-                continuation.yield(.failed(error.localizedDescription))
-                continuation.finish()
-            }
+            continuation.yield(.failed(error.localizedDescription))
+            continuation.finish()
         }
+    }
+
+    private nonisolated static func allowed(_ choice: Choice?, excluding excluded: Set<String>) -> Choice? {
+        guard let choice, !excluded.contains(choice.id) else { return nil }
+        return choice
     }
 
     private func modelContainer() async throws -> ModelContainer {
@@ -196,28 +200,6 @@ public actor AgentEngine: AgentRunning {
         } catch {
             containerTask = nil
             throw error
-        }
-    }
-
-    /// Converts one `mlx-swift-lm` tool call into the `Core` value the dispatcher
-    /// validates. The two `JSONValue` enums are structurally identical.
-    static func invocation(from call: ToolCall) -> ToolInvocation {
-        ToolInvocation(
-            name: call.function.name,
-            arguments: call.function.arguments.mapValues(jsonValue),
-            id: call.id
-        )
-    }
-
-    private static func jsonValue(_ value: MLXLMCommon.JSONValue) -> Core.JSONValue {
-        switch value {
-        case .null: .null
-        case .bool(let bool): .bool(bool)
-        case .int(let int): .int(int)
-        case .double(let double): .double(double)
-        case .string(let string): .string(string)
-        case .array(let array): .array(array.map(jsonValue))
-        case .object(let object): .object(object.mapValues(jsonValue))
         }
     }
 }

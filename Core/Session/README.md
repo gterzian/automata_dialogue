@@ -9,13 +9,9 @@ uni03C0's `Core/Session`. It is pure data (no AppKit): the view coordinator in
 `TranscriptEntryKind`:
 
 - `userInput(text:imagePath:)` — the submitted prompt and optional attachment.
-- `rating(Rating)` — the `rate_input` card.
-- `choice(Choice)` — the `choose_automaton` card.
-- `assistantMessage(text:)` — the closing sentence.
+- `choice(Choice)` — the chosen automaton.
+- `assistantMessage(text:)` — the model's answer.
 - `errorMessage(String)` — a red row below partial content.
-
-`rating` and `choice` render through the client's `ToolCallCardView` (tool
-names `rate_input` / `choose_automaton`).
 
 Entry `id`s are stable so the table distinguishes an in-place reconfigure from
 a new row insert.

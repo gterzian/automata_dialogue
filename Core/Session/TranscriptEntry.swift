@@ -13,10 +13,9 @@ public struct TranscriptEntry: Identifiable, Hashable, Sendable, Codable {
 }
 
 /// The row kinds (design doc §5.2, adapted: no separate tool-call card model —
-/// rating and choice are first-class cards).
+/// the choice is a first-class card).
 public enum TranscriptEntryKind: Hashable, Sendable, Codable {
     case userInput(text: String, imagePath: String?)
-    case rating(Rating)
     case choice(Choice)
     case assistantMessage(text: String, isStreaming: Bool)
     case errorMessage(String)
@@ -33,10 +32,6 @@ public extension TranscriptEntry {
         switch kind {
         case .userInput(let text, _):
             return text
-        case .rating(let rating):
-            return [rating.label.rawValue, rating.primitives, rating.description, rating.reason, rating.borderlineNote]
-                .filter { !$0.isEmpty }
-                .joined(separator: "\n")
         case .choice(let choice):
             return [choice.id, choice.rationale].joined(separator: "\n")
         case .assistantMessage(let text, _):

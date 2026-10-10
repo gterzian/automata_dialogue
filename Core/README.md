@@ -21,8 +21,8 @@ for the app.
   descriptors, palettes, and the catalog index. See `Catalog/README.md`.
 - `Programs/` — CPU reference implementations and the PRNG. See
   `Programs/README.md`.
-- `Agent/` — rating/choice types, tool schemas, the dispatcher state machine,
-  and system-prompt assembly. See `Agent/README.md`.
+- `Agent/` — the `Choice` type, the plain-text answer parser, and
+  system-prompt assembly. See `Agent/README.md`.
 - `Import/` — dragged-in image attachments and normalization to the model's
   512×512 input. See `Import/README.md`.
 - `Session/` — transcript entries, the append-only store, the streaming

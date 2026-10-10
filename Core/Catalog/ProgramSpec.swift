@@ -40,14 +40,14 @@ public struct Board: Sendable, Hashable {
     }
 }
 
-/// Per-entry run settings from the inventory (design doc §4).
+/// Per-entry run settings (design doc §4).
 public struct DisplayHints: Sendable, Hashable {
     /// Steps advanced per second of wall time. The surface accumulates
     /// `Δt × stepsPerSecond` and caps each tick at 64 steps.
     public var stepsPerSecond: Double
     /// Total steps before the pattern settles and the clock pauses. Defaults
     /// to four times the board height (design doc §5.4.3); a few long-transient
-    /// entries override it from the inventory.
+    /// entries override it.
     public var stepLimit: Int
     /// E110 grows leftward from the rightmost cell; the view follows the
     /// newest rows pinned to the right edge.
@@ -69,8 +69,8 @@ public struct ProgramSpec: Sendable {
     public let id: String
     public let title: String
     public let behavior: Behavior
-    /// One sentence, derived from the inventory's *Look* paragraph. Used as the
-    /// matching text in the system-prompt index.
+    /// One sentence of how the entry looks. Used as the matching text in the
+    /// system prompt's automata listing.
     public let look: String
     public let gpu: GPUProgram
     public let board: Board

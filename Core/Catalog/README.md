@@ -1,29 +1,22 @@
 # Core/Catalog
 
-One table of 45 `ProgramSpec` values feeds the renderer, the dispatcher's
-label-scoped `list_automata` listing, and the CLI catalog debug print. The
-listing is built from this table, so what the model chooses and what the
-renderer draws cannot diverge.
+One table of 45 `ProgramSpec` values feeds the renderer, the system prompt's
+automata listing, and the CLI catalog debug print. The listing is built from
+this table, so what the model chooses and what the renderer draws cannot
+diverge.
 
 ## Invariants
 
 - Exactly **45** entries, unique ids, in the inventory's order.
 - Behavior counts: **repetition 12, nesting 14, randomness 10, complexity 9**.
 - Every id appears in `Catalog.ids`, and `Catalog.promptIndexLines` is generated
-  from the same table.
+  from the same table as `id | class | look`.
 
 ## Types
 
-- `Behavior` — `.repetition`, `.nesting`, `.randomness`, `.complexity`.
-- `Rating`→behaviors mapping (design doc §3.5):
-
-  | Rating | Allowed behaviors |
-  | --- | --- |
-  | simple | repetition |
-  | structured | nesting, repetition |
-  | random | randomness |
-  | complex | complexity |
-
+- `Behavior` — the four classes: `.repetition`, `.nesting`, `.randomness`,
+  `.complexity`. Every entry carries exactly one; the system prompt lists each
+  entry with its class instead of grouping.
 - `GPUProgram` — `.elementary(rule:)`, `.totalistic(code:colors:)`, or
   `.k2r2(code:)` (radius 2, binary, inventory §1.3); selects the step kernel
   and its constants.
@@ -40,9 +33,8 @@ renderer draws cannot diverge.
 
 ## `look`
 
-`ProgramSpec.look` is a one-sentence visual description derived from the
-inventory's *Look* paragraph. It is the matching text in the `list_automata`
-result and must stay one line.
+`ProgramSpec.look` is a one-sentence visual description. It is the matching text
+in the system prompt's automata listing and must stay one line.
 
 ## `reference`
 

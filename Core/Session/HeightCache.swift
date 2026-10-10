@@ -53,7 +53,7 @@ public final class HeightCache: @unchecked Sendable {
     }
 
     public func invalidate(_ id: String) {
-        lock.withLock { cache.removeValue(forKey: id) }
+        lock.withLock { cache[id] = nil }
     }
 
     public func clear() {

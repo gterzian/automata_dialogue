@@ -23,3 +23,7 @@ a quiet placeholder tile of the same size rather than failing.
 
 - Core is AppKit-free: decoding uses ImageIO/CoreGraphics, not `NSImage`.
 - A non-image drop is rejected with a short message; the input keeps its state.
+- `purgeStaleSessions(keeping:)` deletes every folder under its root. Purging
+  the real `<tmp>/Rater` while another process (a `rater-cli rate` run) holds a
+  live session deletes that session's images mid-run, so the test suite passes
+  a scoped `root`.
