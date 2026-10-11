@@ -75,7 +75,10 @@ public struct ProgramSpec: Sendable {
     public let gpu: GPUProgram
     public let board: Board
     public let display: DisplayHints
-    public let reference: @Sendable () -> any RowProgram
+    /// Builds the CPU `RowProgram` for a board. The catalog routes this through
+    /// `ProgramFactory`, so the mapping from `GPUProgram`/`Board` to a concrete
+    /// program lives in one place.
+    public let reference: @Sendable (Board) -> any RowProgram
 
     public init(
         id: String,
@@ -85,7 +88,7 @@ public struct ProgramSpec: Sendable {
         gpu: GPUProgram,
         board: Board,
         display: DisplayHints,
-        reference: @escaping @Sendable () -> any RowProgram
+        reference: @escaping @Sendable (Board) -> any RowProgram
     ) {
         self.id = id
         self.title = title
@@ -97,8 +100,22 @@ public struct ProgramSpec: Sendable {
         self.reference = reference
     }
 
-    /// A fresh CPU program for this entry.
-    public func makeProgram() -> any RowProgram { reference() }
+    /// A fresh CPU program for this entry's stored board. Deterministic, so it
+    /// is the entry point for the golden hashes and the CPU/GPU comparison.
+    public func makeProgram() -> any RowProgram { reference(board) }
+
+    /// A copy whose `.rand` start draws from `seed`; a start that is not a
+    /// random row is returned unchanged. Each app run calls this with a fresh
+    /// seed so re-choosing an entry gives a different picture, while
+    /// `makeProgram()` stays deterministic for the tests.
+    public func withRandomSeed(_ seed: UInt64) -> ProgramSpec {
+        guard case .random(_, let density) = board.start else { return self }
+        let reseeded = Board(width: board.width, height: board.height,
+                             start: .random(seed: seed, density: density))
+        return ProgramSpec(
+            id: id, title: title, behavior: behavior, look: look,
+            gpu: gpu, board: reseeded, display: display, reference: reference)
+    }
 
     public var stateCount: Int {
         switch gpu {

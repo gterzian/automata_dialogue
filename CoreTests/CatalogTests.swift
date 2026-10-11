@@ -2,16 +2,16 @@ import XCTest
 @testable import Core
 
 final class CatalogTests: XCTestCase {
-    func testHasExactly45UniqueEntries() {
-        XCTAssertEqual(Catalog.all.count, 45)
-        XCTAssertEqual(Set(Catalog.ids).count, 45)
+    func testHasExactly106UniqueEntries() {
+        XCTAssertEqual(Catalog.all.count, 106)
+        XCTAssertEqual(Set(Catalog.ids).count, 106)
     }
 
     func testBehaviorCounts() {
-        XCTAssertEqual(Catalog.count(of: .repetition), 12)
-        XCTAssertEqual(Catalog.count(of: .nesting), 14)
-        XCTAssertEqual(Catalog.count(of: .randomness), 10)
-        XCTAssertEqual(Catalog.count(of: .complexity), 9)
+        XCTAssertEqual(Catalog.count(of: .repetition), 31)
+        XCTAssertEqual(Catalog.count(of: .nesting), 28)
+        XCTAssertEqual(Catalog.count(of: .randomness), 26)
+        XCTAssertEqual(Catalog.count(of: .complexity), 21)
     }
 
     func testEverySpecHasALookLine() {
@@ -23,14 +23,19 @@ final class CatalogTests: XCTestCase {
 
     func testStartConditionsMatchInventory() {
         XCTAssertEqual(Catalog.spec(id: "E110")?.board.start, .rightmost)
-        XCTAssertEqual(Catalog.spec(id: "E54")?.board.start, .random(seed: 54))
+        XCTAssertEqual(Catalog.spec(id: "E54")?.board.start, .center)
+        XCTAssertEqual(Catalog.spec(id: "E54.rand")?.board.start, .random(seed: 54))
         XCTAssertEqual(Catalog.spec(id: "E30.block1100")?.board.start, .block([1, 1, 0, 0]))
         XCTAssertEqual(Catalog.spec(id: "K2R2-20.seed195")?.board.start, .seed(number: 195, colors: 2))
         XCTAssertEqual(Catalog.spec(id: "T1329.seed916")?.board.start, .seed(number: 916, colors: 3))
         XCTAssertEqual(Catalog.spec(id: "T1329.seed54889")?.board.start, .seed(number: 54_889, colors: 3))
+        XCTAssertEqual(Catalog.spec(id: "T357.seed28")?.board.start, .seed(number: 28, colors: 3))
         XCTAssertEqual(Catalog.spec(id: "E22.seed19")?.board.start, .seed(number: 19, colors: 2))
         XCTAssertEqual(Catalog.spec(id: "E90.sparse")?.board.start, .random(seed: 905, density: 0.05))
         XCTAssertEqual(Catalog.spec(id: "E126.pairs")?.board.start, .randomBlocks(seed: 126))
+        XCTAssertEqual(Catalog.spec(id: "T1587.rand")?.board.start, .random(seed: 1587))
+        XCTAssertEqual(Catalog.spec(id: "T237.rand")?.board.start, .random(seed: 237))
+        XCTAssertEqual(Catalog.spec(id: "K2R2-52.rand")?.board.start, .random(seed: 52))
         XCTAssertEqual(Catalog.spec(id: "T1599")?.display.stepLimit, 8300)
         XCTAssertEqual(Catalog.spec(id: "E110.rand")?.display.stepLimit, 700)
     }
@@ -45,5 +50,42 @@ final class CatalogTests: XCTestCase {
         guard let spec = Catalog.spec(id: "K2R2-20.seed195") else { return XCTFail("missing entry") }
         XCTAssertEqual(spec.stateCount, 2)
         XCTAssertEqual(spec.gpu, .k2r2(code: 20))
+    }
+
+    /// A run reseeds `.rand` entries so re-showing one gives a different
+    /// picture, while `makeProgram()` stays the deterministic entry point for
+    /// the goldens (inventory §1.4).
+    func testRandomStartsReseedPerRun() {
+        guard let rand = Catalog.spec(id: "E90.rand"),
+              case .random(let seed, let density) = rand.board.start else {
+            return XCTFail("missing E90.rand random start")
+        }
+        let fresh = rand.withRandomSeed(seed &+ 1)
+        XCTAssertEqual(
+            fresh.board,
+            Board(width: rand.board.width, height: rand.board.height,
+                  start: .random(seed: seed &+ 1, density: density))
+        )
+        XCTAssertNotEqual(
+            RowHash.fnv1a(fresh.makeProgram().row()),
+            RowHash.fnv1a(rand.makeProgram().row())
+        )
+        // Re-applying the stored seed reproduces the deterministic entry.
+        XCTAssertEqual(
+            RowHash.fnv1a(rand.withRandomSeed(seed).makeProgram().row()),
+            RowHash.fnv1a(rand.makeProgram().row())
+        )
+    }
+
+    func testWithRandomSeedLeavesNonRandomStartsAlone() {
+        guard let deterministic = Catalog.spec(id: "E90") else { return XCTFail("missing E90") }
+        XCTAssertEqual(deterministic.withRandomSeed(7).board, deterministic.board)
+        XCTAssertEqual(
+            RowHash.fnv1a(deterministic.withRandomSeed(7).makeProgram().row()),
+            RowHash.fnv1a(deterministic.makeProgram().row())
+        )
+        // `.pairs` is a fixed 2-cell block draw, not a `.rand` row.
+        guard let pairs = Catalog.spec(id: "E126.pairs") else { return XCTFail("missing E126.pairs") }
+        XCTAssertEqual(pairs.withRandomSeed(7).board, pairs.board)
     }
 }

@@ -114,7 +114,11 @@ final class RaterModel: ObservableObject {
         currentSpec = spec
         let cols = min(spec.board.width, 1000)
         let rows = min(spec.board.height, 700)
-        let renderer = IncrementalRenderer(spec: spec, cols: cols, rows: rows)
+        // A `.rand` entry draws a fresh row each run, so re-showing one gives a
+        // different picture; `makeProgram()` keeps the deterministic seed for
+        // the tests and golden hashes (inventory §1.4).
+        let runSpec = spec.withRandomSeed(UInt64.random(in: .min ... .max))
+        let renderer = IncrementalRenderer(spec: runSpec, cols: cols, rows: rows)
         self.renderer = renderer
         automatonImage = renderer.image()
 
@@ -153,7 +157,8 @@ final class RaterModel: ObservableObject {
 
     /// `RATER_MODEL_PATH` first, then the `RATERModelPath` user default
     /// (`defaults write com.rater.app RATERModelPath /path/to/snapshot`), so a
-    /// Finder launch can point at a local model without downloading.
+    /// Finder launch can point at the local snapshot the engine loads. The
+    /// engine never downloads, so a launch with no path fails.
     private static func agentConfiguration() -> AgentEngine.Configuration {
         var configuration = AgentEngine.Configuration.fromEnvironment()
         if configuration.modelDirectory == nil,

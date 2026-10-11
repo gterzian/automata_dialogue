@@ -6,9 +6,9 @@ Metal 4.
 
 What must be covered:
 
-- **Catalog** — exactly 45 unique ids in inventory order; behavior counts
-  (repetition 12, nesting 14, randomness 10, complexity 9); the dispatcher's
-  label→ids listing and the catalog ids agree.
+- **Catalog** — exactly 106 unique ids in inventory order; behavior counts
+  (repetition 31, nesting 28, randomness 26, complexity 21); the listing and the
+  catalog ids agree.
 - **Programs** — CPU reference row hashes for each entry; closed-form local
   rules agree with the rule table for all 8 neighborhoods; the K2R2 code table.
 - **Prompt** — `SystemPrompt.build` contains every rubric section and no

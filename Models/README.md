@@ -2,8 +2,9 @@
 
 Local Hugging Face snapshots, loaded through
 `AgentEngine.Configuration.modelDirectory` (see `Agent/README.md`). The
-snapshot directories are git-ignored; only this file is tracked, so the
-verified hashes and the revision pin stay with the repo.
+snapshot directories are git-ignored; only this file is tracked, so the verified
+hashes stay with the repo. The software never downloads a snapshot: it loads a
+directory that is already present, or fails.
 
 ## Verified snapshots
 
@@ -27,20 +28,20 @@ thinking off there too. None of the snapshots defines remote code (`auto_map`
 absent, no `.py` files), and the weights are safetensors (a JSON header plus
 raw tensor bytes — no pickle).
 
-The 4B and 9B commits pin their downloads
-(`Configuration.pinnedRevision(for:)`); the 4B is the default. A mutable ref
-like `main` would let the hub serve different weights on a later run.
+The commit column records which snapshot was verified; it is not a runtime pin,
+since the engine loads the directory as-is.
 
 ## Running a snapshot
 
-Point the app or CLI at the directory (`--model`/`RATER_MODEL_PATH`), not at
-the hub id; see `Agent/README.md`. The engine's prompt, answer parsing, and
-`enable_thinking` context are model-agnostic, and mlx-swift-lm registers
-`gemma4` in its VLM factory, so a Gemma 4 snapshot runs through the same path.
-A relative `--model` path resolves against the current directory.
+The engine loads a snapshot directory (`--model` or `RATER_MODEL_PATH`) and has
+no downloader, so the directory must already exist or the run fails. The 4B
+snapshot (`Models/Qwen3.5-4B-MLX-4bit`) is the recommended one. The engine's
+prompt, answer parsing, and `enable_thinking` context are model-agnostic, and
+mlx-swift-lm registers `gemma4` in its VLM factory, so a Gemma 4 snapshot runs
+through the same path. A relative `--model` path resolves against the current
+directory.
 
 ## Remaining work
 
-- `Configuration` now defaults to the 4B; the old
-  `mlx-community/Qwen3.5-4B-4bit` fallback is gone. Re-check the 4B snapshot's
-  pin if the default ever changes.
+- The recommended snapshot is `Models/Qwen3.5-4B-MLX-4bit`; re-check the choice
+  when the prompt or an example changes (`Agent/README.md`).

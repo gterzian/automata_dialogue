@@ -3,15 +3,16 @@ import Foundation
 import MLXLMCommon
 import MLXVLM
 
-/// A malformed model id reaching the downloader. Validation outcomes are never
-/// errors: a reply without a catalog id is emitted as `.failed`, not thrown.
+/// A configuration error that stops a run before generation. Downloads are
+/// disabled, so a configuration with no local snapshot directory is fatal
+/// instead of something to fetch.
 public enum AgentEngineError: Error, LocalizedError {
-    case invalidRepositoryID(String)
+    case noModelDirectory
 
     public var errorDescription: String? {
         switch self {
-        case .invalidRepositoryID(let id):
-            "Invalid Hugging Face repository id: \(id). Expected \"namespace/name\"."
+        case .noModelDirectory:
+            "No local model snapshot configured. Set RATER_MODEL_PATH or pass --model <dir>; network downloads are disabled."
         }
     }
 }
@@ -27,59 +28,29 @@ public enum AgentEngineError: Error, LocalizedError {
 /// reply without a catalog id fails the run.
 public actor AgentEngine: AgentRunning {
     public struct Configuration: Sendable {
-        /// The smallest model that held up on the reference set: fast enough to
-        /// feel like a dialogue and strong enough to honour the no-repeat list.
-        /// The 9B is more capable but too slow; the 2B cannot follow the list.
-        /// See `Agent/README.md`.
-        public static let defaultModelID = "mlx-community/Qwen3.5-4B-MLX-4bit"
-
-        /// The snapshot commit a download resolves to when the caller does not
-        /// pin one. A mutable ref like `main` would let the hub serve different
-        /// weights on a later run; the commits keep the download reproducible.
-        /// Both hashes are verified in `Models/README.md`. An unrecognized id
-        /// stays on `main`.
-        static func pinnedRevision(for modelID: String) -> String {
-            switch modelID {
-            case "mlx-community/Qwen3.5-4B-MLX-4bit": "32f3e8ecf65426fc3306969496342d504bfa13f3"
-            case "mlx-community/Qwen3.5-9B-4bit": "8b2b98c00a6b4d291155e4890773ca8f769aee53"
-            default: "main"
-            }
-        }
-
-        public var modelID: String
-        public var revision: String
-        /// When set, the model is loaded from this local snapshot directory and
-        /// nothing is downloaded. `loadModelContainer` ignores the downloader
-        /// for a `.directory` configuration, so the app can run fully offline.
+        /// The local Hugging Face snapshot directory to load. Models are never
+        /// downloaded: a configuration with no directory fails the run. See
+        /// `Models/README.md` for the snapshots and `Agent/README.md`.
         public var modelDirectory: URL?
         public var maxTokens: Int
         public var temperature: Float
-        public var downloader: any Downloader
         public var tokenizerLoader: any TokenizerLoader
-        public var progressHandler: @Sendable (Progress) -> Void
 
         public init(
-            modelID: String = Configuration.defaultModelID,
-            revision: String? = nil,
             modelDirectory: URL? = nil,
             maxTokens: Int = 900,
             temperature: Float = 0.2,
-            downloader: any Downloader = HuggingFaceBridges.downloader(),
-            tokenizerLoader: any TokenizerLoader = HuggingFaceBridges.tokenizerLoader(),
-            progressHandler: @escaping @Sendable (Progress) -> Void = { _ in }
+            tokenizerLoader: any TokenizerLoader = HuggingFaceBridges.tokenizerLoader()
         ) {
-            self.modelID = modelID
-            self.revision = revision ?? Configuration.pinnedRevision(for: modelID)
             self.modelDirectory = modelDirectory
             self.maxTokens = maxTokens
             self.temperature = temperature
-            self.downloader = downloader
             self.tokenizerLoader = tokenizerLoader
-            self.progressHandler = progressHandler
         }
 
-        /// Reads `RATER_MODEL_PATH` (a local snapshot directory). When it is
-        /// unset the engine downloads `modelID` through `HubDownloader` instead.
+        /// Reads `RATER_MODEL_PATH` (a local snapshot directory). Downloads are
+        /// disabled, so an unset path leaves `modelDirectory` nil and the run
+        /// fails when it tries to load.
         public static func fromEnvironment(
             _ environment: [String: String] = ProcessInfo.processInfo.environment
         ) -> Configuration {
@@ -89,15 +60,6 @@ public actor AgentEngine: AgentRunning {
                     fileURLWithPath: NSString(string: path).expandingTildeInPath, isDirectory: true)
             }
             return configuration
-        }
-
-        /// The configuration `loadModelContainer` resolves: a local snapshot
-        /// directory when set, otherwise a hub id to download.
-        func modelConfiguration() -> ModelConfiguration {
-            if let modelDirectory {
-                return ModelConfiguration(directory: modelDirectory)
-            }
-            return ModelConfiguration(id: modelID, revision: revision)
         }
     }
 
@@ -185,14 +147,14 @@ public actor AgentEngine: AgentRunning {
         if let containerTask {
             return try await containerTask.value
         }
-        let configuration = self.configuration
+        guard let directory = configuration.modelDirectory else {
+            throw AgentEngineError.noModelDirectory
+        }
+        // The directory overload takes no `Downloader`, so the engine has no
+        // path to the network even by mistake.
+        let tokenizerLoader = configuration.tokenizerLoader
         let task = Task {
-            try await loadModelContainer(
-                from: configuration.downloader,
-                using: configuration.tokenizerLoader,
-                configuration: configuration.modelConfiguration(),
-                progressHandler: configuration.progressHandler
-            )
+            try await loadModelContainer(from: directory, using: tokenizerLoader)
         }
         containerTask = task
         do {

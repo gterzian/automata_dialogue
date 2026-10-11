@@ -1,42 +1,17 @@
 import Foundation
-import HuggingFace
 import MLXLMCommon
 import Tokenizers
 
-/// Bridges the concrete `swift-huggingface` and `swift-transformers` types to the
-/// `mlx-swift-lm` protocols. `mlx-swift-lm` ships macros that generate the same
-/// two conformances; writing them out keeps the build independent of the macro
-/// plugin, and pins the exact API surface this target relies on.
+/// Bridges the concrete `swift-transformers` types to the `mlx-swift-lm`
+/// protocols. `mlx-swift-lm` ships a macro that generates the same conformance;
+/// writing it out keeps the build independent of the macro plugin, and pins the
+/// exact API surface this target relies on.
+///
+/// Only the tokenizer bridge is needed: the engine loads a local snapshot
+/// directory and never downloads, so it supplies no `Downloader`.
 public enum HuggingFaceBridges {
-    /// A `Downloader` backed by the default `HubClient` (cache plus HF endpoint).
-    public static func downloader() -> any Downloader { HubDownloader() }
-
     /// A `TokenizerLoader` backed by `Tokenizers.AutoTokenizer`.
     public static func tokenizerLoader() -> any TokenizerLoader { TransformersTokenizerLoader() }
-
-    struct HubDownloader: Downloader {
-        private let client = HuggingFace.HubClient()
-
-        func download(
-            id: String,
-            revision: String?,
-            matching patterns: [String],
-            useLatest: Bool,
-            progressHandler: @Sendable @escaping (Progress) -> Void
-        ) async throws -> URL {
-            guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
-                throw AgentEngineError.invalidRepositoryID(id)
-            }
-            // `useLatest` is ignored: the hub client reconciles a cached snapshot
-            // with the requested revision itself.
-            return try await client.downloadSnapshot(
-                of: repo,
-                revision: revision ?? "main",
-                matching: patterns,
-                progressHandler: { @MainActor progress in progressHandler(progress) }
-            )
-        }
-    }
 
     struct TransformersTokenizerLoader: TokenizerLoader {
         func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {

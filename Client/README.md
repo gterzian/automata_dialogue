@@ -31,8 +31,10 @@ over `AutomatonNSView`), which draws the `CGImage` produced by `Core`'s
 `IncrementalRenderer`. `RaterModel` owns the agent run and the animation task:
 on a `.choice` event it starts the entry and advances the renderer ~30 times a
 second; a new `send()` calls `stopAutomaton()` first, so the running automaton
-stops immediately. `Core/Render` now has the on-screen path (`LayerSink` +
-`DisplayLinkClock` + `LayerRenderer`, driven by
+stops immediately. Starting a run reseeds a `.rand` entry
+(`ProgramSpec.withRandomSeed`), so replaying one redraws differently; the rule
+is owned by `Core/Catalog/README.md`. `Core/Render` now has the on-screen path
+(`LayerSink` + `DisplayLinkClock` + `LayerRenderer`, driven by
 `RenderActor.drive(clock:pacing:)`) and delivers GPU-resident frames to a sink
 that asks for them (`FrameSink.wantsGPUResidentFrames`); the panel still draws
 the CPU image, so hosting a `CAMetalLayer`, building the sink with

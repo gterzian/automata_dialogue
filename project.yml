@@ -18,8 +18,8 @@ settings:
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: "0.1.0"
 packages:
-  # The MLX VLM runtime and the Hugging Face download/tokenizer adapters used by
-  # the Agent target. Keep the pinned minors when touching these (design §9).
+  # The MLX VLM runtime and the Hugging Face tokenizer adapters used by the
+  # Agent target. Keep the pinned minors when touching these (design §9).
   mlx-swift-lm:
     url: https://github.com/ml-explore/mlx-swift-lm
     exactVersion: 3.32.3

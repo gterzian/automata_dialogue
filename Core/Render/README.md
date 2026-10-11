@@ -93,6 +93,12 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
 - The residency set is Metal 4's only residency mechanism; buffers must be
   added and the set committed before use. A `CAMetalLayer`'s own
   `residencySet` must be added to the queue as well.
+- **The `CAMetalLayer` is shared across actors.** `makeLayerSink(layer:)`
+  receives the main thread's view backing layer and uses it on the render
+  thread, so `Core/Render` declares `CAMetalLayer` `@unchecked Sendable` to
+  make that hand-off expressible. The layer's `device`, `pixelFormat`, and
+  `drawableSize` are set before the render thread starts; afterwards the render
+  thread only acquires and presents drawables.
 
 ## Remaining work
 
@@ -101,7 +107,8 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
   actor for a `LayerSink` with `makeLayerSink(layer:)`, `configure` the actor
   with it, and `drive` its clock with `.timed`. The app target cannot be
   type-checked in this sandbox (the SwiftUI macro plugin is blocked), so this
-  is untested here.
+  is untested here. The CLI's `rate --show` exercises this same wiring
+  (`CLI/README.md`).
 - **`LEDSink`** behind the `RATER_SINK_LED` flag. Its geometry, colour order,
   and transport are open decisions (§11.13), so it waits on hardware.
 

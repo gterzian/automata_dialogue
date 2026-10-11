@@ -1,19 +1,24 @@
 # Curated Inventory of Cellular Automata
 
 Every automaton below belongs to one of four behavior classes. The class names
-the kind of pattern the automaton produces.
+the kind of pattern the entry's own picture shows on screen, so one rule can
+appear several times with different starting rows, each entry tagged by what it
+looks like from its stated start.
 
 - **repetition** — simple and regular. The pattern stays fixed, repeats every
-  few steps, or settles into a uniform state. Stripes, checkerboards, and even
-  bands.
+  few steps, or settles into a uniform state. Stripes, checkerboards, even
+  bands, lattices, and single plain shapes. Stripes or lines at even spacing
+  belong here.
 - **nesting** — self-similar. The pattern is built from smaller copies of
   itself, so triangles or shapes appear at many scales.
 - **randomness** — no short rule compresses the pattern. It looks disordered,
-  though small triangles may still appear.
+  though small triangles may still appear. Simple marks scattered at irregular
+  spacing belong here.
 - **complexity** — order and randomness mix. Small localized structures form,
-  move, and interact with each other in complicated ways.
+  move, and interact with each other in complicated ways, and large regions of
+  different texture meet along structured boundaries.
 
-The 45 entries follow in section 2. Each gives the id, its class, and a
+The 106 entries follow in section 2. Each gives the id, its class, and a
 one-sentence description of how it looks.
 
 ## 1. Basic algorithms
@@ -55,17 +60,25 @@ one-sentence description of how it looks.
    color for sum s. Code 20 is 010100, so sums 2 and 4 give black and all other
    sums give white.
 4. Compute all new cells from the old row, then replace the row.
+5. Start from a single black cell in the center. Even codes keep an empty row
+   empty.
 
 ### 1.4 Starting rows
 
-- **Seed number n:** write n in binary (base 3 for 3-color rules), most
+- **Single cell (no suffix):** one black cell (gray for T entries) in the
+  center of a white row, or at the right edge for E110.
+- **Seed number n:** write n in binary (base 3 for T entries), most
   significant digit first, on a white row beginning at the center cell.
-- **Random row:** choose each cell independently. For 2 colors a cell is black
-  with the stated probability, one half unless the entry says otherwise.
+- **Random row (`.rand`):** choose each cell independently. For 2 colors a cell
+  is black with probability one half unless the entry says otherwise. For 3
+  colors each of white, gray and black has probability one third. Draw a fresh
+  random row on every run, so choosing the same entry twice gives a different
+  picture.
 - **Repeated block:** copy the block across the whole row, using a width that
-  is a multiple of the block length.
-- **Random 2-cell blocks:** fill the row with blocks chosen at random between
-  white-white and black-black.
+  is a multiple of the block length so the pattern closes cleanly around the
+  ring.
+- **Random 2-cell blocks (`.pairs`):** fill the row with blocks chosen at
+  random between white-white and black-black.
 - An id such as `E90.rand` names a rule together with a special starting row;
   entries without a suffix start from a single cell.
 
@@ -74,15 +87,34 @@ one-sentence description of how it looks.
 - **E250** (repetition): A single cell widens into a triangle at one cell per step, its interior a fine checkerboard that flips each step, bounded by two sharp diagonals.
 - **E109** (repetition): A growing triangle of repeating interlocking triangle motifs over a background that alternates black and white each step, drawing horizontal stripes.
 - **E190** (repetition): A solid black triangle expands at full speed, crossed by evenly spaced diagonal white stripes parallel to one edge.
-- **T600** (repetition): A narrow fixed-width column of stacked, textured gray triangles whose bands recur down the screen.
-- **T1329** (repetition): A fixed-width column of large gray-and-black triangular bands that repeats exactly every 78 steps.
+- **E28** (repetition): A wedge of evenly spaced vertical stripes grows down and to the right from a single cell, with a clean diagonal edge and empty white on the left.
+- **E94** (repetition): A clean triangle filled with evenly spaced vertical stripes, edged by two sharp diagonals.
+- **E77** (repetition): Horizontal stripes bend into evenly spaced right-angle corners that fan out from the top center.
+- **E57** (repetition): A horizontally striped field with a central wedge of fine woven texture widening downward, lighter on its left half and darker on its right.
+- **E54** (repetition): A growing triangle filled with a tight regular lattice of tiny triangles, like woven cloth.
+- **E73** (repetition): A symmetric triangle of stacked arches with a dotted core grows over a horizontally striped background.
+- **E2** (repetition): A single thin diagonal line slides steadily to the left across an empty white field.
+- **T39** (repetition): A solid gray triangle with razor-sharp edges widens at full speed.
+- **T1677** (repetition): A solid black triangle outlined by a thin beaded gray edge.
+- **T1500** (repetition): A solid gray triangle whose two edges carry a ragged fringe of tiny black and white structures.
+- **T1047** (repetition): A dark triangle filled with thin horizontal stripes, with a ragged light fringe along its edges.
+- **T183** (repetition): A triangle of fine black-and-white checker lattice split by one vertical seam down the center.
+- **T600** (repetition): A narrow column of stacked, textured gray triangles, 11 to 25 cells wide, whose bands recur down the screen.
+- **T1329** (repetition): A narrow column of large gray-and-black triangular bands, 9 to 23 cells wide, whose shape repeats exactly every 78 steps.
 - **T219** (repetition): A triangle growing at full speed whose interior is filled with a regular comb of thin, evenly spaced vertical lines.
 - **T957** (repetition): A clean triangle filled edge to edge with a tiny regular lattice texture, like woven cloth.
 - **T966** (repetition): A triangle whose edges carry a fine lattice while the middle shows dense horizontal banding split by a vertical seam.
 - **T1884** (repetition): A dark-textured triangle filled with a regular arched, scale-like lattice in black and gray.
-- **E30.block1100** (repetition): The block black-black-white-white repeated across the row gives a pattern of period 8 with a spatial period of 4 cells.
-- **K2R2-20.seed195** (repetition): From the cells black-black-white-white-white-white-black-black a period-22 oscillator forms, 28 cells wide.
-- **T1329.seed916** (repetition): From seed 916 a compact object of 17 to 30 cells travels across the white background.
+- **K2R2-62** (repetition): A very wide, shallow black triangle grows from a single cell, leaving white above its straight sloping edges.
+- **E30.block1100** (repetition): The block black-black-white-white repeated across the row weaves a fine diagonal lattice with period 8 in time and 4 cells across.
+- **K2R2-20.seed195** (repetition): From the cells black-black-white-white-white-white-black-black a column 8 to 28 cells wide forms, and its shape repeats every 22 steps.
+- **T1329.seed916** (repetition): From seed 916 a compact object 16 to 32 cells wide drifts slowly across the white background.
+- **T357.seed28** (repetition): From seed 28 a persistent column of stacked triangular structures, between 8 and 28 cells wide, runs on through at least 1500 steps.
+- **E184.rand** (repetition): Parallel diagonal stripes of black and white sweep across the picture, with a few wedge-shaped jams that dissolve into the stripes.
+- **E178.rand** (repetition): A woven zigzag texture runs down the picture in vertical columns separated by faint seams.
+- **E15.rand** (repetition): Smooth wavy ribbons curve diagonally across the picture.
+- **E14.rand** (repetition): Thick parallel diagonal stripes lean to the right, with a few broader bands crossing them.
+- **T1587.rand** (repetition): A flat gray field crossed by evenly spaced vertical columns of small beaded structures.
 - **E90** (nesting): The Sierpinski triangle: white triangular holes at every scale inside a black lace, symmetric left to right.
 - **E22** (nesting): A symmetric nested triangle in the same family as rule 90, with slightly different detail inside the holes.
 - **E60** (nesting): A right-angled Sierpinski triangle growing to one side, with a vertical edge on one side and a diagonal on the other.
@@ -90,29 +122,71 @@ one-sentence description of how it looks.
 - **E105** (nesting): The nested structure of rule 150 inverted, its fractal triangle sitting inside a background that alternates black and white each step.
 - **E129** (nesting): A solid black screen with an inverted white Sierpinski triangle whose holes show black at every scale.
 - **E225** (nesting): A nested pattern confined to a thin diagonal band that grows like the square root of the steps, sliding across a black field.
+- **E18** (nesting): The Sierpinski triangle drawn as sparse isolated dots, airy and light, with white triangular holes at every scale.
+- **E126** (nesting): A bold Sierpinski triangle with thick black edges and white triangular holes at every scale.
 - **T237** (nesting): A Sierpinski-like triangle with large white holes and fine gray detail.
 - **T948** (nesting): Nested triangles whose interiors branch into small tree-shaped motifs, a leafier fractal than T237.
 - **T1749** (nesting): Nested triangles with solid black triangular voids at several scales, giving more weight and contrast than the Sierpinski forms.
 - **T420** (nesting): A sparser nested triangle with large clean white regions and a branching rhythm distinct from the 2-color forms.
-- **E90.sparse** (nesting): Sparse speckle at density 0.05 rebuilds itself at steps that are powers of two, so bands of thin speckle repeat at doubling intervals.
-- **E126.pairs** (nesting): Random black-black and white-white 2-cell blocks evolve under rule 126 like rule 90 on pairs, so the block colors reproduce rule 90 every second step.
-- **E184.rand** (nesting): Traffic flow: black cells drift right until blocked, the black density holds at one half, and nested structure appears in the evolution.
+- **T561** (nesting): A black-edged triangle packed with small white triangular holes of many sizes.
+- **T399** (nesting): A dense triangle of fine gray-and-black lines with white triangular holes at many sizes.
+- **T1182** (nesting): Nested triangles on a mid-gray ground: flat gray holes at several scales framed by fine black texture.
+- **T1419** (nesting): Large flat gray triangular holes at several scales set in a black lace.
+- **T1848** (nesting): Solid black triangular voids at several scales set in a gray lace with a pale outline.
+- **T1932** (nesting): Heavy solid black triangular voids at every scale in a dark lace, the darkest of the Sierpinski-like forms.
+- **T885** (nesting): Nested triangles surround a core of tight horizontal stripes that widens toward the bottom.
+- **T1284** (nesting): Nested triangles on either side of a central core of vertical stripes.
+- **T453** (nesting): Bold black branching clusters nested inside white triangular voids, a stout tree-like fractal.
+- **T1509** (nesting): Slender black branching trees nested inside large white triangular voids.
+- **T273** (nesting): A pale gray lace of nested triangles with fine vertical spars.
+- **T1410** (nesting): A narrow steep triangle filled with dark nested structure.
+- **K2R2-2** (nesting): Sparse nested triangles spread wide and shallow, with large flat white wedges between them.
+- **K2R2-30** (nesting): Bold black outlines of nested triangles spread wide and shallow.
+- **K2R2-42** (nesting): Wide, shallow nested triangles whose edges sprout small branching trees.
 - **E30** (randomness): A clean diagonal left edge and a disordered tangle of black and white with scattered white triangles of every size; the center column is statistically random.
 - **E45** (randomness): A regular diagonal on one side and a mix of short vertical dashes and irregular blocks filling the rest, over a horizontally striped background.
-- **E73** (randomness): A symmetric triangle of fine, dotted, speckled texture with no long diagonals, over a horizontally striped background.
 - **T177** (randomness): A triangle whose entire interior is a gray-and-black scatter with no regular structure, bounded by clean diagonals.
 - **T912** (randomness): A mostly random interior with a visible grain of small triangles and a more regular band along the edges.
 - **T2040** (randomness): Random texture broken by dark triangular patches of solid black of various sizes.
+- **T138** (randomness): A triangle of irregular white-flecked mottling in gray and black.
+- **T867** (randomness): A triangle of bright speckle with a mirror-symmetric, kaleidoscope-like center.
+- **T1473** (randomness): A triangle of fine speckle with scattered white triangular gaps.
+- **T1929** (randomness): A dark triangle of black-and-gray static with black triangular patches of many sizes.
+- **T777** (randomness): A triangle of black-and-white noise with a mirror line down the center and small white triangles scattered through it.
+- **K2R2-10** (randomness): A wide, shallow triangle of fine random speckle with faint banding.
+- **K2R2-50** (randomness): A wide triangle of random speckle dotted with bold black inverted triangles.
 - **E90.rand** (randomness): A random field with white triangles at every size; rule 90 adds shifted copies of its single-cell triangle, so the picture carries the initial row's randomness.
 - **E22.rand** (randomness): A random field with white triangles whose black density settles near 0.35, coming from the rule itself.
 - **E22.seed19** (randomness): From the five cells 10011 the pattern grows a random core of density 0.35 that widens, with repetitive regions on both sides.
 - **E126.rand** (randomness): A rule that never settles: random texture at density one half with white triangles at all scales.
+- **E126.pairs** (randomness): Random black-black and white-white pairs evolve into a dense field of triangles of many sizes.
+- **E90.sparse** (randomness): Sparse speckle at density 0.05 spawns overlapping triangles of every size that pile up into a dense lace, and the thin speckle returns at steps that are powers of two.
+- **E150.rand** (randomness): Dense black-and-white static with small dark clumps and no visible structure.
+- **E18.rand** (randomness): Sparse speckle with white triangles of many sizes scattered across it.
+- **E60.rand** (randomness): A dense random texture crossed by small black and white triangles that lean to the right.
+- **E232.rand** (randomness): Vertical bars of random width in black and white, frozen from the first rows.
+- **E170.rand** (randomness): Thick diagonal stripes of irregular widths lean to the right.
+- **E2.rand** (randomness): Thin diagonal lines lean to the right, scattered at irregular spacing across white.
+- **T237.rand** (randomness): Dense random black-and-white texture with white triangles of many sizes scattered throughout.
+- **T1182.rand** (randomness): A mid-gray mottled field with gray triangles of many sizes.
 - **E110** (complexity): From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.
-- **E54** (complexity): From a random row, a regular background crossed by moving localized structures that collide and interact.
+- **E110.rand** (complexity): Within a few steps a random row organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.
+- **E54.rand** (complexity): From a random row, a regular background crossed by moving localized structures that collide and interact.
+- **E106.rand** (complexity): Diagonal strokes and white triangles of many sizes interlock across the picture, with irregular regions between them.
+- **E154.rand** (complexity): Broad diagonal black bands cross a speckled field, with irregular textured regions between them.
+- **E62** (complexity): From a single cell a triangle grows with a finely striped left half and a busy textured right half meeting along a ragged seam.
 - **T1041** (complexity): A growing triangle filling with a mixture of regular stripes and irregular regions.
 - **T1635** (complexity): Black triangular regions of many sizes separated by textured, irregular zones, with localized structures crossing between them.
 - **T2049** (complexity): A large solid black wedge near the center flanked by long vertical lines, with a busy irregular fringe of small structures along both outer sides.
-- **T1599** (complexity): From one gray cell the pattern grows irregularly for thousands of steps, then regions die out and bursts of growth recur before resolving into many simple repetitive structures.
-- **E110.rand** (complexity): Within a few steps a random row organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.
-- **T1329.seed54889** (complexity): From seed 54889 a complex region widens by about half a cell per step on each side without bound.
-- **T357.seed28** (complexity): Code 357 lets most small seeds die out; seed 28 leaves a persistent structure of 8 to 20 cells.
+- **T1599** (complexity): From one gray cell the pattern grows irregularly for thousands of steps, with regions dying out and bursts of growth returning.
+- **T1662** (complexity): A triangle of diagonal stripes strung with beaded structures that pass through each other along a central seam.
+- **T1329.seed54889** (complexity): From seed 54889 a complex region widens by about half a cell per step in total, drifting slowly to one side without bound.
+- **T1635.rand** (complexity): Black voids and bright textured regions are split by tall branching structures that grow, collide and merge.
+- **T2049.rand** (complexity): A black field with thin gray vertical lines, hung with branching white trees that reach down from above.
+- **T2046.rand** (complexity): A black field with clusters of branching white trees growing and merging near the center.
+- **T1329.rand** (complexity): A white field with gray triangles and black trees that grow downward and collide.
+- **T357.rand** (complexity): White voids with gray-and-black trees of many sizes growing into them.
+- **T948.rand** (complexity): Bold black-and-white branching structures at diagonal angles that run into each other.
+- **T1920.rand** (complexity): Black columns split by bright vertical seams, each filled with nested triangles of its own size.
+- **T219.rand** (complexity): A sparse white field crossed by vertical lines and diagonal strands that meet and bend.
+- **K2R2-52.rand** (complexity): Large black and white regions bounded by long vertical and diagonal edges, with small branching structures at their junctions.

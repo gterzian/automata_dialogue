@@ -1,6 +1,6 @@
 # CLI
 
-`rater-cli`, a SwiftPM executable built against `Core`. Two commands:
+`rater-cli`, a SwiftPM executable built against `Core`. Commands:
 
 - `rater-cli render <id> --frames N --out <dir>` — headless render of a
   catalog entry to PNG frames, using the CPU reference programs. Used to
@@ -15,10 +15,13 @@
   output is on by default (the resolved model, the prompt
   size, the model's raw answer, and the parsed class per image); `--quiet`
   keeps only the summary lines, and `--show-prompt` adds the full system
-  prompt. `--model <dir>` (or `RATER_MODEL_PATH`) loads a local snapshot instead
-  of downloading; see `Agent/README.md`. This needs the `Agent` target: the
-  SwiftPM CLI has it only when built with `RATER_AGENT=1`, the Xcode scheme
-  always. See `AGENTS.md`.
+  prompt. `--show` opens each chosen automaton in a window rendered by
+  `Core/Render`'s on-screen path (`RenderActor` + `LayerSink` +
+  `DisplayLinkClock` — the same Metal renderer the app is wired to), redraws a
+  `.rand` entry from a fresh row each time, and waits for the window to be
+  closed before processing the next image; without it the batch is headless.
+  `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
+  snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli catalog` — print the catalog and the generated index.
 - `rater-cli hashes` / `rater-cli cells <id> <steps>` — golden row hashes and a
   single row's cells, for kernel debugging.
@@ -26,4 +29,6 @@
   `fit` kernels for one entry and report whether the grid matches the CPU
   reference.
 
-The CLI never links AppKit; it uses `Core/Import` and `Core/Render` directly.
+Everything except `rate --show` is AppKit-free: those commands use
+`Core/Import` and `Core/Render` directly. `rate --show` links AppKit to host the
+window and drives `Core/Render`'s on-screen sink.

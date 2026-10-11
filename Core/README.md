@@ -17,7 +17,7 @@ for the app.
 
 ## Layout
 
-- `Catalog/` — the 45 `ProgramSpec` entries, behavior classes, GPU program
+- `Catalog/` — the 106 `ProgramSpec` entries, behavior classes, GPU program
   descriptors, palettes, and the catalog index. See `Catalog/README.md`.
 - `Programs/` — CPU reference implementations and the PRNG. See
   `Programs/README.md`.

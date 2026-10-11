@@ -1,11 +1,11 @@
+import AppKit
+import Agent
 import Core
 import CoreGraphics
 import Foundation
 import ImageIO
-
-#if canImport(Agent)
-import Agent
-#endif
+import Metal
+import QuartzCore
 
 // rater-cli — see CLI/README.md.
 
@@ -17,7 +17,7 @@ let command = arguments.first ?? "catalog"
 /// Flag names that never take a value; every other `--name` consumes the next
 /// token when that token is not itself a flag. Without this, a boolean flag at
 /// the end of the arguments would swallow the following path.
-let booleanFlags: Set<String> = ["all", "quiet", "show-prompt"]
+let booleanFlags: Set<String> = ["all", "quiet", "show", "show-prompt"]
 
 /// Parses `--key value` pairs from the arguments after `command`.
 func flags(from args: [String]) -> [String: String] {
@@ -187,14 +187,117 @@ func printUsage() -> Never {
         options: --cols N --rows N --steps N
       rate <path|dir> ...               run the MLX agent over reference images
         a directory contributes its top-level images
-        options: --model <dir> [--quiet] [--show-prompt]
-        (--model default: RATER_MODEL_PATH, else download)
+        options: --model <dir> [--quiet] [--show-prompt] [--show]
+        --show opens each chosen automaton in a Metal window and waits for close
+        (--model default: RATER_MODEL_PATH; downloads are disabled)
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
 }
 
-#if canImport(Agent)
+// MARK: - Metal window
+
+/// A view backed by a `CAMetalLayer`, so an `AutomatonWindow` can present the
+/// render core's on-screen path into it. AppKit calls `makeBackingLayer` when
+/// the view first wants a layer.
+final class MetalHostView: NSView {
+    // Read by the render actor through `makeLayerSink(layer:)`; see the
+    // `CAMetalLayer` Sendable note in `Core/Render/LayerSink.swift`.
+    nonisolated let metalLayer = CAMetalLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("MetalHostView is created in code") }
+
+    override func makeBackingLayer() -> CALayer { metalLayer }
+}
+
+/// Presents one automaton in a window using `Core/Render`'s on-screen path: a
+/// `RenderActor` owns a `LayerSink` over `MetalHostView.metalLayer` and drives
+/// its `DisplayLinkClock` with `.timed` pacing. `present` suspends until the
+/// user closes the window, so a caller can step through a batch one at a time;
+/// `NSApplication.run()` keeps delivering the close event while it is suspended.
+@MainActor
+final class AutomatonWindow: NSObject, NSWindowDelegate {
+    private var window: NSWindow?
+    private var host: MetalHostView?
+    private var closeContinuation: CheckedContinuation<Void, Never>?
+
+    func present(_ spec: ProgramSpec) async {
+        guard GPUContext.isAvailable else {
+            print("--show: no Metal 4 device; skipped \(spec.id)")
+            return
+        }
+        let cols = min(spec.board.width, 1000)
+        let rows = min(spec.board.height, 700)
+        // A `.rand` entry draws a fresh row each time it is shown, matching the
+        // app (inventory §1.4); `makeProgram()` stays deterministic for the
+        // golden hashes.
+        let runSpec = spec.withRandomSeed(UInt64.random(in: .min ... .max))
+        let content = NSRect(x: 0, y: 0, width: CGFloat(cols), height: CGFloat(rows))
+        let host = MetalHostView(frame: content)
+        host.metalLayer.pixelFormat = .bgra8Unorm
+        host.metalLayer.framebufferOnly = true
+        // One drawable pixel per display cell; the layer scales it to the view.
+        host.metalLayer.drawableSize = CGSize(width: cols, height: rows)
+
+        let window = NSWindow(
+            contentRect: content,
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "\(spec.id) — \(spec.title)"
+        window.contentView = host
+        window.delegate = self
+        // This type holds the window; let ARC release it, not AppKit.
+        window.isReleasedWhenClosed = false
+        window.center()
+        self.window = window
+        self.host = host
+
+        let actor = RenderActor()
+        var sink: LayerSink?
+        do {
+            try await actor.start()
+            let made = try await actor.makeLayerSink(layer: host.metalLayer)
+            sink = made
+            _ = try await actor.configure(spec: runSpec, cols: cols, rows: rows, sink: made)
+            await actor.drive(
+                clock: made.clock,
+                pacing: .timed(stepsPerSecond: runSpec.display.stepsPerSecond)
+            )
+        } catch {
+            print("--show: \(spec.id) failed to render: \(error.localizedDescription)")
+            await actor.shutdown()
+            self.window = nil
+            self.host = nil
+            return
+        }
+
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            self.closeContinuation = continuation
+        }
+
+        if let sink { await actor.stopDriving(clock: sink.clock) }
+        await actor.shutdown()
+        self.window = nil
+        self.host = nil
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        closeContinuation?.resume()
+        closeContinuation = nil
+    }
+}
+
 /// The image files a set of CLI arguments names. A file is taken as-is; a
 /// directory contributes its top-level image files, sorted naturally, so
 /// `rate artifacts/` rates every drawing in the folder.
@@ -225,11 +328,17 @@ func imagePaths(from inputs: [String]) -> [String] {
     return paths
 }
 
-/// Runs the real agent over each image and prints `name<TAB>id<TAB>seconds`.
-/// Debug output is on by default (the resolved model, the prompt size, the
-/// model's raw answer, and the parsed class per image); `--quiet` keeps only
-/// the summary lines. `--show-prompt` adds the full system prompt.
-func runRate() async throws {
+/// Parsed `rate` inputs shared by the headless and windowed modes.
+struct RateSetup: Sendable {
+    let paths: [String]
+    let configuration: AgentEngine.Configuration
+    let verbose: Bool
+    let showPrompt: Bool
+}
+
+/// Validates the `rate` arguments and resolves the model. Exits with usage on
+/// bad input, like the other commands.
+func rateSetup() -> RateSetup {
     let inputs = positional(from: arguments)
     guard !inputs.isEmpty else {
         FileHandle.standardError.write(Data("rate: provide one or more image paths or directories\n".utf8))
@@ -241,74 +350,159 @@ func runRate() async throws {
         exit(2)
     }
     let flags = flags(from: arguments)
-    let verbose = flags["quiet"] == nil
     var configuration = AgentEngine.Configuration.fromEnvironment()
     if let model = flags["model"] {
         configuration.modelDirectory = URL(
             fileURLWithPath: NSString(string: model).expandingTildeInPath, isDirectory: true)
     }
-    if verbose {
-        if let directory = configuration.modelDirectory {
-            print("[debug] model: directory \(directory.path)")
-        } else {
-            print("[debug] model: hub \(configuration.modelID) @ \(configuration.revision)")
+    guard let directory = configuration.modelDirectory else {
+        FileHandle.standardError.write(Data(
+            "rate: no local model; pass --model <dir> or set RATER_MODEL_PATH (network downloads are disabled)\n".utf8))
+        exit(2)
+    }
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+          isDirectory.boolValue else {
+        FileHandle.standardError.write(Data("rate: model directory not found: \(directory.path)\n".utf8))
+        exit(2)
+    }
+    return RateSetup(
+        paths: paths,
+        configuration: configuration,
+        verbose: flags["quiet"] == nil,
+        showPrompt: flags["show-prompt"] != nil
+    )
+}
+
+/// The resolved model and prompt size; `--show-prompt` adds the full prompt.
+/// Debug output is on unless `--quiet`.
+func printRateDebugHeader(_ setup: RateSetup) {
+    guard setup.verbose else { return }
+    if let directory = setup.configuration.modelDirectory {
+        print("[debug] model: directory \(directory.path)")
+    } else {
+        print("[debug] model: none configured (downloads are disabled)")
+    }
+    let prompt = SystemPrompt.build()
+    print("[debug] system prompt: \(prompt.count) chars, ~\(SystemPrompt.estimatedTokenCount(of: prompt)) tokens")
+    if setup.showPrompt {
+        print("[debug] --- system prompt ---")
+        print(prompt)
+        print("[debug] --- end system prompt ---")
+    }
+}
+
+/// One image's agent result, shared by the headless and windowed modes.
+struct RateOutcome: Sendable {
+    let name: String
+    let seconds: String
+    let choice: Choice?
+    let failure: String?
+}
+
+/// Runs the agent over one image. The engine carries the recent-choice window
+/// across the batch, so each image is asked to pick an unused automaton.
+func rateOne(
+    engine: AgentEngine,
+    path: String,
+    directory: URL,
+    verbose: Bool
+) async -> RateOutcome {
+    let url = URL(fileURLWithPath: path)
+    let start = Date()
+    var response = ""
+    var choice: Choice?
+    var failure: String?
+    do {
+        // Normalize to the model's 512×512 input, as the app does, so an
+        // oversized or malformed image never reaches the preprocessor's far
+        // larger edge limits.
+        let normalized = try ImageImport.normalize(url, into: directory)
+        if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
+        for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {
+            switch event {
+            case .text(let text): response = text
+            case .choice(let picked): choice = picked
+            case .failed(let message): failure = message
+            case .finished: break
+            }
         }
-        let prompt = SystemPrompt.build()
-        print("[debug] system prompt: \(prompt.count) chars, ~\(SystemPrompt.estimatedTokenCount(of: prompt)) tokens")
-        if flags["show-prompt"] != nil {
-            print("[debug] --- system prompt ---")
-            print(prompt)
-            print("[debug] --- end system prompt ---")
+    } catch {
+        failure = error.localizedDescription
+    }
+    let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
+    if verbose {
+        print("[debug] \(url.lastPathComponent) answer after \(seconds)s:")
+        print(response.isEmpty ? "[debug]   (empty response)" : response)
+        if let choice, let spec = Catalog.spec(id: choice.id) {
+            print("[debug]   parsed \(choice.id) [\(spec.behavior.rawValue)] \(spec.title)")
         }
     }
-    let engine = AgentEngine(configuration: configuration)
-    // Normalize each input to the model's 512×512 size, as the app does, so an
-    // oversized or malformed image never reaches the preprocessor's far larger
-    // edge limits. The session folder is removed when the run ends.
+    return RateOutcome(name: url.lastPathComponent, seconds: seconds, choice: choice, failure: failure)
+}
+
+/// Prints the `name<TAB>id<TAB>seconds` result line and returns the chosen
+/// spec, if any.
+@discardableResult
+func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
+    if let failure = outcome.failure {
+        print("\(outcome.name)\tFAILED\t\(failure)\t\(outcome.seconds)s")
+        return nil
+    }
+    guard let choice = outcome.choice else {
+        print("\(outcome.name)\tFAILED\tno catalog id\t\(outcome.seconds)s")
+        return nil
+    }
+    print("\(outcome.name)\t\(choice.id)\t\(outcome.seconds)s")
+    return Catalog.spec(id: choice.id)
+}
+
+/// Headless batch: one line per image and a summary, no window.
+func runRate(_ setup: RateSetup) async {
+    printRateDebugHeader(setup)
+    let engine = AgentEngine(configuration: setup.configuration)
+    // The session folder is removed when the run ends.
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     defer { ImageImport.removeSessionDirectory(for: sessionID) }
     var chosen = 0
-    for path in paths {
-        let url = URL(fileURLWithPath: path)
-        let start = Date()
-        var response = ""
-        var choice: Choice?
-        var failure: String?
-        do {
-            let normalized = try ImageImport.normalize(url, into: directory)
-            if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
-            for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {
-                switch event {
-                case .text(let text): response = text
-                case .choice(let picked): choice = picked
-                case .failed(let message): failure = message
-                case .finished: break
-                }
-            }
-        } catch {
-            failure = error.localizedDescription
-        }
-        let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
-        if verbose {
-            print("[debug] \(url.lastPathComponent) answer after \(seconds)s:")
-            print(response.isEmpty ? "[debug]   (empty response)" : response)
-            if let choice, let spec = Catalog.spec(id: choice.id) {
-                print("[debug]   parsed \(choice.id) [\(spec.behavior.rawValue)] \(spec.title)")
-            }
-        }
-        if let failure {
-            print("\(url.lastPathComponent)\tFAILED\t\(failure)\t\(seconds)s")
-        } else if let choice {
-            chosen += 1
-            print("\(url.lastPathComponent)\t\(choice.id)\t\(seconds)s")
-        } else {
-            print("\(url.lastPathComponent)\tFAILED\tno catalog id\t\(seconds)s")
-        }
+    for path in setup.paths {
+        let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
+        if printRateOutcome(outcome) != nil { chosen += 1 }
     }
-    print("\n\(chosen)/\(paths.count) chosen")
+    print("\n\(chosen)/\(setup.paths.count) chosen")
 }
-#endif
+
+/// Windowed batch: opens each chosen automaton in an `AutomatonWindow` (the
+/// render core's Metal on-screen path) and waits for the window to close before
+/// the next image. The review loop is a main-actor task started before
+/// `NSApplication.run()`, so `present` can suspend and the window's close event
+/// still arrives.
+@MainActor
+func runRateWindowed(_ setup: RateSetup) async {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    app.finishLaunching()
+    Task { @MainActor in
+        let presenter = AutomatonWindow()
+        printRateDebugHeader(setup)
+        let engine = AgentEngine(configuration: setup.configuration)
+        let sessionID = UUID()
+        let directory = ImageImport.sessionDirectory(for: sessionID)
+        var chosen = 0
+        for path in setup.paths {
+            let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
+            if let spec = printRateOutcome(outcome) {
+                chosen += 1
+                await presenter.present(spec)
+            }
+        }
+        ImageImport.removeSessionDirectory(for: sessionID)
+        print("\n\(chosen)/\(setup.paths.count) chosen")
+        app.terminate(nil)
+    }
+    app.run()
+}
 
 switch command {
 case "catalog":
@@ -327,14 +521,12 @@ case "gpu":
         print("Metal 4 requires macOS 26")
     }
 case "rate":
-#if canImport(Agent)
-    try await runRate()
-#else
-    FileHandle.standardError.write(Data(
-        "rate: built without the Agent target; set RATER_AGENT=1 for SwiftPM or use the Xcode build\n".utf8
-    ))
-    exit(1)
-#endif
+    let setup = rateSetup()
+    if flags(from: arguments)["show"] != nil {
+        await runRateWindowed(setup)
+    } else {
+        await runRate(setup)
+    }
 default:
     printUsage()
 }

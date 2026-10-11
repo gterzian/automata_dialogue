@@ -2,6 +2,13 @@ import Foundation
 import Metal
 import QuartzCore
 
+// The layer is created on the main thread (as a view's backing layer) and then
+// handed to `RenderActor.makeLayerSink(layer:)`, which uses it on the render
+// thread to acquire and present drawables. `CAMetalLayer` is documented safe
+// for `nextDrawable`/`present` across threads, and `LayerSink` already shares
+// it with the render actor, so the cross-actor hand-off is accepted.
+extension CAMetalLayer: @unchecked @retroactive Sendable {}
+
 /// A `FrameClock` over `CAMetalDisplayLink` (design doc §6). It is added to the
 /// render actor's run loop, so ticks and the `LayerSink` draw happen on the
 /// thread that owns the Metal objects. `preferredFrameLatency = 2` keeps two

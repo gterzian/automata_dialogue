@@ -7,38 +7,35 @@ per-input model, the answer parsing, and the prompt).
 
 ## Bridges
 
-`mlx-swift-lm` ships `MLXHuggingFace` macros that generate the `Downloader` and
-`TokenizerLoader` bridges from the Hugging Face packages. This target writes the
-two conformances out by hand in `HuggingFaceBridges.swift` instead: it pins the
-exact API surface this target relies on and keeps the build independent of the
-macro plugin. When bumping `swift-huggingface` or `swift-transformers`, re-check
-the two API points the bridges pin:
-`HubClient.downloadSnapshot(of:revision:matching:progressHandler:)` and
+`mlx-swift-lm` ships a macro that generates the `TokenizerLoader` bridge from
+`swift-transformers`. This target writes the conformance out by hand in
+`HuggingFaceBridges.swift` instead: it pins the exact API surface this target
+relies on and keeps the build independent of the macro plugin. When bumping
+`swift-transformers`, re-check the one API point the bridge pins:
 `AutoTokenizer.from(modelFolder:)`.
 
 ## Model
 
-- Default `mlx-community/Qwen3.5-4B-MLX-4bit` (`Configuration.defaultModelID`),
-  pinned to a snapshot commit (`Configuration.pinnedRevision(for:)`);
-  `Models/README.md` records it and the verified weight hashes. It is the
-  smallest model that both matches the class and honours the no-repeat list;
-  the 9B is too slow and the 2B fails the exclusion list (see Remaining work).
-  `mlx-community/Qwen3.5-9B-4bit` stays pinned for callers that opt in. A
-  registry entry is not required: `ModelConfiguration(id:)` plus the `qwen3_5`
-  model type loads the model.
+- **Local snapshots only.** The engine loads a directory
+  (`Configuration.modelDirectory`, set by `rater-cli rate --model <dir>` or
+  `RATER_MODEL_PATH`) through `loadModelContainer(from:using:)`, the overload
+  that takes no `Downloader`, so it has no path to the network. A configuration
+  with no directory fails the run with `AgentEngineError.noModelDirectory`;
+  nothing is ever fetched. Obtain the snapshot outside the software.
+  `Models/README.md` records the verified snapshots.
+- `Models/Qwen3.5-4B-MLX-4bit` is the recommended snapshot: the smallest that
+  both matches the class and honours the no-repeat list. The 9B is slower and
+  the 2B fails the exclusion list (see Remaining work). A registry entry is not
+  required: the config's `qwen3_5` model type loads it.
+- The directory must be a complete Hugging Face snapshot (`config.json`,
+  `*.safetensors` with `model.safetensors.index.json`, `tokenizer.json`,
+  `tokenizer_config.json`, `vocab.json`, `chat_template.jinja`, and the
+  preprocessor JSONs); the tokenizer's `eos_token` (`<|im_end|>`) supplies the
+  stop token.
 - Thinking is off (`additionalContext: ["enable_thinking": false]`), so the
   model does not spend tokens on a reasoning preamble before its `id:` line.
 - The container is loaded once and shared; a failed load is retried on the next
-  run. Download and load run off the main actor.
-- **Local snapshots.** `Configuration.modelDirectory`, `rater-cli rate --model
-  <dir>`, and `RATER_MODEL_PATH` all load from a directory instead of the hub.
-  `loadModelContainer` never calls the downloader for a `.directory`
-  configuration, so no network is touched. The directory must be a full Hugging
-  Face snapshot (`config.json`, `*.safetensors` with
-  `model.safetensors.index.json`, `tokenizer.json`, `tokenizer_config.json`,
-  `vocab.json`, `chat_template.jinja`, and the preprocessor JSONs). Download it
-  once, e.g. `huggingface-cli download mlx-community/Qwen3.5-4B-MLX-4bit --local-dir
-  <dir>`; the tokenizer's `eos_token` (`<|im_end|>`) supplies the stop token.
+  run. Load runs off the main actor.
 
 ## Run
 
