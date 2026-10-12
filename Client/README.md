@@ -33,10 +33,5 @@ on a `.choice` event it starts the entry and advances the renderer ~30 times a
 second; a new `send()` calls `stopAutomaton()` first, so the running automaton
 stops immediately. Starting a run reseeds a `.rand` entry
 (`ProgramSpec.withRandomSeed`), so replaying one redraws differently; the rule
-is owned by `Core/Catalog/README.md`. `Core/Render` now has the on-screen path
-(`LayerSink` + `DisplayLinkClock` + `LayerRenderer`, driven by
-`RenderActor.drive(clock:pacing:)`) and delivers GPU-resident frames to a sink
-that asks for them (`FrameSink.wantsGPUResidentFrames`); the panel still draws
-the CPU image, so hosting a `CAMetalLayer`, building the sink with
-`RenderActor.makeLayerSink(layer:)`, and switching `RaterModel` to the render
-actor is the remaining wiring.
+is owned by `Core/Catalog/README.md`. The panel still draws the CPU image; the
+GPU path it should adopt is the app-wiring item in `Core/Render/README.md`.

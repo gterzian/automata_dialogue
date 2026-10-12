@@ -2,9 +2,10 @@
 
 `rater-cli`, a SwiftPM executable built against `Core`. Commands:
 
-- `rater-cli render <id> --frames N --out <dir>` — headless render of a
-  catalog entry to PNG frames, using the CPU reference programs. Used to
-  eyeball the catalog and to produce golden images.
+- `rater-cli render <id> [--out file.png]` — headless render of a catalog
+  entry to a PNG, using the CPU reference programs. Used to eyeball the
+  catalog and to produce golden images. `--all [--out dir]` renders every
+  entry; `--cols`, `--rows`, and `--steps` override the size and step count.
 - `rater-cli rate <path|dir>...` — run the real MLX agent over reference
   drawings and print the chosen id and latency per image, then a summary table.
   A path may be an image file or a directory, in which case its top-level
@@ -16,11 +17,23 @@
   size, the model's raw answer, and the parsed class per image); `--quiet`
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
-  on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`, the same
-  renderer the app is wired to). It shows the submitted image until Return,
+  on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`, the path
+  the app should adopt; see `Core/Render/README.md`). It shows the submitted
+  image until Return,
   runs the model, scrolls the chosen automaton until the next Return, and
-  cycles the images until the window is closed. A `.rand` entry redraws from a
-  fresh row each time.
+  cycles the images until the window is closed. While the model runs the
+  window shows `WorkingIndicator` (Metal beating rings) in place of the
+  image, so the wait is visibly "working". A `.rand` entry redraws from a
+  fresh row each time. The window's drawable holds one cell per display column
+  (`ViewportGeometry`), and the run simulates a board ten windows wide: the
+  layer stretches a small cell grid over the whole window while the viewport
+  shows one part of a much bigger board, so the pattern keeps evolving after it
+  leaves the first view and each Left/Right arrow moves the viewport ten
+  columns; Escape restarts the running automaton from a fresh seed; Up/Down
+  raise or lower the growth rate (each press ×1.5). The run starts at 20 rows
+  per second of wall time (`.timed`) and advances toward the bottom until the
+  window fills, then scrolls with the newest row at the bottom and older rows
+  going off the top.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli catalog` — print the catalog and the generated index.

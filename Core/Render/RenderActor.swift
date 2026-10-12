@@ -19,6 +19,10 @@ public actor RenderActor {
     private var context: GPUContext?
     private var simulation: MetalSimulation?
     private var sink: (any FrameSink)?
+    /// The spec and board of the live run, so `restart` can rebuild a fresh
+    /// seed without the caller re-supplying them.
+    private var runSpec: ProgramSpec?
+    private var runBoard: Board?
     /// Sub-row carry for `.timed` pacing, owned by the render actor so the
     /// clock's non-isolated tick can hand the delta to an isolated advance.
     private var paceRemainder = 0.0
@@ -36,7 +40,8 @@ public actor RenderActor {
     /// Starts a run and delivers the seed frame. A previous run is dropped.
     /// `scrolling` keeps the newest source row at the bottom and runs without
     /// an end; otherwise the whole run is stretched across the display and
-    /// stops at `steps`.
+    /// stops at `steps`. `mapping` selects the still-image fit or the pannable
+    /// one-cell-per-column window (see `ColumnMapping`).
     @discardableResult
     public func configure(
         spec: ProgramSpec,
@@ -44,6 +49,8 @@ public actor RenderActor {
         rows: Int,
         steps: Int? = nil,
         scrolling: Bool = false,
+        mapping: ColumnMapping = .fit,
+        board: Board? = nil,
         sink: any FrameSink
     ) throws -> RenderFrame {
         try start()
@@ -52,9 +59,12 @@ public actor RenderActor {
         paceRemainder = 0
         self.sink = sink
         let simulation = try MetalSimulation(
-            spec: spec, cols: cols, rows: rows, steps: steps, context: context, scrolling: scrolling
+            spec: spec, cols: cols, rows: rows, steps: steps, context: context,
+            scrolling: scrolling, mapping: mapping, board: board
         )
         self.simulation = simulation
+        runSpec = spec
+        runBoard = board ?? spec.board
         return try deliver(simulation, chunk: 0)
     }
 
@@ -71,6 +81,36 @@ public actor RenderActor {
     public func advanceToEnd() throws -> RenderFrame? {
         guard let simulation, !simulation.scrolling else { return nil }
         return try deliver(simulation, chunk: simulation.totalSteps - 1)
+    }
+
+    /// Shifts the window `delta` board columns and delivers the re-fitted
+    /// frame. A no-op for a `.fit` run or when nothing is configured. The
+    /// display link has no place to throw, so a failed re-fit is recorded in
+    /// `lastError`.
+    public func pan(by delta: Int) {
+        guard let simulation else { return }
+        simulation.pan(by: delta)
+        do {
+            _ = try deliver(simulation, chunk: 0)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Restarts the live run from a fresh seed row and delivers frame 0. A
+    /// `.rand` entry draws a different row; the sink and GPU buffers are kept,
+    /// so nothing is recompiled or reallocated. A failed re-fit is recorded in
+    /// `lastError`.
+    public func restart() {
+        guard let simulation, let spec = runSpec, let board = runBoard else { return }
+        let fresh = spec.withRandomSeed(UInt64.random(in: .min ... .max))
+        let seeded = Board(width: board.width, height: board.height, start: fresh.board.start)
+        simulation.reset(program: fresh.reference(seeded))
+        do {
+            _ = try deliver(simulation, chunk: 0)
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     /// Returns to the seed row and delivers frame 0.
@@ -95,23 +135,29 @@ public actor RenderActor {
         sink?.finish()
         sink = nil
         simulation = nil
+        runSpec = nil
+        runBoard = nil
     }
 
     /// The last error from a driven run, if any. The clock tick cannot throw,
     /// so a failed `advance` is recorded here instead of being dropped.
     public private(set) var lastError: String?
 
+    /// The pacing of the live driven run; `setPacing` changes it in flight.
+    private var pacing: RenderPacing = .fixed(0)
+
     /// Starts `clock` on the render thread and advances the run by `pacing` on
     /// each tick. Because this is actor-isolated, the display link is added to
     /// the render run loop, so ticks and presentation share the Metal thread.
     public func drive(clock: any FrameClock, pacing: RenderPacing) {
         paceRemainder = 0
+        self.pacing = pacing
         clock.start { [weak self] delta in
             guard let self else { return }
             Task { [weak self] in
                 guard let self else { return }
                 do {
-                    try await self.tick(delta: delta, pacing: pacing)
+                    try await self.tick(delta: delta)
                 } catch {
                     await self.record(error)
                 }
@@ -124,7 +170,15 @@ public actor RenderActor {
         drive(clock: clock, pacing: .fixed(stepsPerFrame))
     }
 
-    private func tick(delta: TimeInterval, pacing: RenderPacing) throws {
+    /// Changes the advance rate of a driven run in flight, so the Up/Down
+    /// arrows can speed the growth up or slow it down. The sub-row carry is
+    /// dropped so the old rate's fraction cannot jump the new one.
+    public func setPacing(_ pacing: RenderPacing) {
+        paceRemainder = 0
+        self.pacing = pacing
+    }
+
+    private func tick(delta: TimeInterval) throws {
         let steps = pacing.steps(for: delta, remainder: &paceRemainder)
         guard steps > 0 else { return }
         _ = try advance(by: steps)

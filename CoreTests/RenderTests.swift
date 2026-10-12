@@ -51,6 +51,93 @@ final class FitTests: XCTestCase {
     }
 }
 
+final class ViewportTests: XCTestCase {
+    func testGridSizesCellsToTheWindow() {
+        let size = CGSize(width: 1600, height: 1000)
+        XCTAssertEqual(ViewportGeometry.columns(size: size), 400)
+        XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 400), 250)
+        XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 161), 101)
+    }
+
+    /// The simulated board is much wider than the viewport, so the pattern can
+    /// leave the first view and the view has room to pan; a catalog board wider
+    /// than that is kept.
+    func testBoardIsMuchWiderThanTheViewport() {
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 161, cols: 400), 4000)
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 401, cols: 400), 4000)
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 6101, cols: 400), 6101)
+    }
+
+    func testInitialOriginCentresOrPins() {
+        XCTAssertEqual(
+            ViewportGeometry.initialOrigin(boardWidth: 4000, cols: 400, start: .center, pinRight: false), 1800)
+        XCTAssertEqual(
+            ViewportGeometry.initialOrigin(boardWidth: 4000, cols: 400, start: .rightmost, pinRight: true), 3600)
+        XCTAssertEqual(
+            ViewportGeometry.initialOrigin(boardWidth: 321, cols: 400, start: .center, pinRight: false), 0)
+    }
+
+    /// `.window` shows one source cell per display column at `viewportOrigin`;
+    /// panning slides that window without changing the cell size.
+    func testWindowMappingShowsOneCellPerColumnAndPans() {
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 80
+        let rows = 10
+        // A board ten windows wide, centred on the seed like the panel.
+        let board = Board(width: cols * ViewportGeometry.boardWindows, height: spec.board.height, start: .center)
+        let renderer = IncrementalRenderer(
+            spec: spec, cols: cols, rows: rows, scrolling: true, mapping: .window, board: board)
+        let origin = renderer.viewportOrigin
+        XCTAssertEqual(origin, (board.width - cols) / 2)
+        XCTAssertEqual(renderer.maxViewportOrigin, board.width - cols)
+
+        renderer.advance(by: 45)
+        var program = spec.reference(board)
+        var source: [[UInt8]] = [program.row()]
+        while source.count <= renderer.step { program.step(); source.append(program.row()) }
+        for row in 0..<rows {
+            let sourceStep = renderer.step - (rows - 1) + row
+            XCTAssertEqual(
+                (0..<cols).map { renderer.colorGrid[$0, row] },
+                Array(source[sourceStep][origin..<(origin + cols)]),
+                "row \(row)"
+            )
+        }
+
+        // Panning three cells moves the window; the render must follow.
+        renderer.pan(by: 3)
+        XCTAssertEqual(renderer.viewportOrigin, origin + 3)
+        XCTAssertEqual(
+            (0..<cols).map { renderer.colorGrid[$0, rows - 1] },
+            Array(source[renderer.step][(origin + 3)..<(origin + 3 + cols)])
+        )
+    }
+
+    func testWindowPanClampsAndFitDoesNotPan() {
+        let spec = Catalog.spec(id: "E90")!
+        let board = Board(width: 4000, height: spec.board.height, start: .center)
+        let window = IncrementalRenderer(
+            spec: spec, cols: 80, rows: 10, scrolling: true, mapping: .window, board: board)
+        window.pan(by: 10_000)
+        XCTAssertEqual(window.viewportOrigin, board.width - 80)
+        window.pan(by: -20_000)
+        XCTAssertEqual(window.viewportOrigin, 0)
+
+        let fit = IncrementalRenderer(spec: spec, cols: 80, rows: 10, scrolling: true)
+        fit.pan(by: 10)
+        XCTAssertEqual(fit.viewportOrigin, 0)
+        XCTAssertEqual(fit.maxViewportOrigin, 0)
+    }
+
+    func testRightPinnedWindowStartsAtTheRightEdge() {
+        let spec = Catalog.spec(id: "E110")!
+        let board = Board(width: 4000, height: spec.board.height, start: .rightmost)
+        let renderer = IncrementalRenderer(
+            spec: spec, cols: 120, rows: 10, scrolling: true, mapping: .window, board: board)
+        XCTAssertEqual(renderer.viewportOrigin, board.width - 120)
+    }
+}
+
 final class CPURendererTests: XCTestCase {
     func testGridDimensionsAndDeterminism() {
         let spec = Catalog.spec(id: "E90")!

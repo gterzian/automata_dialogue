@@ -129,6 +129,11 @@ the file that owns it ("see `Core/Catalog/README.md`") rather than restating it.
    directory (`--model` or `RATER_MODEL_PATH`) through the directory-only
    `loadModelContainer`, and a run with no directory fails. See
    `Agent/README.md`.
+6. **The panel's automaton runs on the GPU end to end.** The CPU sets the run's
+   parameters; the board, the viewport clip, and the draw all stay on the GPU
+   with no cell data read back to the CPU. The panel simulates a board much
+   wider than the window and renders only the viewport. See
+   `Core/Render/README.md` for the pipeline and its barriers.
 
 ## Concurrency (repo-wide)
 

@@ -208,30 +208,70 @@ final class MetalHostView: NSView {
     // `CAMetalLayer` Sendable note in `Core/Render/LayerSink.swift`.
     nonisolated let metalLayer = CAMetalLayer()
 
-    override init(frame frameRect: NSRect) {
+    /// The drawable's texture size. The layer stretches it over the view, so a
+    /// small size (the automaton's cell grid) gives blocky cells and a full-res
+    /// size (the working indicator) stays smooth. AppKit sets `contentsScale`
+    /// when the view enters the window, so the size is re-applied after layout
+    /// instead of set once.
+    private let targetDrawableSize: CGSize
+
+    init(frame frameRect: NSRect, drawableSize: CGSize) {
+        self.targetDrawableSize = drawableSize
         super.init(frame: frameRect)
         wantsLayer = true
+        metalLayer.pixelFormat = .bgra8Unorm
+        metalLayer.framebufferOnly = true
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("MetalHostView is created in code") }
 
     override func makeBackingLayer() -> CALayer { metalLayer }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyDrawableSize()
+    }
+
+    override func layout() {
+        super.layout()
+        applyDrawableSize()
+    }
+
+    private func applyDrawableSize() {
+        if let scale = window?.backingScaleFactor { metalLayer.contentsScale = scale }
+        metalLayer.drawableSize = targetDrawableSize
+    }
 }
 
-/// Presents one image, then one automaton, in a single screen-sized window
-/// using `Core/Render`'s on-screen path: a `RenderActor` owns a `LayerSink`
-/// over `MetalHostView.metalLayer` and drives its `DisplayLinkClock` with
-/// `.timed` pacing. `showInput` returns immediately so the image stays visible
-/// while the model runs; `present` swaps the scrolling automaton into the same
-/// window and suspends until Return or close. The app's key monitor calls
-/// `submit()`; `NSApplication.run()` keeps delivering events while suspended.
+/// Presents one image, the working indicator, then one automaton, in a single
+/// screen-sized window using `Core/Render`'s on-screen path: a `RenderActor`
+/// owns a `LayerSink`, or an `IndicatorActor` a `WorkingIndicator`, over a
+/// `MetalHostView.metalLayer`. `showInput` holds the image until Return;
+/// `showThinking` shows the Metal rings while the model runs; `present` swaps
+/// the scrolling automaton into the same window and suspends until Return or
+/// close. The app's key monitor calls `submit()`; `NSApplication.run()` keeps
+/// delivering events while suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
+    /// Rows per second the growth starts at. The reference visualizer batches
+    /// ten rows a frame (600/s), which fills the window almost instantly;
+    /// starting far slower lets the top-to-bottom growth be seen, and the
+    /// Up/Down arrows raise or lower it while the run is live.
+    private static let baseRowsPerSecond = 20.0
+    private static let speedStep = 1.5
+    private static let minimumRowsPerSecond = 1.0
+    private static let maximumRowsPerSecond = 4_000.0
+    /// Board columns an arrow key moves the window.
+    static let panColumns = 10
+
+    private var scrollRowsPerSecond = AutomatonWindow.baseRowsPerSecond
     private var window: NSWindow?
     private var host: MetalHostView?
     private var actor: RenderActor?
     private var sink: LayerSink?
+    private var indicator: IndicatorActor?
+    private var indicatorHost: MetalHostView?
     private var enterContinuation: CheckedContinuation<Void, Never>?
     private(set) var isClosed = false
 
@@ -256,29 +296,40 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             print("rate: no Metal 4 device; skipped \(spec.id)")
             return
         }
+        await stopThinking()
         let window = ensureWindow()
-        let scale = window.backingScaleFactor
         let contentSize = window.contentLayoutRect.size
-        let (cols, rows) = displayGrid(contentSize: contentSize, scale: scale)
-        let host = MetalHostView(frame: NSRect(origin: .zero, size: contentSize))
-        host.metalLayer.pixelFormat = .bgra8Unorm
-        host.metalLayer.framebufferOnly = true
-        host.metalLayer.contentsScale = scale
-        // One drawable pixel per display cell; the layer scales it to the view.
-        host.metalLayer.drawableSize = CGSize(width: cols, height: rows)
+        // The drawable holds one texel per display cell; the layer stretches that
+        // small grid over the whole window. The run simulates a board much wider
+        // than the window so the pattern keeps going after it leaves the first
+        // view and the arrows have room to pan.
+        let cols = ViewportGeometry.columns(size: contentSize)
+        let rows = ViewportGeometry.rows(size: contentSize, cols: cols)
+        let host = MetalHostView(
+            frame: NSRect(origin: .zero, size: contentSize),
+            drawableSize: CGSize(width: cols, height: rows))
+        host.metalLayer.magnificationFilter = .nearest
 
         // A `.rand` entry draws a fresh row each time it is shown, matching the
         // app (inventory §1.4); `makeProgram()` stays deterministic for the
         // golden hashes.
         let runSpec = spec.withRandomSeed(UInt64.random(in: .min ... .max))
+        let board = Board(
+            width: ViewportGeometry.boardWidth(specWidth: runSpec.board.width, cols: cols),
+            height: runSpec.board.height,
+            start: runSpec.board.start)
+        // Each automaton starts at the slow base rate; the arrows tune it.
+        scrollRowsPerSecond = Self.baseRowsPerSecond
         let actor = RenderActor()
         var made: LayerSink?
         do {
             try await actor.start()
             let sink = try await actor.makeLayerSink(layer: host.metalLayer)
             made = sink
-            _ = try await actor.configure(spec: runSpec, cols: cols, rows: rows, scrolling: true, sink: sink)
-            await actor.drive(clock: sink.clock, pacing: .timed(stepsPerSecond: scrollSpeed(for: spec)))
+            _ = try await actor.configure(
+                spec: runSpec, cols: cols, rows: rows, scrolling: true, mapping: .window,
+                board: board, sink: sink)
+            await actor.drive(clock: sink.clock, pacing: .timed(stepsPerSecond: scrollRowsPerSecond))
         } catch {
             print("rate: \(spec.id) failed to render: \(error.localizedDescription)")
             await actor.shutdown()
@@ -297,13 +348,83 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         await stopRun()
     }
 
-    /// Stops the running automaton, if any.
+    /// True while an automaton is presented, so the key monitor only consumes
+    /// the arrows when there is something to pan.
+    var isPresenting: Bool { actor != nil }
+
+    /// Moves the running automaton's window `columns` board columns sideways;
+    /// a no-op while no automaton is showing.
+    func pan(by columns: Int) {
+        guard let actor else { return }
+        Task { await actor.pan(by: columns) }
+    }
+
+    /// Restarts the running automaton from a fresh seed; a no-op while none is
+    /// showing. A `.rand` entry redraws from a different row.
+    func restart() {
+        guard let actor else { return }
+        Task { await actor.restart() }
+    }
+
+    /// Speeds the growth up or slows it down by one step; a no-op while no
+    /// automaton is showing.
+    func adjustSpeed(up: Bool) {
+        guard let actor else { return }
+        let factor = up ? Self.speedStep : 1 / Self.speedStep
+        scrollRowsPerSecond = min(
+            max(scrollRowsPerSecond * factor, Self.minimumRowsPerSecond), Self.maximumRowsPerSecond)
+        let pacing = RenderPacing.timed(stepsPerSecond: scrollRowsPerSecond)
+        Task { await actor.setPacing(pacing) }
+    }
+
+    /// Shows the Metal "working" indicator (expanding rings) in the window
+    /// while the model runs. Replaces the current content; `present` or
+    /// `stopThinking` ends it. The indicator actor and its layer are reused
+    /// across runs, so the shader pipeline is compiled once.
+    func showThinking() async {
+        guard !isClosed, GPUContext.isAvailable else { return }
+        let window = ensureWindow()
+        let contentSize = window.contentLayoutRect.size
+        let host = indicatorHost ?? MetalHostView(
+            frame: NSRect(origin: .zero, size: contentSize),
+            drawableSize: indicatorDrawableSize(
+                contentSize: contentSize, scale: window.backingScaleFactor))
+        host.metalLayer.magnificationFilter = .linear
+        indicatorHost = host
+        window.contentView = host
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+
+        let actor = indicator ?? IndicatorActor()
+        indicator = actor
+        do {
+            try await actor.start(layer: host.metalLayer)
+        } catch {
+            print("rate: indicator failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Pauses the "working" indicator; the actor is kept for the next run.
+    func stopThinking() async {
+        await indicator?.stop()
+    }
+
+    /// Stops the running automaton, if any. The indicator actor and its GPU
+    /// context stay alive for the next run.
     func stopRun() async {
         if let actor, let sink { await actor.stopDriving(clock: sink.clock) }
         await actor?.shutdown()
         actor = nil
         sink = nil
         host = nil
+        await stopThinking()
+    }
+
+    /// Tears down the indicator's render thread; call once the review ends.
+    func shutdownIndicator() async {
+        await indicator?.shutdown()
+        indicator = nil
+        indicatorHost = nil
     }
 
     /// Resumes a `waitForEnter`; the key monitor calls this on Return. A Return
@@ -322,27 +443,21 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// The drawable's pixel size, capped so a wide board on a large panel does
-    /// not allocate a span buffer for every pixel.
-    private func displayGrid(contentSize: CGSize, scale: CGFloat) -> (Int, Int) {
+    /// The indicator's drawable: full device pixels so the rings stay smooth,
+    /// capped so a large display does not run the fragment shader over tens of
+    /// millions of pixels.
+    private func indicatorDrawableSize(contentSize: CGSize, scale: CGFloat) -> CGSize {
         let pixelWidth = max(1, Int(contentSize.width * scale))
         let pixelHeight = max(1, Int(contentSize.height * scale))
         let maxPixels = 4_000_000
-        var cols = pixelWidth
-        var rows = pixelHeight
-        if cols * rows > maxPixels {
-            let factor = (Double(maxPixels) / Double(cols * rows)).squareRoot()
-            cols = max(1, Int(Double(cols) * factor))
-            rows = max(1, Int(Double(rows) * factor))
+        var width = pixelWidth
+        var height = pixelHeight
+        if width * height > maxPixels {
+            let factor = (Double(maxPixels) / Double(width * height)).squareRoot()
+            width = max(1, Int(Double(width) * factor))
+            height = max(1, Int(Double(height) * factor))
         }
-        return (cols, rows)
-    }
-
-    /// Rows per second of scroll. The catalog tunes `stepsPerSecond` for a
-    /// stretched three-second run, which is too fast for a full-screen scroll;
-    /// cap it so the downward motion stays readable.
-    private func scrollSpeed(for spec: ProgramSpec) -> Double {
-        min(spec.display.stepsPerSecond, 120)
+        return CGSize(width: width, height: height)
     }
 
     /// Opens the screen-sized window, or returns the open one.
@@ -551,17 +666,24 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             }
             await presenter.waitForEnter()
             if presenter.isClosed { break }
+            await presenter.showThinking()
             let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
+            await presenter.stopThinking()
             shown += 1
             if let spec = printRateOutcome(outcome) {
                 chosen += 1
                 await presenter.present(spec)
             } else {
+                // Put the failed image back up so it is still reviewable.
+                if let image = NSImage(contentsOfFile: path) {
+                    presenter.showInput(image, title: name)
+                }
                 await presenter.waitForEnter()
             }
         }
     }
     await presenter.stopRun()
+    await presenter.shutdownIndicator()
     ImageImport.removeSessionDirectory(for: sessionID)
     print("\n\(chosen)/\(shown) chosen")
 }
@@ -580,6 +702,30 @@ func runRateWindowed(_ setup: RateSetup) async {
     let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         if event.keyCode == 36 || event.keyCode == 76 {
             MainActor.assumeIsolated { presenter.submit() }
+            return nil
+        }
+        // Left/right pan the running automaton's window, as in the reference
+        // visualizer. Consumed only while an automaton is on screen.
+        if event.keyCode == 123, presenter.isPresenting {
+            MainActor.assumeIsolated { presenter.pan(by: -AutomatonWindow.panColumns) }
+            return nil
+        }
+        if event.keyCode == 124, presenter.isPresenting {
+            MainActor.assumeIsolated { presenter.pan(by: AutomatonWindow.panColumns) }
+            return nil
+        }
+        // Up/Down modulate the growth rate; Escape restarts the running
+        // automaton from a fresh seed, as in the reference visualizer.
+        if event.keyCode == 126, presenter.isPresenting {
+            MainActor.assumeIsolated { presenter.adjustSpeed(up: true) }
+            return nil
+        }
+        if event.keyCode == 125, presenter.isPresenting {
+            MainActor.assumeIsolated { presenter.adjustSpeed(up: false) }
+            return nil
+        }
+        if event.keyCode == 53, presenter.isPresenting {
+            MainActor.assumeIsolated { presenter.restart() }
             return nil
         }
         return event

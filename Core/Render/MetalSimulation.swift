@@ -2,10 +2,9 @@ import Foundation
 import Metal
 
 /// A reusable per-frame command allocator and command buffer. `FrameSlotRing`
-/// rotates three of them so a sink that does not wait on readback can encode
-/// frame N+1/N+2 while the GPU runs N. The readback path
-/// waits after every commit, so the rotation is structural today; a
-/// `LayerSink` returns from its drawable callback and lets the ring overlap.
+/// rotates three of them so frame N+1/N+2 could be encoded while the GPU runs
+/// N. `MetalSimulation.commit` waits after every commit today, so the rotation
+/// is structural until that wait is dropped (see `README.md`).
 @available(macOS 26.0, *)
 final class FrameSlot: @unchecked Sendable {
     let allocator: any MTL4CommandAllocator
@@ -92,13 +91,24 @@ public final class MetalSimulation {
     /// row stays at the bottom. A non-scrolling run stretches its whole history
     /// across the display and stops at `totalSteps`.
     public let scrolling: Bool
+    /// Which column mapping the grid uses; see `ColumnMapping`.
+    public let mapping: ColumnMapping
+    /// First source column shown by a `.window` mapping, clamped to
+    /// `maxViewportOrigin`.
+    public private(set) var viewportOrigin: Int
     /// Source row currently computed (0 is the seed).
     public private(set) var step = 0
     /// Index of the frame slot that produced the last `render` call.
     public private(set) var lastSlot = 0
 
+    /// The origin a `reset()` returns to (rightmost for a right-pinned entry).
+    private let startOrigin: Int
+
     private let context: GPUContext
     private let width: Int
+    /// The board the run simulates. Wider than the catalog board when the
+    /// panel needs room to pan; see `ViewportGeometry.boardWidth`.
+    private let board: Board
     /// Rows the history buffer holds; the source step indexes it modulo this.
     private let capacity: Int
     private let history: any MTLBuffer
@@ -122,12 +132,15 @@ public final class MetalSimulation {
         rows: Int,
         steps: Int? = nil,
         context: GPUContext,
-        scrolling: Bool = false
+        scrolling: Bool = false,
+        mapping: ColumnMapping = .fit,
+        board: Board? = nil
     ) throws {
         let displayCols = max(1, cols)
         let displayRows = max(1, rows)
-        let nominalSteps = max(1, steps ?? min(spec.board.height, spec.display.stepLimit))
-        let width = spec.board.width
+        let runBoard = board ?? spec.board
+        let nominalSteps = max(1, steps ?? min(runBoard.height, spec.display.stepLimit))
+        let width = runBoard.width
         let device = context.device
         // A scrolling run only ever reads the last `rows` rows, so its history
         // is a ring of that size; a stretched run needs the whole history.
@@ -165,8 +178,10 @@ public final class MetalSimulation {
         self.rows = displayRows
         self.totalSteps = scrolling ? Int.max : nominalSteps
         self.scrolling = scrolling
+        self.mapping = mapping
         self.context = context
         self.width = width
+        self.board = runBoard
         self.capacity = capacity
         self.history = history
         self.colorBuffer = colorBuffer
@@ -181,6 +196,15 @@ public final class MetalSimulation {
         self.fitTable = try Self.makeTable(device: device, history: history, second: colorBuffer, third: fitBuffer)
 
         let fit = Fit(boardWidth: width, displayCols: displayCols, pinRight: spec.display.pinRight)
+        // A `.window` mapping shows one cell per column at a movable origin, so
+        // a board wider than the display pans instead of being downsampled.
+        let startOrigin = mapping == .window
+            ? ViewportGeometry.initialOrigin(
+                boardWidth: width, cols: displayCols, start: runBoard.start,
+                pinRight: spec.display.pinRight)
+            : fit.sourceOrigin
+        self.startOrigin = startOrigin
+        self.viewportOrigin = startOrigin
 
         var stepParams = StepParams(width: UInt32(width), rule: rule, colors: colors, capacity: UInt32(capacity))
         memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
@@ -189,9 +213,9 @@ public final class MetalSimulation {
             displayCols: UInt32(displayCols),
             displayRows: UInt32(displayRows),
             totalSteps: UInt32(clamping: nominalSteps),
-            block: UInt32(fit.block),
-            sourceOrigin: UInt32(fit.sourceOrigin),
-            padLeft: UInt32(fit.padLeft),
+            block: UInt32(mapping == .window ? 1 : fit.block),
+            sourceOrigin: UInt32(startOrigin),
+            padLeft: UInt32(mapping == .window ? 0 : fit.padLeft),
             rowOffset: 0,
             capacity: UInt32(capacity),
             viewportStart: 0,
@@ -203,9 +227,30 @@ public final class MetalSimulation {
         reseed()
     }
 
-    /// Returns the simulation to the seed row (step 0) and clears the grid.
-    public func reset() {
-        reseed()
+    /// Largest `viewportOrigin` a `.window` mapping can pan to; 0 for `.fit`.
+    public var maxViewportOrigin: Int {
+        mapping == .window ? max(0, width - cols) : 0
+    }
+
+    /// Shifts a `.window` mapping `delta` source columns, clamped to the board.
+    /// The caller re-fits (`advance(chunk: 0)`) to show the new window.
+    public func pan(by delta: Int) {
+        guard mapping == .window else { return }
+        let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
+        guard origin != viewportOrigin else { return }
+        viewportOrigin = origin
+        fitParams.sourceOrigin = UInt32(origin)
+        memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
+    }
+
+    /// Returns the simulation to the seed row (step 0), resets the horizontal
+    /// origin, and clears the grid. `program` supplies a different seed row (a
+    /// `.rand` replay); the buffers are reused.
+    public func reset(program: (any RowProgram)? = nil) {
+        viewportOrigin = startOrigin
+        fitParams.sourceOrigin = UInt32(startOrigin)
+        memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
+        reseed(program: program)
     }
 
     /// Advances up to `count` source rows and returns the grid at the new
@@ -273,10 +318,10 @@ public final class MetalSimulation {
 
     // MARK: - Private
 
-    private func reseed() {
+    private func reseed(program: (any RowProgram)? = nil) {
         step = 0
         fittedRows = 0
-        let seed = spec.makeProgram().row()
+        let seed = (program ?? spec.reference(board)).row()
         seed.withUnsafeBytes { bytes in
             if let base = bytes.baseAddress { memcpy(history.contents(), base, width) }
         }

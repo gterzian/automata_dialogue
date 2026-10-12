@@ -182,6 +182,31 @@ final class RenderActorTests: XCTestCase {
         await actor.shutdown()
     }
 
+    /// `setPacing` changes the rate of a driven run in flight, so the arrows
+    /// can speed the growth up or slow it down mid-run.
+    func testSetPacingChangesTheRate() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E30")!
+        let sink = ReadbackSink()
+        let clock = ManualClock()
+        let actor = RenderActor()
+        try await actor.configure(spec: spec, cols: 20, rows: 10, steps: 400, sink: sink)
+        _ = sink.waitForFrame(timeout: 0.01) // consume the seed frame's signal
+        await actor.drive(clock: clock, pacing: .timed(stepsPerSecond: 30))
+
+        clock.pump(1.0) // 30 rows
+        XCTAssertEqual(sink.waitForFrame(timeout: 0.5)?.step, 30)
+
+        await actor.setPacing(.timed(stepsPerSecond: 10))
+        clock.pump(1.0) // 10 more rows, not another 30
+        XCTAssertEqual(sink.waitForFrame(timeout: 0.5)?.step, 40)
+
+        await actor.stopDriving(clock: clock)
+        await actor.shutdown()
+    }
+
     /// A GPU-resident sink gets the simulation's buffer and no CPU grid, and
     /// the new-row range advances monotonically across frames.
     func testGPUSinkReceivesResidentFrames() async throws {
@@ -297,6 +322,64 @@ final class RenderActorTests: XCTestCase {
             XCTAssertEqual(gpu.rowCount, 10)
             XCTAssertTrue(gpu.startsRun)
         }
+        await actor.shutdown()
+    }
+
+    /// A pannable `.window` frame must match `IncrementalRenderer` with the
+    /// same mapping, and a pan must move both the same way.
+    func testWindowMappingGPUMatchesIncrementalCPU() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 120
+        let rows = 30
+        // A board ten windows wide, as the panel simulates.
+        let board = Board(width: 1200, height: spec.board.height, start: .center)
+        let sink = ReadbackSink()
+        let actor = RenderActor()
+
+        let cpu = IncrementalRenderer(
+            spec: spec, cols: cols, rows: rows, scrolling: true, mapping: .window, board: board)
+        let seed = try await actor.configure(
+            spec: spec, cols: cols, rows: rows, scrolling: true, mapping: .window, board: board, sink: sink)
+        XCTAssertEqual(seed.grid, cpu.colorGrid)
+
+        for _ in 0..<12 {
+            _ = cpu.advance(by: 7)
+            let frame = try await actor.advance(by: 7)
+            XCTAssertEqual(frame?.grid, cpu.colorGrid, "step \(cpu.step)")
+        }
+
+        // Pan far enough to leave the first window; the two must stay in step.
+        let start = cpu.viewportOrigin
+        cpu.pan(by: 300)
+        await actor.pan(by: 300)
+        XCTAssertEqual(cpu.viewportOrigin, start + 300)
+        XCTAssertEqual(sink.mostRecent?.grid, cpu.colorGrid, "after pan")
+        await actor.shutdown()
+    }
+
+    /// `restart()` returns to frame 0 and, for a `.rand` entry, draws a new
+    /// seed row.
+    func testRestartReseedsTheRun() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90.rand")!
+        let sink = ReadbackSink()
+        let actor = RenderActor()
+        let first = try await actor.configure(
+            spec: spec, cols: 80, rows: 20, scrolling: true, mapping: .window, sink: sink)
+        for _ in 0..<5 {
+            _ = try await actor.advance(by: 7)
+        }
+        XCTAssertGreaterThan(sink.mostRecent?.step ?? 0, 0)
+
+        await actor.restart()
+        XCTAssertEqual(sink.mostRecent?.step, 0)
+        // A fresh random seed means a different first frame.
+        XCTAssertNotEqual(sink.mostRecent?.grid, first.grid)
         await actor.shutdown()
     }
 

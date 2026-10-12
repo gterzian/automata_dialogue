@@ -16,6 +16,11 @@ public final class IncrementalRenderer {
     /// so the newest row stays at the bottom and older rows scroll off the
     /// top. When false, the whole run is stretched across the display.
     public let scrolling: Bool
+    /// Which column mapping the grid uses; see `ColumnMapping`.
+    public let mapping: ColumnMapping
+    /// First source column shown by a `.window` mapping, clamped to
+    /// `maxViewportOrigin`.
+    public private(set) var viewportOrigin: Int
 
     /// The current source row (0 is the seed).
     public private(set) var step = 0
@@ -24,24 +29,47 @@ public final class IncrementalRenderer {
     private var program: any RowProgram
     private var grid: ColorGrid
     private let fit: Fit
+    /// The board the run simulates. Wider than the catalog board when the panel
+    /// needs room to pan; see `ViewportGeometry.boardWidth`.
+    private let board: Board
+    /// The origin a `reset()` returns to (rightmost for a right-pinned entry).
+    private let startOrigin: Int
     private var nextDisplayRow = 0
     /// Scrolling history ring; the source step indexes it modulo `capacity`.
     private let capacity: Int
     private var ring: [[UInt8]]
 
-    public init(spec: ProgramSpec, cols: Int, rows: Int, steps: Int? = nil, scrolling: Bool = false) {
+    public init(
+        spec: ProgramSpec,
+        cols: Int,
+        rows: Int,
+        steps: Int? = nil,
+        scrolling: Bool = false,
+        mapping: ColumnMapping = .fit,
+        board: Board? = nil
+    ) {
         let displayCols = max(1, cols)
         let displayRows = max(1, rows)
+        let runBoard = board ?? spec.board
         self.spec = spec
         self.cols = displayCols
         self.rows = displayRows
         self.scrolling = scrolling
+        self.mapping = mapping
+        self.board = runBoard
+        let origin = mapping == .window
+            ? ViewportGeometry.initialOrigin(
+                boardWidth: runBoard.width, cols: displayCols, start: runBoard.start,
+                pinRight: spec.display.pinRight)
+            : 0
+        self.startOrigin = origin
+        self.viewportOrigin = origin
         self.totalSteps = scrolling
             ? Int.max
-            : max(1, steps ?? min(spec.board.height, spec.display.stepLimit))
+            : max(1, steps ?? min(runBoard.height, spec.display.stepLimit))
         self.capacity = displayRows + 2
-        self.program = spec.makeProgram()
-        self.fit = Fit(boardWidth: spec.board.width, displayCols: displayCols, pinRight: spec.display.pinRight)
+        self.program = spec.reference(runBoard)
+        self.fit = Fit(boardWidth: runBoard.width, displayCols: displayCols, pinRight: spec.display.pinRight)
         self.grid = ColorGrid(cols: displayCols, rows: displayRows)
         self.ring = Array(repeating: [], count: displayRows + 2)
         if scrolling {
@@ -53,6 +81,22 @@ public final class IncrementalRenderer {
     }
 
     public var colorGrid: ColorGrid { grid }
+
+    /// Largest `viewportOrigin` a `.window` mapping can pan to; 0 for `.fit`.
+    public var maxViewportOrigin: Int {
+        mapping == .window ? max(0, board.width - cols) : 0
+    }
+
+    /// Shifts a `.window` mapping `delta` source columns, clamped to the board,
+    /// and refits. A no-op for the `.fit` mapping or a non-scrolling run, which
+    /// does not keep the history a refit reads.
+    public func pan(by delta: Int) {
+        guard mapping == .window, scrolling else { return }
+        let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
+        guard origin != viewportOrigin else { return }
+        viewportOrigin = origin
+        refit()
+    }
 
     public var progress: Double {
         totalSteps <= 1 ? 1 : Double(step) / Double(totalSteps - 1)
@@ -86,7 +130,8 @@ public final class IncrementalRenderer {
     }
 
     public func reset() {
-        program = spec.makeProgram()
+        program = spec.reference(board)
+        viewportOrigin = startOrigin
         step = 0
         settled = false
         grid = ColorGrid(cols: cols, rows: rows)
@@ -117,7 +162,7 @@ public final class IncrementalRenderer {
         let row = program.row()
         while nextDisplayRow < rows, targetStep(forDisplayRow: nextDisplayRow) <= sourceStep {
             for col in 0..<cols {
-                grid[col, nextDisplayRow] = fit.value(in: row, displayCol: col)
+                grid[col, nextDisplayRow] = value(in: row, displayCol: col)
             }
             nextDisplayRow += 1
         }
@@ -135,7 +180,21 @@ public final class IncrementalRenderer {
                 continue
             }
             let row = ring[sourceStep % capacity]
-            for col in 0..<cols { grid[col, displayRow] = fit.value(in: row, displayCol: col) }
+            for col in 0..<cols { grid[col, displayRow] = value(in: row, displayCol: col) }
+        }
+    }
+
+    /// The palette index display column `displayCol` shows. `.fit` maps the
+    /// whole board into the display; `.window` reads the cell `viewportOrigin`
+    /// columns to the right, background past the board edge.
+    private func value(in row: [UInt8], displayCol: Int) -> UInt8 {
+        switch mapping {
+        case .fit:
+            return fit.value(in: row, displayCol: displayCol)
+        case .window:
+            let index = viewportOrigin + displayCol
+            guard index >= 0, index < board.width else { return 0 }
+            return row[index]
         }
     }
 }

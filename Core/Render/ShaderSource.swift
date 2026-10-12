@@ -238,4 +238,70 @@ public enum ShaderSource {
         return in.color;
     }
     """
+
+    /// The "working" indicator the review window shows while the model runs:
+    /// expanding rings over the background, time-driven in the fragment shader
+    /// so no per-frame geometry is built on the CPU.
+    public static let indicator = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    struct IndicatorUniforms {
+        float time;      // seconds since the animation started
+        float aspect;    // drawable width / height
+        float thickness; // gaussian band width in radius units
+        float padding;
+        float4 background;
+        float4 ink;
+    };
+
+    struct IndicatorVertexOut {
+        float4 position [[position]];
+        float2 uv;
+    };
+
+    // A single oversized triangle covers the drawable; the fragment paints the
+    // rings from the interpolated coordinate.
+    vertex IndicatorVertexOut indicator_vertex(uint vid [[vertex_id]]) {
+        float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+        float2 position = positions[vid];
+        IndicatorVertexOut out;
+        out.position = float4(position, 0.0, 1.0);
+        out.uv = position * 0.5 + 0.5;
+        return out;
+    }
+
+    fragment float4 indicator_fragment(IndicatorVertexOut in [[stage_in]],
+                                       constant IndicatorUniforms& u [[buffer(0)]]) {
+        // Seconds per full expansion. Long and calm, so the rings read as slow
+        // water rather than a metronome.
+        const float RING_SECONDS = 5.0;
+
+        float2 p = (in.uv - 0.5) * float2(u.aspect, 1.0);
+        // 0 at the centre, 1 at the top/bottom edge, so rings stay circular.
+        float radius = length(p) * 2.0;
+        // A slow angular wobble keeps a ring off a perfect circle, the way a
+        // ripple distorts as it crosses moving water.
+        float angle = atan2(p.y, p.x);
+        radius += 0.02 * sin(angle * 5.0 + u.time * 0.6);
+        float alpha = 0.0;
+        for (int i = 0; i < 6; ++i) {
+            // Each ring is offset a sixth of the cycle. It grows out to the edge
+            // and pulls back in, so the whole thing beats like a heart rather
+            // than only expanding.
+            float phase = fract(u.time / RING_SECONDS + float(i) / 6.0);
+            float grow = phase < 0.5 ? phase * 2.0 : (1.0 - phase) * 2.0;
+            float d = radius - grow;
+            // A wide gaussian band instead of a hard edge: soft and diffuse.
+            float band = exp(-(d * d) / (u.thickness * u.thickness));
+            // Brightest at full expansion, dark at the centre, like a pulse.
+            float pulse = sin(phase * 3.14159265);
+            // A faint travelling shimmer, like light across disturbed water.
+            float shimmer = 0.82 + 0.18 * sin(radius * 22.0 - u.time * 1.4);
+            alpha += band * pulse * shimmer;
+        }
+        alpha = clamp(alpha, 0.0, 1.0);
+        return mix(u.background, u.ink, alpha);
+    }
+    """
 }

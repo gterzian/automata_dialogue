@@ -5,6 +5,37 @@ cell, row-major) and, on the Metal path, into a GPU buffer. Three seams split
 it: **simulation core**, **frame sink** (delivery), and **frame clock**
 (pacing).
 
+## Pipeline
+
+The on-screen path is GPU-resident end to end: the CPU sets parameters and
+never moves cell data. One frame is three passes —
+1. **advance the board** (`MetalSimulation.advance`): a batch of `step_*`
+   dispatches writes the chunk into the board's history buffer;
+2. **clip to the viewport** (`fit`): the newest `rows` source rows × the
+   `viewportOrigin` columns become `colorBuffer`, which *is* the visible cell
+   grid;
+3. **draw** (`LayerRenderer`): `runs`/`encode_draw` compact that grid into
+   spans and a GPU-written indirect draw, and the render pass issues it.
+
+Nothing crosses the CPU between the passes. A sink that asks for
+`wantsGPUResidentFrames` gets a `GPUColorGrid` aliasing the simulation's
+buffer, and the pass draws the compute output directly. That is why the panel
+simulates a **board much wider than the window**
+(`ViewportGeometry.boardWidth`) and renders only a viewport, instead of fitting
+a whole board into a still frame: the pattern can leave the window and keep
+going, and the view pans to follow it. The catalog board width is a property of
+the entry, not of the display; the run's board is passed explicitly.
+
+The two dependencies are different and are ordered explicitly: a
+**dispatch→dispatch** barrier separates the sequential step rows (row *n+1*
+reads the row *n* just wrote), and a **dispatch→vertex** barrier publishes the
+spans and draw arguments before the render pass reads them. The step rows
+cannot be one dispatch — for a board wider than a threadgroup, tile halos would
+have to grow with the row count — so they are a batch of dispatches. A full
+`MTLIndirectCommandBuffer` is unnecessary: the command shape is constant and
+only the instance count varies, which the indirect argument buffer already
+carries.
+
 ## What exists
 
 - **CPU reference path** (`CPUAutomatonRenderer`, `IncrementalRenderer`) — runs
@@ -27,7 +58,9 @@ it: **simulation core**, **frame sink** (delivery), and **frame clock**
   a dedicated run-loop thread and delivers `RenderFrame`s to a `FrameSink`;
   `ReadbackSink` retains the latest frame for a CPU consumer. `RenderPacing`
   turns clock ticks into advances: `.fixed` for deterministic tests, `.timed`
-  accumulates `Δ × stepsPerSecond` and clamps each tick.
+  accumulates `Δ × stepsPerSecond` and clamps each tick; `setPacing` changes a
+  driven run's rate in flight. `pan(by:)` slides the window and `restart()`
+  reseeds without dropping the sink.
   `RenderActor.makeLayerSink(layer:)` builds a layer sink on the actor's own
   `GPUContext`, so the sink and the simulation share one device, queue, and
   residency set.
@@ -49,6 +82,15 @@ it: **simulation core**, **frame sink** (delivery), and **frame clock**
   GPU, and a render pass clears to the background and draws one instanced quad
   per span. `RenderActor.drive(clock:pacing:)` starts the clock on the render
   thread.
+- **Working indicator** (`ShaderSource.indicator`, `IndicatorRenderer`,
+  `WorkingIndicator`, `IndicatorActor`) — the beating ring animation the
+  review window shows while the model runs: rings grow out to the edge and pull
+  back in. One full-screen triangle; the
+  fragment shader paints the rings from a `time` uniform, so no per-frame
+  geometry is built on the CPU. `IndicatorActor` owns the `GPUContext`,
+  renderer, and `DisplayLinkClock` on its own `RenderExecutor`, the way
+  `RenderActor` does for a run, and reuses the indicator and layer across runs
+  so the pipeline compiles once.
 - **Fit** (`Fit`) — the one geometry rule both paths use.
 
 Both paths converge on the same `ColorGrid`; the readback test compares them.
@@ -60,9 +102,24 @@ Both paths converge on the same `ColorGrid`; the readback test compares them.
 (E110). A display column that reaches past the board reads background; it never
 wraps to the left edge.
 
+The animating panel sizes its grid with `ViewportGeometry` instead of `Fit`: a
+cell edge of `minimumCellPoints` (4 points, the reference visualizer's cell)
+sets `cols`, and the run simulates a board `boardWindows` (10) windows wide so
+the pattern keeps going after it leaves the first window and the view has room
+to pan. `ColumnMapping.window` maps one board cell per display column at a
+movable `viewportOrigin` (kernel block 1), and `LayerRenderer` stretches the
+small cell grid over the whole drawable. `IncrementalRenderer`/`MetalSimulation`
+take the simulated board explicitly, so a narrow catalog entry still runs on a
+wide board; `pan(by:)` slides the origin, clamped to `boardWidth - cols`, and
+`RenderActor.pan(by:)` re-fits and delivers. A run starts centred on the board
+(rightmost for a rightmost or `pinRight` entry), grows from the top until the
+window fills, then scrolls with the newest row at the bottom.
+`ColumnMapping.fit` stays the still-image mapping for `CPUAutomatonRenderer`
+and the CLI's `render` command.
+
 Remaining work: majority vote erases sparse single-cell features when a board
-is downsampled (E90's Sierpinski seeds at a reduced width). Boards narrower
-than the panel use `k = 1` (upscale), so this only affects the 6101-wide
+is downsampled (E90's Sierpinski seeds at a reduced width). Under `.fit`,
+boards narrower than the panel use `k = 1`, so this only affects the 6101-wide
 entries, which are dense. If a sparse entry ever needs downsampling, revisit
 `Fit` and the Metal `fit` kernel together.
 
@@ -109,10 +166,15 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
 - **App wiring.** `RaterModel` still animates with `IncrementalRenderer` on the
   main actor and draws a `CGImage`; it should host a `CAMetalLayer`, ask the
   actor for a `LayerSink` with `makeLayerSink(layer:)`, `configure` the actor
-  with it, and `drive` its clock with `.timed`. The app target cannot be
-  type-checked in this sandbox (the SwiftUI macro plugin is blocked), so this
-  is untested here. The CLI's `rate` window exercises this same wiring
-  (`CLI/README.md`).
+  with `mapping: .window` and a `ViewportGeometry` grid, set the layer's
+  `drawableSize` to that cell grid (re-applied after layout), and `drive` its
+  clock with `.timed`. The app target cannot be type-checked in this sandbox
+  (the SwiftUI macro plugin is blocked), so this is untested here. The CLI's
+  `rate` window now exercises this same wiring (`CLI/README.md`).
+- **`MetalSimulation.commit` waits on the GPU after every frame**, so the
+  three-slot ring never overlaps and the CPU stalls each tick. The GPU-resident
+  path could skip the wait with per-slot `FitParams`/uniform buffers; the
+  readback path must keep it.
 - **`LEDSink`** behind the `RATER_SINK_LED` flag. Its geometry, colour order,
   and transport are open decisions, so it waits on hardware.
 
@@ -127,10 +189,13 @@ GPU `step`/`fit` kernels and asserts the `ColorGrid` equals
 `CPUAutomatonRenderer`'s for binary, 3-color, and right-pinned entries.
 `RenderActorTests` asserts the GPU incremental path matches `IncrementalRenderer`
 frame for frame (including the partially filled grid mid-run and a scrolling
-run's moving window), that the render
-actor runs off the main thread, that `drive` advances on a clock tick, and that
-`.timed` pacing follows the tick delta. `LayerTests` compares the `runs` span
+run's moving window), that the `.window` mapping and a pan match the CPU on a
+board ten windows wide, that `restart` reseeds and `setPacing` changes the
+rate, that the render actor runs off the main thread, that `drive` advances on
+a clock tick, and that `.timed` pacing follows the tick delta. `LayerTests`
+compares the `runs` span
 compaction with a CPU run-length pass, checks the incremental GPU path's
 accumulated spans against a full CPU compaction, and reads the rendered texture
-back to check spans are filled with palette colours. The display-link
-presentation itself needs a screen and is not tested here.
+back to check spans are filled with palette colours. `IndicatorTests` checks
+the beating rings draw over the background and change with `time`. The
+display-link presentation itself needs a screen and is not tested here.
