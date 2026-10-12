@@ -33,8 +33,8 @@ public enum ImageImportError: Error, LocalizedError, Equatable {
 }
 
 /// Loads a dropped file, normalizes it to the model's 512×512 input, and writes
-/// it into the session's temp folder (design doc §5.3). Pure CoreGraphics +
-/// ImageIO so `Core` stays AppKit-free.
+/// it into the session's temp folder. Pure CoreGraphics + ImageIO so `Core`
+/// stays AppKit-free.
 public enum ImageImport {
     public static let modelDimension = 512
 

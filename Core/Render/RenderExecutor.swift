@@ -1,6 +1,6 @@
 import Foundation
 
-/// A `SerialExecutor` over a dedicated thread's `CFRunLoop` (design doc §6).
+/// A `SerialExecutor` over a dedicated thread's `CFRunLoop`.
 /// Metal objects, drawable acquisition, and `present` are confined here so the
 /// main thread only configures the layer and posts commands. The run loop is
 /// also where a `CAMetalDisplayLink` schedules its ticks, so a tick and the

@@ -9,7 +9,7 @@ public enum Behavior: String, Sendable, Hashable, CaseIterable, Codable {
     case complexity
 }
 
-/// Up to 16 colors; index 0 is the background (design doc §4). Colors are
+/// Up to 16 colors; index 0 is the background. Colors are
 /// `float4`-shaped so the Metal `fit`/render path can upload the palette
 /// unchanged.
 public struct PaletteColor: Sendable, Hashable {

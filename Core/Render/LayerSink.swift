@@ -9,7 +9,7 @@ import QuartzCore
 // it with the render actor, so the cross-actor hand-off is accepted.
 extension CAMetalLayer: @unchecked @retroactive Sendable {}
 
-/// A `FrameClock` over `CAMetalDisplayLink` (design doc §6). It is added to the
+/// A `FrameClock` over `CAMetalDisplayLink`. It is added to the
 /// render actor's run loop, so ticks and the `LayerSink` draw happen on the
 /// thread that owns the Metal objects. `preferredFrameLatency = 2` keeps two
 /// frames in flight, matching the three frame slots.
@@ -30,7 +30,7 @@ public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDel
         link.preferredFrameLatency = 2
     }
 
-    /// Frames kept in flight; two matches the three frame slots (design doc §6).
+    /// Frames kept in flight; two matches the three frame slots.
     public var preferredFrameLatency: Float {
         get { link.preferredFrameLatency }
         set { link.preferredFrameLatency = newValue }
@@ -58,7 +58,7 @@ public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDel
 }
 
 /// Presents the latest delivered `RenderFrame` through a `CAMetalLayer` as the
-/// display link ticks (design doc §6). It is a `FrameSink`, so the render actor
+/// display link ticks. It is a `FrameSink`, so the render actor
 /// hands it frames; the `DisplayLinkClock` supplies the drawable and pacing.
 /// The app starts the clock and advances the actor from its tick.
 @available(macOS 26.0, *)
@@ -77,7 +77,7 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         self.clock = DisplayLinkClock(layer: layer)
         self.renderer = try LayerRenderer(context: context, pixelFormat: layer.pixelFormat)
         // The layer owns the residency of its drawables; the queue must know
-        // about it (design doc §11.11).
+        // about it.
         context.queue.addResidencySet(layer.residencySet)
         clock.onDrawable = { [weak self] drawable, _ in self?.render(drawable) }
     }
@@ -89,7 +89,7 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
     }
 
     /// The layer binds the simulation's color buffer directly, so the actor
-    /// skips the per-frame CPU readback (design doc §7).
+    /// skips the per-frame CPU readback.
     public var wantsGPUResidentFrames: Bool { true }
 
     public func finish() {

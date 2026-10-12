@@ -3,7 +3,7 @@ import Foundation
 import QuartzCore
 
 /// Owns the Metal objects for one app and confines them to a dedicated run
-/// loop (design doc §6). The main thread configures a run, advances it, and
+/// loop. The main thread configures a run, advances it, and
 /// receives `RenderFrame`s through a `FrameSink`; no Metal call or `present`
 /// runs on the main thread. `configure` and `advance` are synchronous on the
 /// render actor, so their committed work has completed (and for the readback

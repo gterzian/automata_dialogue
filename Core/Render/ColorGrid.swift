@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// One palette index per display cell, row-major (design doc §5.4.1). Row 0 is
+/// One palette index per display cell, row-major. Row 0 is
 /// the seed row and rows increase downward in time.
 public struct ColorGrid: Sendable, Hashable {
     public var cols: Int

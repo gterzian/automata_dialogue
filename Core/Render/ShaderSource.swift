@@ -29,7 +29,7 @@ public enum ShaderSource {
 
     // The row being computed is read from a GPU-side head counter that
     // `bump_head` advances, so every dispatch in the run binds the same
-    // buffers (design doc §11.9 fallback). The argument table is live at GPU
+    // buffers. The argument table is live at GPU
     // execution time, so per-dispatch address updates would all resolve to the
     // last value.
     kernel void step_eca(device uchar* history [[buffer(0)]],
@@ -133,8 +133,8 @@ public enum ShaderSource {
     #include <metal_stdlib>
     using namespace metal;
 
-    // One horizontal run of same-colour, non-background cells (design doc §6:
-    // draw cost follows the structure). Layout mirrors `LayerRenderer.Span`.
+    // One horizontal run of same-colour, non-background cells (draw cost
+    // follows the structure). Layout mirrors `LayerRenderer.Span`.
     struct Span {
         uint row;
         uint start;

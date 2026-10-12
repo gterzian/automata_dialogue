@@ -188,7 +188,8 @@ func printUsage() -> Never {
       rate <path|dir> ...               run the MLX agent over reference images
         a directory contributes its top-level images
         options: --model <dir> [--quiet] [--show-prompt] [--show]
-        --show opens each chosen automaton in a Metal window and waits for close
+        --show shows each input image, then opens the chosen automaton in a
+        Metal window and waits for close
         (--model default: RATER_MODEL_PATH; downloads are disabled)
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
@@ -216,16 +217,36 @@ final class MetalHostView: NSView {
     override func makeBackingLayer() -> CALayer { metalLayer }
 }
 
-/// Presents one automaton in a window using `Core/Render`'s on-screen path: a
-/// `RenderActor` owns a `LayerSink` over `MetalHostView.metalLayer` and drives
-/// its `DisplayLinkClock` with `.timed` pacing. `present` suspends until the
-/// user closes the window, so a caller can step through a batch one at a time;
-/// `NSApplication.run()` keeps delivering the close event while it is suspended.
+/// Presents the input image, then one automaton, in a single window using
+/// `Core/Render`'s on-screen path: a `RenderActor` owns a `LayerSink` over
+/// `MetalHostView.metalLayer` and drives its `DisplayLinkClock` with `.timed`
+/// pacing. `showInput` returns immediately so the input stays visible while the
+/// model runs; `present` then swaps the automaton into the same window and
+/// suspends until the user closes it, so a caller can step through a batch one
+/// at a time. `NSApplication.run()` keeps delivering the close event while it
+/// is suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var host: MetalHostView?
     private var closeContinuation: CheckedContinuation<Void, Never>?
+
+    /// Shows `image` and returns. The next `present` reuses the window; if it
+    /// was closed first, `present` opens a fresh one.
+    func showInput(_ image: NSImage, title: String) {
+        var size = image.size
+        if size.width <= 0 || size.height <= 0 { size = CGSize(width: 512, height: 512) }
+        let maxSize = CGSize(width: 1000, height: 700)
+        let scale = min(1, maxSize.width / size.width, maxSize.height / size.height)
+        size = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+        let window = ensureWindow(size: size, title: title)
+        let view = NSImageView(frame: NSRect(origin: .zero, size: size))
+        view.image = image
+        view.imageScaling = .scaleProportionallyUpOrDown
+        window.contentView = view
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+    }
 
     func present(_ spec: ProgramSpec) async {
         guard GPUContext.isAvailable else {
@@ -245,21 +266,6 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         // One drawable pixel per display cell; the layer scales it to the view.
         host.metalLayer.drawableSize = CGSize(width: cols, height: rows)
 
-        let window = NSWindow(
-            contentRect: content,
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "\(spec.id) — \(spec.title)"
-        window.contentView = host
-        window.delegate = self
-        // This type holds the window; let ARC release it, not AppKit.
-        window.isReleasedWhenClosed = false
-        window.center()
-        self.window = window
-        self.host = host
-
         let actor = RenderActor()
         var sink: LayerSink?
         do {
@@ -274,25 +280,59 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         } catch {
             print("--show: \(spec.id) failed to render: \(error.localizedDescription)")
             await actor.shutdown()
-            self.window = nil
             self.host = nil
             return
         }
 
+        // The input window (if any) stayed on screen through setup; swap in the
+        // automaton now that it is ready.
+        let window = ensureWindow(size: content.size, title: "\(spec.id) — \(spec.title)")
+        window.contentView = host
+        self.host = host
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            self.closeContinuation = continuation
-        }
+        await waitForClose()
 
         if let sink { await actor.stopDriving(clock: sink.clock) }
         await actor.shutdown()
-        self.window = nil
         self.host = nil
     }
 
+    /// Suspends until the current window is closed; returns immediately when no
+    /// window is open.
+    func waitForClose() async {
+        guard window != nil else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            self.closeContinuation = continuation
+        }
+    }
+
+    /// Reuses the open window at the new size, or opens one centered at `size`.
+    private func ensureWindow(size: CGSize, title: String) -> NSWindow {
+        if let window {
+            window.title = title
+            window.setContentSize(size)
+            return window
+        }
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = title
+        window.delegate = self
+        // This type holds the window; let ARC release it, not AppKit.
+        window.isReleasedWhenClosed = false
+        window.center()
+        self.window = window
+        return window
+    }
+
     func windowWillClose(_ notification: Notification) {
+        // The next `showInput`/`present` opens a fresh window.
+        window = nil
         closeContinuation?.resume()
         closeContinuation = nil
     }
@@ -491,10 +531,17 @@ func runRateWindowed(_ setup: RateSetup) async {
         let directory = ImageImport.sessionDirectory(for: sessionID)
         var chosen = 0
         for path in setup.paths {
+            // Show the input while the model runs, so the reviewer sees what the
+            // automaton is answering; `present` then swaps in the automaton.
+            if let image = NSImage(contentsOfFile: path) {
+                presenter.showInput(image, title: URL(fileURLWithPath: path).lastPathComponent)
+            }
             let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
             if let spec = printRateOutcome(outcome) {
                 chosen += 1
                 await presenter.present(spec)
+            } else {
+                await presenter.waitForClose()
             }
         }
         ImageImport.removeSessionDirectory(for: sessionID)

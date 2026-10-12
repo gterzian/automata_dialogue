@@ -2,7 +2,7 @@ import Foundation
 
 /// Owns the full, ordered transcript off-main. Settled entries are persisted as
 /// append-only JSONL; the streaming assistant row is mutated in memory and
-/// persisted once when the run finishes or fails (design doc §7).
+/// persisted once when the run finishes or fails.
 public final class TranscriptStore: @unchecked Sendable {
     /// What an `apply(_:)` call changed, so a view can refresh minimally.
     public enum Mutation: Equatable, Sendable {

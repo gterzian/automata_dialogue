@@ -3,7 +3,7 @@ import Metal
 
 /// A reusable per-frame command allocator and command buffer. `FrameSlotRing`
 /// rotates three of them so a sink that does not wait on readback can encode
-/// frame N+1/N+2 while the GPU runs N (design doc §11.8). The readback path
+/// frame N+1/N+2 while the GPU runs N. The readback path
 /// waits after every commit, so the rotation is structural today; a
 /// `LayerSink` returns from its drawable callback and lets the ring overlap.
 @available(macOS 26.0, *)
@@ -50,7 +50,7 @@ final class FrameSlotRing {
     }
 }
 
-/// The GPU simulation core, sink-independent (design doc §6). It owns the
+/// The GPU simulation core, sink-independent. It owns the
 /// history buffer, the GPU-side `head` counter, and the `step`/`fit` kernels,
 /// and advances a caller-sized chunk of source rows so a caller can animate
 /// instead of running the whole board in one commit. `render(chunk:)` produces
@@ -196,7 +196,7 @@ public final class MetalSimulation {
 
     /// Advances without reading the grid back, returning the run's GPU color
     /// buffer and the display rows this call fitted. A GPU-resident sink binds
-    /// the buffer directly and compacts only the new rows (design doc §7).
+    /// the buffer directly and compacts only the new rows.
     @discardableResult
     public func renderGPU(chunk: Int) throws -> GPUColorGrid {
         let firstRow = fittedRows

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Owns delivery of a finished frame (design doc §6). The simulation core is
+/// Owns delivery of a finished frame. The simulation core is
 /// sink-independent: the same `MetalSimulation` feeds the screen, CPU readback,
 /// and the LED path through different sinks. A sink is confined to the render
 /// actor, so implementations may hold mutable state without locking; they are
@@ -78,9 +78,7 @@ public final class ReadbackSink: FrameSink, @unchecked Sendable {
     }
 }
 
-/// The delivery surfaces the design lists. `.readback` and `.layer` are built;
-/// `.led` waits on hardware (see `Core/Render/README.md`). The factory builds
-/// only context-free sinks, so a `LayerSink` comes from
+/// The factory builds only context-free sinks, so a `LayerSink` comes from
 /// `RenderActor.makeLayerSink(layer:)`, which supplies the actor's context.
 public enum SinkKind: Sendable, CaseIterable {
     case readback

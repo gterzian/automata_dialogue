@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Grows a `ColorGrid` one source row at a time so an animating view does not
-/// re-run the whole history on every tick (design doc §6, render ahead). It
+/// re-run the whole history on every tick. It
 /// produces exactly the grid `CPUAutomatonRenderer` would for the same size and
 /// step count. Not thread-safe: one queue owns it.
 public final class IncrementalRenderer {

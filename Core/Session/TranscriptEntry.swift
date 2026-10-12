@@ -12,8 +12,7 @@ public struct TranscriptEntry: Identifiable, Hashable, Sendable, Codable {
     }
 }
 
-/// The row kinds (design doc §5.2, adapted: no separate tool-call card model —
-/// the choice is a first-class card).
+/// One row kind. The choice is a first-class card, not a separate tool-call row.
 public enum TranscriptEntryKind: Hashable, Sendable, Codable {
     case userInput(text: String, imagePath: String?)
     case choice(Choice)

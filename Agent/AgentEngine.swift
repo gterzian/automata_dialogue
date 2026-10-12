@@ -17,7 +17,7 @@ public enum AgentEngineError: Error, LocalizedError {
     }
 }
 
-/// The MLX VLM implementation of `AgentRunning` (design doc §3, §11.6). Each run
+/// The MLX VLM implementation of `AgentRunning`. Each run
 /// is one self-contained turn: a fresh `ChatSession` carries the immutable system
 /// prompt, the current input, and a single plain-text answer, so latency is
 /// constant and the prompt prefix is cacheable. The model container is loaded

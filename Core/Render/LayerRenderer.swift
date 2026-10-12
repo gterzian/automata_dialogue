@@ -4,8 +4,8 @@ import Metal
 /// Encodes a fitted `ColorGrid` into a render target: a `runs` kernel compacts
 /// each non-background run of same-coloured cells into a `Span`, an
 /// `encode_draw` kernel writes the indirect draw arguments on the GPU, and a
-/// render pass clears to the background colour and draws one quad per span
-/// (design doc §6). Draw cost therefore follows the structure, not the grid
+/// render pass clears to the background colour and draws one quad per span.
+/// Draw cost therefore follows the structure, not the grid
 /// area. The same code path serves a `CAMetalLayer` drawable and the offscreen
 /// test texture.
 ///
@@ -14,7 +14,7 @@ import Metal
 ///   path, offscreen tests, a `LayerSink` fed a readback frame).
 /// - `render(gpu:)` binds a `GPUColorGrid` directly and compacts only its new
 ///   rows, appending to the spans already accumulated. Display rows never
-///   change once fitted, so the accumulated spans stay valid (design doc §7).
+///   change once fitted, so the accumulated spans stay valid.
 @available(macOS 26.0, *)
 final class LayerRenderer {
     /// Mirrors the `Span` struct in `ShaderSource.layer`.

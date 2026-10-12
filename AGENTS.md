@@ -1,8 +1,8 @@
 # AGENTS.md — Automata Rater
 
 Automata Rater: a native macOS app where a local MLX agent chooses one of 106
-curated cellular automata to display for an input. The design of record is the
-draft design doc and the two artifacts in `artifacts/`.
+curated cellular automata to display for an input. The catalog and rubric live
+in the two artifacts in `artifacts/`.
 
 ## Product intent
 
@@ -112,11 +112,10 @@ the file that owns it ("see `Core/Catalog/README.md`") rather than restating it.
 - Toolchain: Swift 6.4, `swift-tools-version: 6.0`, macOS 26, strict
   concurrency (`complete`).
 
-## Product decisions (deviations from the design doc)
+## Product decisions
 
 1. **No in-app drawing.** The user drags an existing image file onto the input.
-   The drawing popover/canvas of the design doc is dropped; see
-   `Core/Import/README.md`.
+   There is no drawing popover/canvas; see `Core/Import/README.md`.
 2. **Single panel.** One panel shows the running automaton; the choice card and
    the input occupy the same panel. No split view, no session tabs in v1. See
    `Client/README.md`.
@@ -142,8 +141,8 @@ the file that owns it ("see `Core/Catalog/README.md`") rather than restating it.
 
 ## Style
 
-- Comments explain *why*, not *what*. Cite the inventory or design section when
-  a constant or rule comes from there.
+- Comments explain *why*, not *what*. Cite the inventory when a constant or
+  rule comes from there.
 - Keep additions small and tested.
 
 ## README documentation policy

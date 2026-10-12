@@ -1,6 +1,6 @@
 import Foundation
 
-/// Owns pacing (design doc §6): the sink decides *how* a frame is delivered,
+/// Owns pacing: the sink decides *how* a frame is delivered,
 /// the clock decides *when* the simulation advances. A `CAMetalDisplayLink`-
 /// backed clock runs the tick on the render actor's run loop, the same thread
 /// that owns the Metal objects, so presentation stays off the main thread.
@@ -13,8 +13,8 @@ public protocol FrameClock: AnyObject, Sendable {
     func stop()
 }
 
-/// How `drive` turns clock ticks into source-row advances (design doc §7: render
-/// ahead, paced by the display link's elapsed time). `.fixed` keeps the
+/// How `drive` turns clock ticks into source-row advances (render ahead, paced
+/// by the display link's elapsed time). `.fixed` keeps the
 /// deterministic per-tick advance the tests pump by hand; `.timed` follows the
 /// real tick delta so the run looks the same on a 60 Hz and a 120 Hz display.
 public struct RenderPacing: Sendable, Equatable {

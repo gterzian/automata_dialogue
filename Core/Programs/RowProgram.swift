@@ -29,7 +29,3 @@ public protocol RowProgram: Sendable {
     mutating func step()
     func row() -> [UInt8]
 }
-
-/// The design doc's `any Program`. Kept as a distinct name so the inventory's
-/// `RowProgram` wording still reads naturally.
-public typealias Program = RowProgram

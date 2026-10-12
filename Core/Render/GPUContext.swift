@@ -1,9 +1,7 @@
 import Foundation
 import Metal
 
-/// One per app, created on the render actor (design doc §5.4.3). Owns the
-/// device, the Metal 4 command queue, the compiler, the simulation pipelines,
-/// and the residency set shared by every buffer.
+/// One per app, created on the render actor.
 @available(macOS 26.0, *)
 public final class GPUContext {
     public enum GPUError: Error, LocalizedError {
@@ -103,8 +101,7 @@ public final class GPUContext {
         }
     }
 
-    /// Adds buffers to the residency set and commits the change (design doc
-    /// §5.4.3: residency sets are Metal 4's only residency mechanism).
+    /// Residency sets are Metal 4's only residency mechanism.
     public func makeResident(_ buffers: [any MTLBuffer]) {
         for buffer in buffers { residency.addAllocation(buffer) }
         residency.commit()

@@ -1,7 +1,6 @@
 import Foundation
 
-/// How the GPU advances an entry (design doc §4). The simulation core switches
-/// on this to pick a step kernel and its constants.
+/// How the GPU advances an entry.
 public enum GPUProgram: Sendable, Hashable {
     /// Radius 1, 2 colors; `rule` is the Wolfram code.
     case elementary(rule: UInt8)
@@ -40,13 +39,13 @@ public struct Board: Sendable, Hashable {
     }
 }
 
-/// Per-entry run settings (design doc §4).
+/// Per-entry run settings.
 public struct DisplayHints: Sendable, Hashable {
     /// Steps advanced per second of wall time. The surface accumulates
     /// `Δt × stepsPerSecond` and caps each tick at 64 steps.
     public var stepsPerSecond: Double
     /// Total steps before the pattern settles and the clock pauses. Defaults
-    /// to four times the board height (design doc §5.4.3); a few long-transient
+    /// to four times the board height; a few long-transient
     /// entries override it.
     public var stepLimit: Int
     /// E110 grows leftward from the rightmost cell; the view follows the
@@ -62,9 +61,8 @@ public struct DisplayHints: Sendable, Hashable {
     }
 }
 
-/// One row of the single table that feeds the renderer, the prompt index, and
-/// the tool-schema enum (design doc §4). `reference` builds the CPU program
-/// that the GPU kernels are tested against.
+/// One row of the single table that feeds the renderer and the prompt index.
+/// `reference` builds the CPU program that the GPU kernels are tested against.
 public struct ProgramSpec: Sendable {
     public let id: String
     public let title: String

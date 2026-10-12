@@ -1,6 +1,6 @@
 import Foundation
 
-/// The curated inventory as one table (design doc §4). Exactly 106 entries, in
+/// The curated inventory as one table. Exactly 106 entries, in
 /// the inventory's order; the system prompt's automata listing and the CLI
 /// catalog print are generated from this table.
 public enum Catalog {

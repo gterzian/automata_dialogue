@@ -2,9 +2,8 @@ import Foundation
 import Metal
 
 /// A `ColorGrid` that stays on the GPU plus the display rows written since the
-/// previous frame (design doc §7: deliver the GPU `colorBuffer` and the
-/// newly-ready row range so only new rows are compacted). A sink that can bind
-/// the buffer directly skips the per-frame CPU readback.
+/// previous frame, so a sink that can bind the buffer directly skips the
+/// per-frame CPU readback.
 ///
 /// The buffer belongs to the live `MetalSimulation`; a sink may read it only on
 /// the render actor, and a reconfigured run replaces it.
@@ -31,8 +30,8 @@ public struct GPUColorGrid: @unchecked Sendable {
 
 /// One delivered frame: the fitted grid plus enough run state for a sink to
 /// present it or to know when the run has settled. The sink looks the
-/// `ProgramSpec` up from the catalog by `specID` (design doc §8: a transcript
-/// stores only the id and rebuilds from the catalog), so a frame stays small
+/// `ProgramSpec` up from the catalog by `specID` (a transcript stores only the
+/// id and rebuilds from the catalog), so a frame stays small
 /// and `Sendable` across the render actor boundary.
 ///
 /// Exactly one of `grid` and `gpu` is set, chosen by
@@ -52,7 +51,6 @@ public struct RenderFrame: Sendable {
     public let totalSteps: Int
     /// True once `step` has reached the last source row.
     public let settled: Bool
-    /// Index of the frame slot that produced this frame (design doc §11.8).
     public let slot: Int
 
     public init(

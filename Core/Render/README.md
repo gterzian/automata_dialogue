@@ -1,11 +1,9 @@
 # Core/Render
 
 Turns a `ProgramSpec` into a `ColorGrid` (one `UInt8` palette index per display
-cell, row-major) and, on the Metal path, into a GPU buffer. The design's three
-seams — **simulation core**, **frame sink** (delivery), **frame clock**
-(pacing) — are built: the CPU reference, the sink-independent GPU simulation,
-the dedicated render actor, a readback sink, and the on-screen `LayerSink`
-driven by `DisplayLinkClock`. The LED sink remains.
+cell, row-major) and, on the Metal path, into a GPU buffer. Three seams split
+it: **simulation core**, **frame sink** (delivery), and **frame clock**
+(pacing).
 
 ## What exists
 
@@ -25,7 +23,7 @@ driven by `DisplayLinkClock`. The LED sink remains.
   a dedicated run-loop thread and delivers `RenderFrame`s to a `FrameSink`;
   `ReadbackSink` retains the latest frame for a CPU consumer. `RenderPacing`
   turns clock ticks into advances: `.fixed` for deterministic tests, `.timed`
-  accumulates `Δ × stepsPerSecond` and clamps each tick (design doc §7).
+  accumulates `Δ × stepsPerSecond` and clamps each tick.
   `RenderActor.makeLayerSink(layer:)` builds a layer sink on the actor's own
   `GPUContext`, so the sink and the simulation share one device, queue, and
   residency set.
@@ -68,8 +66,8 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
   addresses between encoded dispatches makes every dispatch resolve to the
   final address. The step kernels therefore read the current row from a
   GPU-side `head` counter that a 1-thread `bump_head` kernel advances, so all
-  argument tables have constant bindings (design doc §11.9, the "one-thread
-  kernel advances a GPU-side head counter" fallback).
+  argument tables have constant bindings (the "one-thread kernel advances a
+  GPU-side head counter" fallback).
 - **`CFRunLoopRun()` returns immediately when the run loop has no sources.**
   `RenderExecutor`'s render thread would exit before the first job arrived and
   every `await` on the actor would hang. `run()` adds an empty `CFRunLoopSource`
@@ -110,7 +108,7 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
   is untested here. The CLI's `rate --show` exercises this same wiring
   (`CLI/README.md`).
 - **`LEDSink`** behind the `RATER_SINK_LED` flag. Its geometry, colour order,
-  and transport are open decisions (§11.13), so it waits on hardware.
+  and transport are open decisions, so it waits on hardware.
 
 A sink that receives GPU-resident frames must read the buffer only on the
 render actor and must treat `firstRow == 0` as a new run, because the spans

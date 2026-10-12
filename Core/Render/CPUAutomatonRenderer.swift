@@ -3,7 +3,7 @@ import Foundation
 
 /// The always-available render path: runs the `Core/Programs` reference on the
 /// calling queue, fits the rows to a `ColorGrid`, and produces a `CGImage`. It
-/// is the correctness reference for the Metal path (design doc §5.4.1) and the
+/// is the correctness reference for the Metal path and the
 /// backend for the CLI and for a machine without a Metal 4 GPU.
 public struct CPUAutomatonRenderer: Sendable {
     public init() {}
