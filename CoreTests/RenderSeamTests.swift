@@ -254,6 +254,52 @@ final class RenderActorTests: XCTestCase {
         XCTAssertTrue(sink.isFinished)
     }
 
+    /// A scrolling run refits the whole window each frame; the GPU path must
+    /// match `IncrementalRenderer(scrolling:)` frame for frame.
+    func testScrollingGPUMatchesIncrementalCPU() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 120
+        let rows = 30
+        let sink = ReadbackSink()
+        let actor = RenderActor()
+
+        let cpu = IncrementalRenderer(spec: spec, cols: cols, rows: rows, scrolling: true)
+        let seed = try await actor.configure(spec: spec, cols: cols, rows: rows, scrolling: true, sink: sink)
+        XCTAssertEqual(seed.grid, cpu.colorGrid)
+
+        // Cross the fill point and keep scrolling: every frame's window must
+        // agree, including the partially-filled grid before it fills.
+        for _ in 0..<12 {
+            _ = cpu.advance(by: 7)
+            let frame = try await actor.advance(by: 7)
+            XCTAssertEqual(frame?.grid, cpu.colorGrid, "step \(cpu.step)")
+        }
+        await actor.shutdown()
+    }
+
+    /// A scrolling GPU-resident frame always carries the full window (row 0),
+    /// so the sink recompacts every row instead of accumulating.
+    func testScrollingGPUSinkGetsFullWindowFrames() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E30")!
+        let sink = GPUSink()
+        let actor = RenderActor()
+        _ = try await actor.configure(spec: spec, cols: 20, rows: 10, scrolling: true, sink: sink)
+        _ = try await actor.advance(by: 25)
+        for frame in sink.frames {
+            let gpu = try XCTUnwrap(frame.gpu)
+            XCTAssertEqual(gpu.firstRow, 0)
+            XCTAssertEqual(gpu.rowCount, 10)
+            XCTAssertTrue(gpu.startsRun)
+        }
+        await actor.shutdown()
+    }
+
     /// `MetalSimulation.reset()` returns to the seed frame and reproduces it.
     func testMetalSimulationResetReproducesSeed() throws {
         guard GPUContext.isAvailable else {

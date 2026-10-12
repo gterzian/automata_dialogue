@@ -87,6 +87,39 @@ final class CPURendererTests: XCTestCase {
         XCTAssertNotNil(incremental.image())
     }
 
+    /// A scrolling run grows from the top until the display is full, then
+    /// keeps the newest row at the bottom and shows the source rows above it.
+    func testScrollingGrowsThenKeepsNewestRowAtBottom() {
+        let spec = Catalog.spec(id: "E90")!
+        let rows = 10
+        let incremental = IncrementalRenderer(spec: spec, cols: spec.board.width, rows: rows, scrolling: true)
+        XCTAssertFalse(incremental.settled)
+
+        // Only the seed row is drawn; the rest of the window is background.
+        XCTAssertTrue((0..<incremental.cols).contains { incremental.colorGrid[$0, 0] == 1 })
+        for row in 1..<rows {
+            XCTAssertTrue((0..<incremental.cols).allSatisfy { incremental.colorGrid[$0, row] == 0 })
+        }
+
+        // Past the fill point the bottom row is the newest source row and the
+        // top row is `rows - 1` steps older.
+        incremental.advance(by: 25)
+        XCTAssertEqual(incremental.step, 25)
+        let fit = Fit(boardWidth: spec.board.width, displayCols: incremental.cols, pinRight: spec.display.pinRight)
+        var program = spec.makeProgram()
+        var source: [[UInt8]] = [program.row()]
+        while source.count <= incremental.step {
+            program.step()
+            source.append(program.row())
+        }
+        for displayRow in 0..<rows {
+            let sourceStep = incremental.step - (rows - 1) + displayRow
+            let expected = (0..<incremental.cols).map { fit.value(in: source[sourceStep], displayCol: $0) }
+            let actual = (0..<incremental.cols).map { incremental.colorGrid[$0, displayRow] }
+            XCTAssertEqual(actual, expected, "row \(displayRow)")
+        }
+    }
+
     func testColorGridRGBAAndImage() {
         var grid = ColorGrid(cols: 2, rows: 1)
         grid[0, 0] = 0

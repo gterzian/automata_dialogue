@@ -15,12 +15,12 @@
   output is on by default (the resolved model, the prompt
   size, the model's raw answer, and the parsed class per image); `--quiet`
   keeps only the summary lines, and `--show-prompt` adds the full system
-  prompt. `--show` shows each input image in the window while the model runs,
-  then opens the chosen automaton in that window (rendered by `Core/Render`'s
+  prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
   on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`, the same
-  Metal renderer the app is wired to). It redraws a `.rand` entry from a fresh
-  row each time, and waits for the window to be closed before processing the
-  next image; without it the batch is headless.
+  renderer the app is wired to). It shows the submitted image until Return,
+  runs the model, scrolls the chosen automaton until the next Return, and
+  cycles the images until the window is closed. A `.rand` entry redraws from a
+  fresh row each time.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli catalog` — print the catalog and the generated index.
@@ -30,6 +30,6 @@
   `fit` kernels for one entry and report whether the grid matches the CPU
   reference.
 
-Everything except `rate --show` is AppKit-free: those commands use
-`Core/Import` and `Core/Render` directly. `rate --show` links AppKit to host the
+Everything except `rate` is AppKit-free: those commands use
+`Core/Import` and `Core/Render` directly. `rate` links AppKit to host the
 window and drives `Core/Render`'s on-screen sink.

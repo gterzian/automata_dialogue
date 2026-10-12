@@ -17,7 +17,11 @@ it: **simulation core**, **frame sink** (delivery), and **frame clock**
   `fit` kernels. `MetalSimulation` is the sink-independent core: it owns the
   history buffer and the GPU-side `head` counter and advances one chunk of
   source rows per `render(chunk:)`, so a caller animates instead of running the
-  whole board in one commit. `MetalAutomaton` is the one-shot wrapper.
+  whole board in one commit. `MetalSimulation` also has a **scrolling** mode:
+  it keeps only the newest `rows + 2` source rows in a ring and maps display
+  row `d` to source step `step - (rows - 1) + d`, so a short board grows from
+  the top and then the window follows the newest row without an end.
+  `MetalAutomaton` is the one-shot wrapper.
 - **Render seam** (`RenderExecutor`, `RenderActor`, `FrameSink`, `FrameClock`,
   `ReadbackSink`, `SinkFactory`) — `RenderActor` confines the Metal objects to
   a dedicated run-loop thread and delivers `RenderFrame`s to a `FrameSink`;
@@ -33,7 +37,9 @@ it: **simulation core**, **frame sink** (delivery), and **frame clock**
   so the actor skips the readback. `LayerRenderer.render(gpu:)` appends the new
   rows to the spans it already compacted; display rows never change once
   fitted, so the accumulated spans stay valid. A frame with `firstRow == 0`
-  starts a run and resets the counter.
+  starts a run and resets the counter. A **scrolling** frame moves the window
+  every tick, so it reports `firstRow == 0` with every row and the sink
+  recompacts the whole grid each frame.
 - **On-screen sink** (`DisplayLinkClock`, `LayerSink`, `LayerRenderer`) —
   `DisplayLinkClock` conforms to `FrameClock` over `CAMetalDisplayLink`
   (`preferredFrameLatency = 2`); `LayerSink` is a `FrameSink` that owns the
@@ -105,7 +111,7 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
   actor for a `LayerSink` with `makeLayerSink(layer:)`, `configure` the actor
   with it, and `drive` its clock with `.timed`. The app target cannot be
   type-checked in this sandbox (the SwiftUI macro plugin is blocked), so this
-  is untested here. The CLI's `rate --show` exercises this same wiring
+  is untested here. The CLI's `rate` window exercises this same wiring
   (`CLI/README.md`).
 - **`LEDSink`** behind the `RATER_SINK_LED` flag. Its geometry, colour order,
   and transport are open decisions, so it waits on hardware.
@@ -120,7 +126,8 @@ When `MTLCreateSystemDefaultDevice()` reports `.metal4`, `MetalTests` runs the
 GPU `step`/`fit` kernels and asserts the `ColorGrid` equals
 `CPUAutomatonRenderer`'s for binary, 3-color, and right-pinned entries.
 `RenderActorTests` asserts the GPU incremental path matches `IncrementalRenderer`
-frame for frame (including the partially filled grid mid-run), that the render
+frame for frame (including the partially filled grid mid-run and a scrolling
+run's moving window), that the render
 actor runs off the main thread, that `drive` advances on a clock tick, and that
 `.timed` pacing follows the tick delta. `LayerTests` compares the `runs` span
 compaction with a CPU run-length pass, checks the incremental GPU path's

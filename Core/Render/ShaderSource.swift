@@ -14,6 +14,7 @@ public enum ShaderSource {
         uint width;
         uint rule;    // elementary rule bits, or totalistic code
         uint colors;  // 0 selects the elementary kernel
+        uint capacity; // history rows; the source step is taken modulo this
     };
 
     struct FitParams {
@@ -25,6 +26,10 @@ public enum ShaderSource {
         uint sourceOrigin;
         uint padLeft;
         uint rowOffset;
+        uint capacity;      // history rows, modulo index
+        uint viewportStart; // newest window's top source step (scrolling)
+        uint currentStep;   // source rows computed so far (scrolling)
+        uint scrolling;     // 1 = window over `capacity`, 0 = stretch to fit
     };
 
     // The row being computed is read from a GPU-side head counter that
@@ -40,12 +45,13 @@ public enum ShaderSource {
         uint readRow = *head;
         uint writeRow = readRow + 1;
         uint i = gid;
-        uint base = readRow * p.width;
+        uint base = (readRow % p.capacity) * p.width;
+        uint writeBase = (writeRow % p.capacity) * p.width;
         uint l = history[base + (i + p.width - 1) % p.width];
         uint c = history[base + i];
         uint r = history[base + (i + 1) % p.width];
         uint neighborhood = (l << 2) | (c << 1) | r;
-        history[writeRow * p.width + i] = uchar((p.rule >> neighborhood) & 1u);
+        history[writeBase + i] = uchar((p.rule >> neighborhood) & 1u);
     }
 
     kernel void step_totalistic(device uchar* history [[buffer(0)]],
@@ -56,14 +62,15 @@ public enum ShaderSource {
         uint readRow = *head;
         uint writeRow = readRow + 1;
         uint i = gid;
-        uint base = readRow * p.width;
+        uint base = (readRow % p.capacity) * p.width;
+        uint writeBase = (writeRow % p.capacity) * p.width;
         uint l = history[base + (i + p.width - 1) % p.width];
         uint c = history[base + i];
         uint r = history[base + (i + 1) % p.width];
         uint sum = l + c + r;
         uint divisor = 1;
         for (uint k = 0; k < sum; ++k) { divisor *= p.colors; }
-        history[writeRow * p.width + i] = uchar((p.rule / divisor) % p.colors);
+        history[writeBase + i] = uchar((p.rule / divisor) % p.colors);
     }
 
     kernel void step_k2r2(device uchar* history [[buffer(0)]],
@@ -74,13 +81,14 @@ public enum ShaderSource {
         uint readRow = *head;
         uint writeRow = readRow + 1;
         uint i = gid;
-        uint base = readRow * p.width;
+        uint base = (readRow % p.capacity) * p.width;
+        uint writeBase = (writeRow % p.capacity) * p.width;
         uint sum = history[base + (i + p.width - 2) % p.width]
                  + history[base + (i + p.width - 1) % p.width]
                  + history[base + i]
                  + history[base + (i + 1) % p.width]
                  + history[base + (i + 2) % p.width];
-        history[writeRow * p.width + i] = uchar((p.rule >> sum) & 1u);
+        history[writeBase + i] = uchar((p.rule >> sum) & 1u);
     }
 
     kernel void bump_head(device uint* head [[buffer(0)]],
@@ -92,7 +100,7 @@ public enum ShaderSource {
     // palette index) when downsampling. Out-of-board columns read background.
     static uchar fit_value(device const uchar* history, constant FitParams& p,
                            uint sourceStep, uint displayCol) {
-        uint base = sourceStep * p.boardWidth;
+        uint base = (sourceStep % p.capacity) * p.boardWidth;
         if (p.boardWidth < p.displayCols) {
             int idx = int(displayCol) - int(p.padLeft);
             if (idx < 0 || idx >= int(p.boardWidth)) return 0;
@@ -122,9 +130,18 @@ public enum ShaderSource {
                     uint2 gid [[thread_position_in_grid]]) {
         uint row = p.rowOffset + gid.y;
         if (gid.x >= p.displayCols || row >= p.displayRows) return;
-        uint target = p.displayRows == 1
-            ? p.totalSteps - 1
-            : (row * (p.totalSteps - 1)) / (p.displayRows - 1);
+        uint target;
+        if (p.scrolling != 0) {
+            // A window over the newest source rows: row 0 is the oldest still
+            // visible. Rows the run has not reached yet stay background, so a
+            // short board grows from the top before it starts to scroll.
+            target = p.viewportStart + row;
+            if (target > p.currentStep) { colorGrid[row * p.displayCols + gid.x] = 0; return; }
+        } else {
+            target = p.displayRows == 1
+                ? p.totalSteps - 1
+                : (row * (p.totalSteps - 1)) / (p.displayRows - 1);
+        }
         colorGrid[row * p.displayCols + gid.x] = fit_value(history, p, target, gid.x);
     }
     """

@@ -16,7 +16,8 @@ let command = arguments.first ?? "catalog"
 
 /// Flag names that never take a value; every other `--name` consumes the next
 /// token when that token is not itself a flag. Without this, a boolean flag at
-/// the end of the arguments would swallow the following path.
+/// the end of the arguments would swallow the following path. `show` is
+/// accepted for compatibility; showing the automaton is the default now.
 let booleanFlags: Set<String> = ["all", "quiet", "show", "show-prompt"]
 
 /// Parses `--key value` pairs from the arguments after `command`.
@@ -186,10 +187,11 @@ func printUsage() -> Never {
       gpu <id>                        compare the Metal 4 kernels with the CPU
         options: --cols N --rows N --steps N
       rate <path|dir> ...               run the MLX agent over reference images
-        a directory contributes its top-level images
-        options: --model <dir> [--quiet] [--show-prompt] [--show]
-        --show shows each input image, then opens the chosen automaton in a
-        Metal window and waits for close
+        a directory contributes its top-level images; the batch cycles
+        options: --model <dir> [--quiet] [--show-prompt]
+        Enter shows each image, submits it on the next Enter, then scrolls the
+        chosen automaton until Enter advances to the next image. Closing the
+        window stops the run.
         (--model default: RATER_MODEL_PATH; downloads are disabled)
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
@@ -217,124 +219,156 @@ final class MetalHostView: NSView {
     override func makeBackingLayer() -> CALayer { metalLayer }
 }
 
-/// Presents the input image, then one automaton, in a single window using
-/// `Core/Render`'s on-screen path: a `RenderActor` owns a `LayerSink` over
-/// `MetalHostView.metalLayer` and drives its `DisplayLinkClock` with `.timed`
-/// pacing. `showInput` returns immediately so the input stays visible while the
-/// model runs; `present` then swaps the automaton into the same window and
-/// suspends until the user closes it, so a caller can step through a batch one
-/// at a time. `NSApplication.run()` keeps delivering the close event while it
-/// is suspended.
+/// Presents one image, then one automaton, in a single screen-sized window
+/// using `Core/Render`'s on-screen path: a `RenderActor` owns a `LayerSink`
+/// over `MetalHostView.metalLayer` and drives its `DisplayLinkClock` with
+/// `.timed` pacing. `showInput` returns immediately so the image stays visible
+/// while the model runs; `present` swaps the scrolling automaton into the same
+/// window and suspends until Return or close. The app's key monitor calls
+/// `submit()`; `NSApplication.run()` keeps delivering events while suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var host: MetalHostView?
-    private var closeContinuation: CheckedContinuation<Void, Never>?
+    private var actor: RenderActor?
+    private var sink: LayerSink?
+    private var enterContinuation: CheckedContinuation<Void, Never>?
+    private(set) var isClosed = false
 
-    /// Shows `image` and returns. The next `present` reuses the window; if it
-    /// was closed first, `present` opens a fresh one.
+    /// Shows `image` at the screen's size and returns; the caller runs the model
+    /// next, and `present` reuses the window for the automaton.
     func showInput(_ image: NSImage, title: String) {
-        var size = image.size
-        if size.width <= 0 || size.height <= 0 { size = CGSize(width: 512, height: 512) }
-        let maxSize = CGSize(width: 1000, height: 700)
-        let scale = min(1, maxSize.width / size.width, maxSize.height / size.height)
-        size = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
-        let window = ensureWindow(size: size, title: title)
-        let view = NSImageView(frame: NSRect(origin: .zero, size: size))
+        let window = ensureWindow()
+        let view = NSImageView(frame: NSRect(origin: .zero, size: window.contentLayoutRect.size))
         view.image = image
         view.imageScaling = .scaleProportionallyUpOrDown
         window.contentView = view
+        window.title = title
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Swaps the scrolling automaton for `spec` into the window and suspends
+    /// until Return or the window closes.
     func present(_ spec: ProgramSpec) async {
+        guard !isClosed else { return }
         guard GPUContext.isAvailable else {
-            print("--show: no Metal 4 device; skipped \(spec.id)")
+            print("rate: no Metal 4 device; skipped \(spec.id)")
             return
         }
-        let cols = min(spec.board.width, 1000)
-        let rows = min(spec.board.height, 700)
+        let window = ensureWindow()
+        let scale = window.backingScaleFactor
+        let contentSize = window.contentLayoutRect.size
+        let (cols, rows) = displayGrid(contentSize: contentSize, scale: scale)
+        let host = MetalHostView(frame: NSRect(origin: .zero, size: contentSize))
+        host.metalLayer.pixelFormat = .bgra8Unorm
+        host.metalLayer.framebufferOnly = true
+        host.metalLayer.contentsScale = scale
+        // One drawable pixel per display cell; the layer scales it to the view.
+        host.metalLayer.drawableSize = CGSize(width: cols, height: rows)
+
         // A `.rand` entry draws a fresh row each time it is shown, matching the
         // app (inventory §1.4); `makeProgram()` stays deterministic for the
         // golden hashes.
         let runSpec = spec.withRandomSeed(UInt64.random(in: .min ... .max))
-        let content = NSRect(x: 0, y: 0, width: CGFloat(cols), height: CGFloat(rows))
-        let host = MetalHostView(frame: content)
-        host.metalLayer.pixelFormat = .bgra8Unorm
-        host.metalLayer.framebufferOnly = true
-        // One drawable pixel per display cell; the layer scales it to the view.
-        host.metalLayer.drawableSize = CGSize(width: cols, height: rows)
-
         let actor = RenderActor()
-        var sink: LayerSink?
+        var made: LayerSink?
         do {
             try await actor.start()
-            let made = try await actor.makeLayerSink(layer: host.metalLayer)
-            sink = made
-            _ = try await actor.configure(spec: runSpec, cols: cols, rows: rows, sink: made)
-            await actor.drive(
-                clock: made.clock,
-                pacing: .timed(stepsPerSecond: runSpec.display.stepsPerSecond)
-            )
+            let sink = try await actor.makeLayerSink(layer: host.metalLayer)
+            made = sink
+            _ = try await actor.configure(spec: runSpec, cols: cols, rows: rows, scrolling: true, sink: sink)
+            await actor.drive(clock: sink.clock, pacing: .timed(stepsPerSecond: scrollSpeed(for: spec)))
         } catch {
-            print("--show: \(spec.id) failed to render: \(error.localizedDescription)")
+            print("rate: \(spec.id) failed to render: \(error.localizedDescription)")
             await actor.shutdown()
-            self.host = nil
             return
         }
 
-        // The input window (if any) stayed on screen through setup; swap in the
-        // automaton now that it is ready.
-        let window = ensureWindow(size: content.size, title: "\(spec.id) — \(spec.title)")
         window.contentView = host
+        window.title = "\(spec.id) — \(spec.title)"
+        self.actor = actor
+        self.sink = made
         self.host = host
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
-        await waitForClose()
-
-        if let sink { await actor.stopDriving(clock: sink.clock) }
-        await actor.shutdown()
-        self.host = nil
+        await waitForEnter()
+        await stopRun()
     }
 
-    /// Suspends until the current window is closed; returns immediately when no
-    /// window is open.
-    func waitForClose() async {
-        guard window != nil else { return }
+    /// Stops the running automaton, if any.
+    func stopRun() async {
+        if let actor, let sink { await actor.stopDriving(clock: sink.clock) }
+        await actor?.shutdown()
+        actor = nil
+        sink = nil
+        host = nil
+    }
+
+    /// Resumes a `waitForEnter`; the key monitor calls this on Return. A Return
+    /// outside a wait (while the model runs, say) is ignored.
+    func submit() {
+        guard !isClosed else { return }
+        enterContinuation?.resume()
+        enterContinuation = nil
+    }
+
+    /// Suspends until Return or close.
+    func waitForEnter() async {
+        if isClosed { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            self.closeContinuation = continuation
+            self.enterContinuation = continuation
         }
     }
 
-    /// Reuses the open window at the new size, or opens one centered at `size`.
-    private func ensureWindow(size: CGSize, title: String) -> NSWindow {
-        if let window {
-            window.title = title
-            window.setContentSize(size)
-            return window
+    /// The drawable's pixel size, capped so a wide board on a large panel does
+    /// not allocate a span buffer for every pixel.
+    private func displayGrid(contentSize: CGSize, scale: CGFloat) -> (Int, Int) {
+        let pixelWidth = max(1, Int(contentSize.width * scale))
+        let pixelHeight = max(1, Int(contentSize.height * scale))
+        let maxPixels = 4_000_000
+        var cols = pixelWidth
+        var rows = pixelHeight
+        if cols * rows > maxPixels {
+            let factor = (Double(maxPixels) / Double(cols * rows)).squareRoot()
+            cols = max(1, Int(Double(cols) * factor))
+            rows = max(1, Int(Double(rows) * factor))
         }
+        return (cols, rows)
+    }
+
+    /// Rows per second of scroll. The catalog tunes `stepsPerSecond` for a
+    /// stretched three-second run, which is too fast for a full-screen scroll;
+    /// cap it so the downward motion stays readable.
+    private func scrollSpeed(for spec: ProgramSpec) -> Double {
+        min(spec.display.stepsPerSecond, 120)
+    }
+
+    /// Opens the screen-sized window, or returns the open one.
+    private func ensureWindow() -> NSWindow {
+        if let window { return window }
+        let frame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable, .resizable],
+            contentRect: frame,
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = title
+        window.title = "Automata Rater"
         window.delegate = self
         // This type holds the window; let ARC release it, not AppKit.
         window.isReleasedWhenClosed = false
-        window.center()
+        window.setFrame(frame, display: true)
         self.window = window
         return window
     }
 
     func windowWillClose(_ notification: Notification) {
-        // The next `showInput`/`present` opens a fresh window.
-        window = nil
-        closeContinuation?.resume()
-        closeContinuation = nil
+        isClosed = true
+        enterContinuation?.resume()
+        enterContinuation = nil
     }
 }
 
@@ -368,7 +402,7 @@ func imagePaths(from inputs: [String]) -> [String] {
     return paths
 }
 
-/// Parsed `rate` inputs shared by the headless and windowed modes.
+/// Parsed `rate` inputs: the images, the model, and the debug flags.
 struct RateSetup: Sendable {
     let paths: [String]
     let configuration: AgentEngine.Configuration
@@ -432,7 +466,7 @@ func printRateDebugHeader(_ setup: RateSetup) {
     }
 }
 
-/// One image's agent result, shared by the headless and windowed modes.
+/// One image's agent result.
 struct RateOutcome: Sendable {
     let name: String
     let seconds: String
@@ -497,58 +531,81 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
     return Catalog.spec(id: choice.id)
 }
 
-/// Headless batch: one line per image and a summary, no window.
-func runRate(_ setup: RateSetup) async {
+/// The review loop: cycle the images forever, running the agent after Return
+/// and scrolling the automaton until the next Return. Closing the window stops
+/// the loop.
+@MainActor
+func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
-    // The session folder is removed when the run ends.
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
-    defer { ImageImport.removeSessionDirectory(for: sessionID) }
     var chosen = 0
-    for path in setup.paths {
-        let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
-        if printRateOutcome(outcome) != nil { chosen += 1 }
-    }
-    print("\n\(chosen)/\(setup.paths.count) chosen")
-}
-
-/// Windowed batch: opens each chosen automaton in an `AutomatonWindow` (the
-/// render core's Metal on-screen path) and waits for the window to close before
-/// the next image. The review loop is a main-actor task started before
-/// `NSApplication.run()`, so `present` can suspend and the window's close event
-/// still arrives.
-@MainActor
-func runRateWindowed(_ setup: RateSetup) async {
-    let app = NSApplication.shared
-    app.setActivationPolicy(.regular)
-    app.finishLaunching()
-    Task { @MainActor in
-        let presenter = AutomatonWindow()
-        printRateDebugHeader(setup)
-        let engine = AgentEngine(configuration: setup.configuration)
-        let sessionID = UUID()
-        let directory = ImageImport.sessionDirectory(for: sessionID)
-        var chosen = 0
+    var shown = 0
+    while !presenter.isClosed {
         for path in setup.paths {
-            // Show the input while the model runs, so the reviewer sees what the
-            // automaton is answering; `present` then swaps in the automaton.
+            if presenter.isClosed { break }
+            let name = URL(fileURLWithPath: path).lastPathComponent
             if let image = NSImage(contentsOfFile: path) {
-                presenter.showInput(image, title: URL(fileURLWithPath: path).lastPathComponent)
+                presenter.showInput(image, title: name)
             }
+            await presenter.waitForEnter()
+            if presenter.isClosed { break }
             let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
+            shown += 1
             if let spec = printRateOutcome(outcome) {
                 chosen += 1
                 await presenter.present(spec)
             } else {
-                await presenter.waitForClose()
+                await presenter.waitForEnter()
             }
         }
-        ImageImport.removeSessionDirectory(for: sessionID)
-        print("\n\(chosen)/\(setup.paths.count) chosen")
+    }
+    await presenter.stopRun()
+    ImageImport.removeSessionDirectory(for: sessionID)
+    print("\n\(chosen)/\(shown) chosen")
+}
+
+/// The windowed review: one screen-sized window, driven by Return. The review
+/// loop is a main-actor task started before `NSApplication.run()`, so it can
+/// suspend and still receive the key and close events.
+@MainActor
+func runRateWindowed(_ setup: RateSetup) async {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    installMainMenu(app)
+    app.finishLaunching()
+
+    let presenter = AutomatonWindow()
+    let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        if event.keyCode == 36 || event.keyCode == 76 {
+            MainActor.assumeIsolated { presenter.submit() }
+            return nil
+        }
+        return event
+    }
+    Task { @MainActor in
+        await review(setup, presenter: presenter)
+        if let monitor { NSEvent.removeMonitor(monitor) }
         app.terminate(nil)
     }
     app.run()
+}
+
+/// The app menu with Quit, so Cmd-Q works while the review window is up.
+@MainActor
+func installMainMenu(_ app: NSApplication) {
+    let mainMenu = NSMenu()
+    let appMenuItem = NSMenuItem()
+    mainMenu.addItem(appMenuItem)
+    let appMenu = NSMenu()
+    appMenu.addItem(
+        withTitle: "Quit Automata Rater",
+        action: #selector(NSApplication.terminate(_:)),
+        keyEquivalent: "q"
+    )
+    appMenuItem.submenu = appMenu
+    app.mainMenu = mainMenu
 }
 
 switch command {
@@ -568,12 +625,7 @@ case "gpu":
         print("Metal 4 requires macOS 26")
     }
 case "rate":
-    let setup = rateSetup()
-    if flags(from: arguments)["show"] != nil {
-        await runRateWindowed(setup)
-    } else {
-        await runRate(setup)
-    }
+    await runRateWindowed(rateSetup())
 default:
     printUsage()
 }

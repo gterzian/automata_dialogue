@@ -21,7 +21,7 @@ What must be covered:
   `HeightCache` behavior.
 - **Render seam** — `ReadbackSink`/`SinkFactory` behavior, `RenderActor` runs
   off the main thread, and (Metal 4 only) the GPU incremental frames equal
-  `IncrementalRenderer` for a partial run.
+  `IncrementalRenderer` for a partial run and for a scrolling window.
 - **Layer sink** — (Metal 4 only) the `runs` span compaction equals a CPU
   run-length pass, and an offscreen render fills each span with its palette
   colour.

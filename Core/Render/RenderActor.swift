@@ -34,12 +34,16 @@ public actor RenderActor {
     public var isStarted: Bool { context != nil }
 
     /// Starts a run and delivers the seed frame. A previous run is dropped.
+    /// `scrolling` keeps the newest source row at the bottom and runs without
+    /// an end; otherwise the whole run is stretched across the display and
+    /// stops at `steps`.
     @discardableResult
     public func configure(
         spec: ProgramSpec,
         cols: Int,
         rows: Int,
         steps: Int? = nil,
+        scrolling: Bool = false,
         sink: any FrameSink
     ) throws -> RenderFrame {
         try start()
@@ -47,7 +51,9 @@ public actor RenderActor {
         finishRun()
         paceRemainder = 0
         self.sink = sink
-        let simulation = try MetalSimulation(spec: spec, cols: cols, rows: rows, steps: steps, context: context)
+        let simulation = try MetalSimulation(
+            spec: spec, cols: cols, rows: rows, steps: steps, context: context, scrolling: scrolling
+        )
         self.simulation = simulation
         return try deliver(simulation, chunk: 0)
     }
@@ -59,10 +65,11 @@ public actor RenderActor {
         return try deliver(simulation, chunk: count)
     }
 
-    /// Advances to the last source row and delivers the settled frame.
+    /// Advances to the last source row and delivers the settled frame. A
+    /// scrolling run has no end, so there is nothing to advance to.
     @discardableResult
     public func advanceToEnd() throws -> RenderFrame? {
-        guard let simulation else { return nil }
+        guard let simulation, !simulation.scrolling else { return nil }
         return try deliver(simulation, chunk: simulation.totalSteps - 1)
     }
 

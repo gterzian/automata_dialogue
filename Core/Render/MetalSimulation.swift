@@ -62,6 +62,7 @@ public final class MetalSimulation {
         var width: UInt32
         var rule: UInt32
         var colors: UInt32
+        var capacity: UInt32
     }
 
     private struct FitParams {
@@ -73,14 +74,24 @@ public final class MetalSimulation {
         var sourceOrigin: UInt32
         var padLeft: UInt32
         var rowOffset: UInt32
+        var capacity: UInt32
+        var viewportStart: UInt32
+        var currentStep: UInt32
+        var scrolling: UInt32
     }
 
     public let spec: ProgramSpec
     public let cols: Int
     public let rows: Int
     /// Total source rows in the run, including the seed (`min(board.height,
-    /// stepLimit)` unless overridden).
+    /// stepLimit)` unless overridden). `Int.max` in scrolling mode, where the
+    /// run has no end.
     public let totalSteps: Int
+    /// A scrolling run keeps only the newest `rows + 2` source rows and maps
+    /// display row `d` to source step `step - (rows - 1) + d`, so the newest
+    /// row stays at the bottom. A non-scrolling run stretches its whole history
+    /// across the display and stops at `totalSteps`.
+    public let scrolling: Bool
     /// Source row currently computed (0 is the seed).
     public private(set) var step = 0
     /// Index of the frame slot that produced the last `render` call.
@@ -88,6 +99,8 @@ public final class MetalSimulation {
 
     private let context: GPUContext
     private let width: Int
+    /// Rows the history buffer holds; the source step indexes it modulo this.
+    private let capacity: Int
     private let history: any MTLBuffer
     private let colorBuffer: any MTLBuffer
     private let stepBuffer: any MTLBuffer
@@ -108,15 +121,19 @@ public final class MetalSimulation {
         cols: Int,
         rows: Int,
         steps: Int? = nil,
-        context: GPUContext
+        context: GPUContext,
+        scrolling: Bool = false
     ) throws {
         let displayCols = max(1, cols)
         let displayRows = max(1, rows)
-        let totalSteps = max(1, steps ?? min(spec.board.height, spec.display.stepLimit))
+        let nominalSteps = max(1, steps ?? min(spec.board.height, spec.display.stepLimit))
         let width = spec.board.width
         let device = context.device
+        // A scrolling run only ever reads the last `rows` rows, so its history
+        // is a ring of that size; a stretched run needs the whole history.
+        let capacity = scrolling ? displayRows + 2 : nominalSteps
 
-        guard let history = device.makeBuffer(length: max(1, totalSteps * width), options: .storageModeShared),
+        guard let history = device.makeBuffer(length: max(1, capacity * width), options: .storageModeShared),
               let colorBuffer = device.makeBuffer(length: displayCols * displayRows, options: .storageModeShared),
               let stepBuffer = device.makeBuffer(length: MemoryLayout<StepParams>.stride, options: .storageModeShared),
               let fitBuffer = device.makeBuffer(length: MemoryLayout<FitParams>.stride, options: .storageModeShared),
@@ -146,9 +163,11 @@ public final class MetalSimulation {
         self.spec = spec
         self.cols = displayCols
         self.rows = displayRows
-        self.totalSteps = totalSteps
+        self.totalSteps = scrolling ? Int.max : nominalSteps
+        self.scrolling = scrolling
         self.context = context
         self.width = width
+        self.capacity = capacity
         self.history = history
         self.colorBuffer = colorBuffer
         self.stepBuffer = stepBuffer
@@ -163,17 +182,21 @@ public final class MetalSimulation {
 
         let fit = Fit(boardWidth: width, displayCols: displayCols, pinRight: spec.display.pinRight)
 
-        var stepParams = StepParams(width: UInt32(width), rule: rule, colors: colors)
+        var stepParams = StepParams(width: UInt32(width), rule: rule, colors: colors, capacity: UInt32(capacity))
         memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
         self.fitParams = FitParams(
             boardWidth: UInt32(width),
             displayCols: UInt32(displayCols),
             displayRows: UInt32(displayRows),
-            totalSteps: UInt32(totalSteps),
+            totalSteps: UInt32(clamping: nominalSteps),
             block: UInt32(fit.block),
             sourceOrigin: UInt32(fit.sourceOrigin),
             padLeft: UInt32(fit.padLeft),
-            rowOffset: 0
+            rowOffset: 0,
+            capacity: UInt32(capacity),
+            viewportStart: 0,
+            currentStep: 0,
+            scrolling: scrolling ? 1 : 0
         )
         memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
 
@@ -199,7 +222,10 @@ public final class MetalSimulation {
     /// the buffer directly and compacts only the new rows.
     @discardableResult
     public func renderGPU(chunk: Int) throws -> GPUColorGrid {
-        let firstRow = fittedRows
+        // A scrolling frame refits every display row (the window moves), so it
+        // always starts at row 0 and a sink must recompact the whole grid. A
+        // stretched frame only fits the rows that just became ready.
+        let firstRow = scrolling ? 0 : fittedRows
         try advance(chunk: chunk)
         return GPUColorGrid(
             buffer: colorBuffer,
@@ -211,10 +237,13 @@ public final class MetalSimulation {
     }
 
     /// Encodes the step and fit work for `chunk` rows and commits it. Returns
-    /// the number of display rows fitted so far.
+    /// the number of display rows fitted by this frame.
     @discardableResult
     func advance(chunk: Int) throws -> Int {
-        let target = min(totalSteps - 1, step + max(0, chunk))
+        let requested = max(0, chunk)
+        let target = scrolling
+            ? step + requested
+            : min(totalSteps - 1, step + requested)
         let (index, slot) = ring.borrow()
         lastSlot = index
 
@@ -224,15 +253,22 @@ public final class MetalSimulation {
             throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
         }
         encodeSteps(from: step, to: target, encoder: encoder)
-        let ready = readyRowCount(at: target)
-        encodeFit(from: fittedRows, to: ready, encoder: encoder)
-        fittedRows = ready
+        if scrolling {
+            fitParams.viewportStart = UInt32(max(0, target - (rows - 1)))
+            fitParams.currentStep = UInt32(clamping: target)
+            encodeFit(from: 0, to: rows, encoder: encoder)
+            fittedRows = rows
+        } else {
+            let ready = readyRowCount(at: target)
+            encodeFit(from: fittedRows, to: ready, encoder: encoder)
+            fittedRows = ready
+        }
         encoder.endEncoding()
         slot.command.endCommandBuffer()
 
         try commit(slot)
         step = target
-        return ready
+        return fittedRows
     }
 
     // MARK: - Private
