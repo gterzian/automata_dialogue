@@ -11,14 +11,18 @@ public struct K2R2CA: RowProgram {
     public let width: Int
     public let code: Int
     public var stateCount: Int { 2 }
+    /// Injected randomness (inventory §1.4); `nil` is a plain deterministic run.
+    public let injection: RandomInjection?
+    private var steps = 0
     private let table: [UInt8]
     private var cells: [UInt8]
     private var scratch: [UInt8]
 
-    public init(code: Int, width: Int, row: [UInt8]) {
+    public init(code: Int, width: Int, row: [UInt8], injection: RandomInjection? = nil) {
         precondition(row.count == width, "seed row must match width")
         self.code = code
         self.width = width
+        self.injection = injection
         var t = [UInt8]()
         var rest = code
         for _ in 0..<6 {
@@ -39,6 +43,11 @@ public struct K2R2CA: RowProgram {
                 + Int(cells[(i + 1) % width])
                 + Int(cells[(i + 2) % width])
             scratch[i] = table[sum]
+        }
+        if let injection {
+            steps &+= 1
+            scratch[width / 2] = UInt8(
+                SplitMix64.injectedValue(seed: injection.seed, step: UInt64(steps)) % 2)
         }
         swap(&cells, &scratch)
     }

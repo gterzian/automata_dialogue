@@ -11,7 +11,19 @@ public struct SplitMix64: RandomNumberGenerator, Sendable {
 
     public mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
+        return Self.mix(state)
+    }
+
+    /// The random draw for injected randomness at `step` (1-based). It is the
+    /// SplitMix64 mix of `seed + step × golden`, which the CPU reference and
+    /// the GPU kernel can both compute from the step index alone, so they stay
+    /// row-for-row identical without carrying the generator's state.
+    public static func injectedValue(seed: UInt64, step: UInt64) -> UInt64 {
+        mix(seed &+ step &* 0x9E37_79B9_7F4A_7C15)
+    }
+
+    private static func mix(_ value: UInt64) -> UInt64 {
+        var z = value
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
         z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         return z ^ (z >> 31)

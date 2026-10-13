@@ -317,7 +317,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         let board = Board(
             width: ViewportGeometry.boardWidth(specWidth: runSpec.board.width, cols: cols),
             height: runSpec.board.height,
-            start: runSpec.board.start)
+            start: runSpec.board.start,
+            injection: runSpec.board.injection)
         // Each automaton starts at the slow base rate; the arrows tune it.
         scrollRowsPerSecond = Self.baseRowsPerSecond
         let actor = RenderActor()

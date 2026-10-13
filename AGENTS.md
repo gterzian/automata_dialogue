@@ -1,6 +1,6 @@
 # AGENTS.md — Automata Rater
 
-Automata Rater: a macOS CLI where a local MLX agent chooses one of 106
+Automata Rater: a macOS CLI where a local MLX agent chooses one of 109
 curated cellular automata to display for an input. The catalog and rubric live
 in the two artifacts in `artifacts/`.
 

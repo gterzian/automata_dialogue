@@ -8,15 +8,18 @@ public enum ProgramFactory {
         case .elementary(let rule):
             return ElementaryCA(
                 rule: rule, width: board.width,
-                row: initialRow(board.start, width: board.width, colors: 2))
+                row: initialRow(board.start, width: board.width, colors: 2),
+                injection: board.injection)
         case .totalistic(let code, let colors):
             return TotalisticCA(
                 code: Int(code), colors: Int(colors), width: board.width,
-                row: initialRow(board.start, width: board.width, colors: Int(colors)))
+                row: initialRow(board.start, width: board.width, colors: Int(colors)),
+                injection: board.injection)
         case .k2r2(let code):
             return K2R2CA(
                 code: Int(code), width: board.width,
-                row: initialRow(board.start, width: board.width, colors: 2))
+                row: initialRow(board.start, width: board.width, colors: 2),
+                injection: board.injection)
         }
     }
 

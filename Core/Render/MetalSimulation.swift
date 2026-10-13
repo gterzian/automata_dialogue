@@ -62,6 +62,8 @@ public final class MetalSimulation {
         var rule: UInt32
         var colors: UInt32
         var capacity: UInt32
+        var inject: UInt32
+        var injectSeed: UInt64
     }
 
     private struct FitParams {
@@ -96,6 +98,12 @@ public final class MetalSimulation {
     /// First source column shown by a `.window` mapping, clamped to
     /// `maxViewportOrigin`.
     public private(set) var viewportOrigin: Int
+    /// True once the caller pans by hand; the entry's follow then stops for the
+    /// rest of the run (a `reset` clears it).
+    public private(set) var userPanned = false
+    /// Fractional columns carried between frames while following a drifting
+    /// pattern, so a sub-column rate does not round to zero.
+    private var followCarry = 0.0
     /// Source row currently computed (0 is the seed).
     public private(set) var step = 0
     /// Index of the frame slot that produced the last `render` call.
@@ -206,7 +214,10 @@ public final class MetalSimulation {
         self.startOrigin = startOrigin
         self.viewportOrigin = startOrigin
 
-        var stepParams = StepParams(width: UInt32(width), rule: rule, colors: colors, capacity: UInt32(capacity))
+        var stepParams = StepParams(
+            width: UInt32(width), rule: rule, colors: colors, capacity: UInt32(capacity),
+            inject: runBoard.injection == nil ? 0 : 1,
+            injectSeed: runBoard.injection?.seed ?? 0)
         memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
         self.fitParams = FitParams(
             boardWidth: UInt32(width),
@@ -233,9 +244,15 @@ public final class MetalSimulation {
     }
 
     /// Shifts a `.window` mapping `delta` source columns, clamped to the board.
-    /// The caller re-fits (`advance(chunk: 0)`) to show the new window.
+    /// A manual pan also aborts the entry's follow for the rest of the run; the
+    /// caller re-fits (`advance(chunk: 0)`) to show the new window.
     public func pan(by delta: Int) {
         guard mapping == .window else { return }
+        userPanned = true
+        moveOrigin(by: delta)
+    }
+
+    private func moveOrigin(by delta: Int) {
         let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
         guard origin != viewportOrigin else { return }
         viewportOrigin = origin
@@ -243,10 +260,24 @@ public final class MetalSimulation {
         memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
     }
 
+    /// Pans the viewport by the entry's follow rate for `steps` source steps.
+    /// A manual pan, a `.fit` mapping, or a zero rate leaves the view fixed.
+    private func follow(by steps: Int) {
+        let rate = spec.display.follow.columnsPerStep
+        guard rate != 0, mapping == .window, !userPanned else { return }
+        followCarry += rate * Double(steps)
+        let whole = Int(followCarry.rounded(.towardZero))
+        guard whole != 0 else { return }
+        followCarry -= Double(whole)
+        moveOrigin(by: whole)
+    }
+
     /// Returns the simulation to the seed row (step 0), resets the horizontal
     /// origin, and clears the grid. `program` supplies a different seed row (a
     /// `.rand` replay); the buffers are reused.
     public func reset(program: (any RowProgram)? = nil) {
+        userPanned = false
+        followCarry = 0
         viewportOrigin = startOrigin
         fitParams.sourceOrigin = UInt32(startOrigin)
         memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
@@ -289,6 +320,7 @@ public final class MetalSimulation {
         let target = scrolling
             ? step + requested
             : min(totalSteps - 1, step + requested)
+        if scrolling { follow(by: target - step) }
         let (index, slot) = ring.borrow()
         lastSlot = index
 

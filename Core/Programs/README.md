@@ -28,6 +28,12 @@ takes its seed row from `BoardStart`, so seeds, blocks, non-half densities and
 3-color random rows are seeded on the CPU and uploaded by the GPU path
 (`MetalSimulation.reseed` reads `spec.makeProgram().row()`).
 
+Injected randomness (`Board.injection`) overwrites the centre cell after every
+step with `SplitMix64.injectedValue(seed:step) % stateCount`. The value is a
+function of the seed and the step index, not generator state, so the CPU
+reference and the Metal `step_*` kernels compute the same injection and stay
+row-for-row identical.
+
 ## Tests
 
 - For each catalog entry, N rows from the CPU program hash to a recorded

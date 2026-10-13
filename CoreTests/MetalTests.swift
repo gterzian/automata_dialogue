@@ -17,6 +17,7 @@ final class MetalTests: XCTestCase {
             ("T177", 601, 300, 300),  // 3-color random
             ("K2R2-20.seed195", 221, 220, 220), // radius-2 totalistic, seeded
             ("E110", 400, 150, 400),  // right-pinned, board wider than display
+            ("E90.inject", 401, 200, 200), // injected randomness
         ]
         for testCase in cases {
             let spec = Catalog.spec(id: testCase.id)!

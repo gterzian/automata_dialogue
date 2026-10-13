@@ -2,16 +2,46 @@ import XCTest
 @testable import Core
 
 final class CatalogTests: XCTestCase {
-    func testHasExactly106UniqueEntries() {
-        XCTAssertEqual(Catalog.all.count, 106)
-        XCTAssertEqual(Set(Catalog.ids).count, 106)
+    func testHasExpectedUniqueEntries() {
+        XCTAssertEqual(Catalog.all.count, 109)
+        XCTAssertEqual(Set(Catalog.ids).count, 109)
     }
 
     func testBehaviorCounts() {
-        XCTAssertEqual(Catalog.count(of: .repetition), 31)
+        XCTAssertEqual(Catalog.count(of: .repetition), 32)
         XCTAssertEqual(Catalog.count(of: .nesting), 28)
-        XCTAssertEqual(Catalog.count(of: .randomness), 26)
-        XCTAssertEqual(Catalog.count(of: .complexity), 21)
+        XCTAssertEqual(Catalog.count(of: .randomness), 29)
+        XCTAssertEqual(Catalog.count(of: .complexity), 20)
+    }
+
+    /// E62's single-cell triangle looks busy but is a period-3 weave, so it is
+    /// repetition, not complexity (see `artifacts/`).
+    func testE62IsRepetition() {
+        XCTAssertEqual(Catalog.spec(id: "E62")?.behavior, .repetition)
+    }
+
+    /// Entries that drift sideways declare a follow rate; a centred or
+    /// symmetric entry stays fixed.
+    func testFollowRates() {
+        XCTAssertEqual(Catalog.spec(id: "E110")?.display.follow, Follow.left)
+        XCTAssertEqual(Catalog.spec(id: "E28")?.display.follow, Follow.right)
+        XCTAssertEqual(Catalog.spec(id: "E60")?.display.follow, Follow.right)
+        XCTAssertEqual(Catalog.spec(id: "E2")?.display.follow, Follow.left)
+        XCTAssertEqual(Catalog.spec(id: "E90")?.display.follow, Follow.none)
+    }
+
+    /// Injected randomness is deterministic, so `makeProgram()` stays the
+    /// golden entry point.
+    func testInjectedRandomnessIsDeterministic() {
+        guard let spec = Catalog.spec(id: "E90.inject") else { return XCTFail("missing E90.inject") }
+        XCTAssertNotNil(spec.board.injection)
+        var a = spec.makeProgram()
+        var b = spec.makeProgram()
+        for _ in 0..<32 {
+            a.step()
+            b.step()
+        }
+        XCTAssertEqual(RowHash.fnv1a(a.row()), RowHash.fnv1a(b.row()))
     }
 
     func testEverySpecHasALookLine() {

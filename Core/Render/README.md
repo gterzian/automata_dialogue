@@ -111,7 +111,11 @@ movable `viewportOrigin` (kernel block 1), and `LayerRenderer` stretches the
 small cell grid over the whole drawable. `IncrementalRenderer`/`MetalSimulation`
 take the simulated board explicitly, so a narrow catalog entry still runs on a
 wide board; `pan(by:)` slides the origin, clamped to `boardWidth - cols`, and
-`RenderActor.pan(by:)` re-fits and delivers. A run starts centred on the board
+`RenderActor.pan(by:)` re-fits and delivers. An entry whose pattern drifts
+sideways declares `DisplayHints.follow` (signed columns per source step); the
+renderer pans the viewport by that rate as it advances, so the pattern goes
+down *and* toward the side it drifts, and a manual `pan(by:)` aborts the follow
+for the rest of the run (a `reset` restores it). A run starts centred on the board
 (rightmost for a rightmost or `pinRight` entry), grows from the top until the
 window fills, then scrolls with the newest row at the bottom.
 `ColumnMapping.fit` stays the still-image mapping for `CPUAutomatonRenderer`

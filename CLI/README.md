@@ -29,7 +29,10 @@
   layer stretches a small cell grid over the whole window while the viewport
   shows one part of a much bigger board, so the pattern keeps evolving after it
   leaves the first view and each Left/Right arrow moves the viewport ten
-  columns; Escape restarts the running automaton from a fresh seed; Up/Down
+  columns. An entry whose pattern drifts sideways (see `DisplayHints.follow`)
+  pans the viewport with it, so the pattern goes down and toward that side; a
+  Left/Right pan aborts that follow for the rest of the run. Escape restarts the
+  running automaton from a fresh seed; Up/Down
   raise or lower the growth rate (each press ×1.5). The run starts at 20 rows
   per second of wall time (`.timed`) and advances toward the bottom until the
   window fills, then scrolls with the newest row at the bottom and older rows

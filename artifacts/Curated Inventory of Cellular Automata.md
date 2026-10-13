@@ -18,7 +18,7 @@ looks like from its stated start.
   move, and interact with each other in complicated ways, and large regions of
   different texture meet along structured boundaries.
 
-The 106 entries follow in section 2. Each gives the id, its class, and a
+The 109 entries follow in section 2. Each gives the id, its class, and a
 one-sentence description of how it looks.
 
 ## 1. Basic algorithms
@@ -79,6 +79,10 @@ one-sentence description of how it looks.
   ring.
 - **Random 2-cell blocks (`.pairs`):** fill the row with blocks chosen at
   random between white-white and black-black.
+- **Injected randomness (`.inject`):** on top of any start, after every step
+  one cell is overwritten with a pseudo-random value drawn from the entry's
+  seed. The draw is deterministic so the CPU reference and the GPU kernel agree
+  row for row; a fresh seed per run makes re-choosing the entry differ.
 - An id such as `E90.rand` names a rule together with a special starting row;
   entries without a suffix start from a single cell.
 
@@ -89,6 +93,7 @@ one-sentence description of how it looks.
 - **E190** (repetition): A solid black triangle expands at full speed, crossed by evenly spaced diagonal white stripes parallel to one edge.
 - **E28** (repetition): A wedge of evenly spaced vertical stripes grows down and to the right from a single cell, with a clean diagonal edge and empty white on the left.
 - **E94** (repetition): A clean triangle filled with evenly spaced vertical stripes, edged by two sharp diagonals.
+- **E62** (repetition): From a single cell a triangle grows, its interior a fine diagonal weave that repeats every three steps: even striping on the left, a denser fan on the right.
 - **E77** (repetition): Horizontal stripes bend into evenly spaced right-angle corners that fan out from the top center.
 - **E57** (repetition): A horizontally striped field with a central wedge of fine woven texture widening downward, lighter on its left half and darker on its right.
 - **E54** (repetition): A growing triangle filled with a tight regular lattice of tiny triangles, like woven cloth.
@@ -156,6 +161,9 @@ one-sentence description of how it looks.
 - **K2R2-10** (randomness): A wide, shallow triangle of fine random speckle with faint banding.
 - **K2R2-50** (randomness): A wide triangle of random speckle dotted with bold black inverted triangles.
 - **E90.rand** (randomness): A random field with white triangles at every size; rule 90 adds shifted copies of its single-cell triangle, so the picture carries the initial row's randomness.
+- **E90.inject** (randomness): Rule 90 with one random cell injected every step: a dense lace of overlapping triangles at every size.
+- **E105.rand** (randomness): Dense black-and-white static with white triangles of many sizes scattered through it.
+- **E129.rand** (randomness): A dark field of irregular texture broken by black triangles of many sizes.
 - **E22.rand** (randomness): A random field with white triangles whose black density settles near 0.35, coming from the rule itself.
 - **E22.seed19** (randomness): From the five cells 10011 the pattern grows a random core of density 0.35 that widens, with repetitive regions on both sides.
 - **E126.rand** (randomness): A rule that never settles: random texture at density one half with white triangles at all scales.
@@ -174,7 +182,6 @@ one-sentence description of how it looks.
 - **E54.rand** (complexity): From a random row, a regular background crossed by moving localized structures that collide and interact.
 - **E106.rand** (complexity): Diagonal strokes and white triangles of many sizes interlock across the picture, with irregular regions between them.
 - **E154.rand** (complexity): Broad diagonal black bands cross a speckled field, with irregular textured regions between them.
-- **E62** (complexity): From a single cell a triangle grows with a finely striped left half and a busy textured right half meeting along a ragged seam.
 - **T1041** (complexity): A growing triangle filling with a mixture of regular stripes and irregular regions.
 - **T1635** (complexity): Black triangular regions of many sizes separated by textured, irregular zones, with localized structures crossing between them.
 - **T2049** (complexity): A large solid black wedge near the center flanked by long vertical lines, with a busy irregular fringe of small structures along both outer sides.

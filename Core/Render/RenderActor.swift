@@ -104,7 +104,8 @@ public actor RenderActor {
     public func restart() {
         guard let simulation, let spec = runSpec, let board = runBoard else { return }
         let fresh = spec.withRandomSeed(UInt64.random(in: .min ... .max))
-        let seeded = Board(width: board.width, height: board.height, start: fresh.board.start)
+        let seeded = Board(width: board.width, height: board.height,
+                           start: fresh.board.start, injection: fresh.board.injection)
         simulation.reset(program: fresh.reference(seeded))
         do {
             _ = try deliver(simulation, chunk: 0)

@@ -21,6 +21,12 @@ public final class IncrementalRenderer {
     /// First source column shown by a `.window` mapping, clamped to
     /// `maxViewportOrigin`.
     public private(set) var viewportOrigin: Int
+    /// True once the caller pans by hand; the entry's follow then stops for the
+    /// rest of the run (a `reset` clears it).
+    public private(set) var userPanned = false
+    /// Fractional columns carried between frames while following a drifting
+    /// pattern, so a sub-column rate does not round to zero.
+    private var followCarry = 0.0
 
     /// The current source row (0 is the seed).
     public private(set) var step = 0
@@ -88,14 +94,31 @@ public final class IncrementalRenderer {
     }
 
     /// Shifts a `.window` mapping `delta` source columns, clamped to the board,
-    /// and refits. A no-op for the `.fit` mapping or a non-scrolling run, which
+    /// and refits. A manual pan also aborts the entry's follow for the rest of
+    /// the run. A no-op for the `.fit` mapping or a non-scrolling run, which
     /// does not keep the history a refit reads.
     public func pan(by delta: Int) {
         guard mapping == .window, scrolling else { return }
-        let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
-        guard origin != viewportOrigin else { return }
-        viewportOrigin = origin
+        userPanned = true
+        moveOrigin(by: delta)
         refit()
+    }
+
+    private func moveOrigin(by delta: Int) {
+        let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
+        viewportOrigin = origin
+    }
+
+    /// Pans the viewport by the entry's follow rate for `steps` source steps.
+    /// A manual pan, a `.fit` mapping, or a zero rate leaves the view fixed.
+    private func follow(by steps: Int) {
+        let rate = spec.display.follow.columnsPerStep
+        guard rate != 0, mapping == .window, !userPanned else { return }
+        followCarry += rate * Double(steps)
+        let whole = Int(followCarry.rounded(.towardZero))
+        guard whole != 0 else { return }
+        followCarry -= Double(whole)
+        moveOrigin(by: whole)
     }
 
     public var progress: Double {
@@ -108,6 +131,7 @@ public final class IncrementalRenderer {
     public func advance(by count: Int) -> Bool {
         if scrolling {
             let target = step + max(0, count)
+            follow(by: target - step)
             while step < target {
                 program.step()
                 step += 1
@@ -131,6 +155,8 @@ public final class IncrementalRenderer {
 
     public func reset() {
         program = spec.reference(board)
+        userPanned = false
+        followCarry = 0
         viewportOrigin = startOrigin
         step = 0
         settled = false

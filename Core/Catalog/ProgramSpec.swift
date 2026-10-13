@@ -27,16 +27,54 @@ public enum BoardStart: Sendable, Hashable {
     case seed(number: Int, colors: Int)
 }
 
+/// The atlas's "continuously injected randomness": after every step, one cell
+/// is overwritten with a pseudo-random value. `seed` makes the draw
+/// deterministic so the CPU reference and the GPU kernel agree row for row.
+public struct RandomInjection: Sendable, Hashable {
+    public var seed: UInt64
+
+    public init(seed: UInt64) {
+        self.seed = seed
+    }
+}
+
 public struct Board: Sendable, Hashable {
     public var width: Int
     public var height: Int
     public var start: BoardStart
+    /// The atlas injects one random cell per step on top of any start
+    /// (inventory §1.4); `nil` is the plain deterministic run.
+    public var injection: RandomInjection?
 
-    public init(width: Int, height: Int, start: BoardStart = .center) {
+    public init(
+        width: Int,
+        height: Int,
+        start: BoardStart = .center,
+        injection: RandomInjection? = nil
+    ) {
         self.width = width
         self.height = height
         self.start = start
+        self.injection = injection
     }
+}
+
+/// How the review window tracks a run that drifts sideways. A run that grows
+/// or slides left should pan the viewport left (so the pattern goes down *and*
+/// left); the default keeps the view fixed so it only goes down. Any manual pan
+/// aborts the follow for the rest of the run.
+public struct Follow: Sendable, Hashable {
+    /// Signed board columns to pan per source step: negative pans left,
+    /// positive pans right, 0 leaves the viewport fixed.
+    public var columnsPerStep: Double
+
+    public init(columnsPerStep: Double) {
+        self.columnsPerStep = columnsPerStep
+    }
+
+    public static let none = Follow(columnsPerStep: 0)
+    public static let left = Follow(columnsPerStep: -1)
+    public static let right = Follow(columnsPerStep: 1)
 }
 
 /// Per-entry run settings.
@@ -51,12 +89,22 @@ public struct DisplayHints: Sendable, Hashable {
     /// E110 grows leftward from the rightmost cell; the view follows the
     /// newest rows pinned to the right edge.
     public var pinRight: Bool
+    /// How fast the viewport follows a sideways-drifting pattern; `.none`
+    /// (the default) keeps the view fixed.
+    public var follow: Follow
     public var palette: Palette
 
-    public init(stepsPerSecond: Double, stepLimit: Int, pinRight: Bool = false, palette: Palette) {
+    public init(
+        stepsPerSecond: Double,
+        stepLimit: Int,
+        pinRight: Bool = false,
+        follow: Follow = .none,
+        palette: Palette
+    ) {
         self.stepsPerSecond = stepsPerSecond
         self.stepLimit = stepLimit
         self.pinRight = pinRight
+        self.follow = follow
         self.palette = palette
     }
 }
@@ -107,9 +155,22 @@ public struct ProgramSpec: Sendable {
     /// seed so re-choosing an entry gives a different picture, while
     /// `makeProgram()` stays deterministic for the tests.
     public func withRandomSeed(_ seed: UInt64) -> ProgramSpec {
-        guard case .random(_, let density) = board.start else { return self }
+        // A random row and injected randomness both redraw each run; an entry
+        // that has neither is returned unchanged.
+        var start = board.start
+        var injection = board.injection
+        var changed = false
+        if case .random(_, let density) = start {
+            start = .random(seed: seed, density: density)
+            changed = true
+        }
+        if injection != nil {
+            injection = RandomInjection(seed: seed)
+            changed = true
+        }
+        guard changed else { return self }
         let reseeded = Board(width: board.width, height: board.height,
-                             start: .random(seed: seed, density: density))
+                             start: start, injection: injection)
         return ProgramSpec(
             id: id, title: title, behavior: behavior, look: look,
             gpu: gpu, board: reseeded, display: display, reference: reference)

@@ -137,6 +137,40 @@ final class ViewportTests: XCTestCase {
             spec: spec, cols: 120, rows: 10, scrolling: true, mapping: .window, board: board)
         XCTAssertEqual(renderer.viewportOrigin, board.width - 120)
     }
+
+    /// A run whose entry declares a follow pans with the advancing steps, and a
+    /// manual pan aborts the follow until the next reset.
+    func testFollowPansWithTheRunAndManualPanAborts() {
+        let spec = Catalog.spec(id: "E28")!   // drifts right at one column per step
+        let board = Board(width: 1000, height: spec.board.height, start: .center)
+        let renderer = IncrementalRenderer(
+            spec: spec, cols: 100, rows: 10, scrolling: true, mapping: .window, board: board)
+        let start = renderer.viewportOrigin
+        XCTAssertFalse(renderer.userPanned)
+        renderer.advance(by: 40)
+        XCTAssertEqual(renderer.viewportOrigin, start + 40)
+
+        renderer.pan(by: -10)
+        XCTAssertTrue(renderer.userPanned)
+        let afterManualPan = renderer.viewportOrigin
+        renderer.advance(by: 40)
+        XCTAssertEqual(renderer.viewportOrigin, afterManualPan)
+
+        renderer.reset()
+        XCTAssertFalse(renderer.userPanned)
+        XCTAssertEqual(renderer.viewportOrigin, start)
+    }
+
+    /// A fixed entry (`.none`) never moves the viewport on its own.
+    func testNoFollowLeavesTheViewportFixed() {
+        let spec = Catalog.spec(id: "E90")!
+        let board = Board(width: 1000, height: spec.board.height, start: .center)
+        let renderer = IncrementalRenderer(
+            spec: spec, cols: 100, rows: 10, scrolling: true, mapping: .window, board: board)
+        let start = renderer.viewportOrigin
+        renderer.advance(by: 100)
+        XCTAssertEqual(renderer.viewportOrigin, start)
+    }
 }
 
 final class CPURendererTests: XCTestCase {

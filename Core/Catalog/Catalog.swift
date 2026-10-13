@@ -1,6 +1,6 @@
 import Foundation
 
-/// The curated inventory as one table. Exactly 106 entries, in
+/// The curated inventory as one table. Exactly 109 entries, in
 /// the inventory's order; the system prompt's automata listing and the CLI
 /// catalog print are generated from this table.
 public enum Catalog {
@@ -50,6 +50,7 @@ public enum Catalog {
         gpu: GPUProgram,
         board: Board,
         pinRight: Bool = false,
+        follow: Follow = .none,
         stepsPerSecond: Double? = nil,
         stepLimit: Int? = nil
     ) -> ProgramSpec {
@@ -57,6 +58,7 @@ public enum Catalog {
             stepsPerSecond: stepsPerSecond ?? defaultStepsPerSecond(height: board.height),
             stepLimit: stepLimit ?? board.height * 4,
             pinRight: pinRight,
+            follow: follow,
             palette: Palette.standard(stateCount: stateCount(gpu))
         )
         return ProgramSpec(
@@ -80,15 +82,17 @@ public enum Catalog {
         width: Int,
         height: Int,
         start: BoardStart = .center,
+        injection: RandomInjection? = nil,
         pinRight: Bool = false,
+        follow: Follow = .none,
         stepsPerSecond: Double? = nil,
         stepLimit: Int? = nil
     ) -> ProgramSpec {
         make(
             id: id, title: title, behavior: behavior, look: look,
             gpu: .elementary(rule: rule),
-            board: Board(width: width, height: height, start: start),
-            pinRight: pinRight, stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
+            board: Board(width: width, height: height, start: start, injection: injection),
+            pinRight: pinRight, follow: follow, stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
         )
     }
 
@@ -101,14 +105,16 @@ public enum Catalog {
         width: Int,
         height: Int,
         start: BoardStart = .center,
+        injection: RandomInjection? = nil,
+        follow: Follow = .none,
         stepsPerSecond: Double? = nil,
         stepLimit: Int? = nil
     ) -> ProgramSpec {
         make(
             id: id, title: title, behavior: behavior, look: look,
             gpu: .totalistic(code: code, colors: 3),
-            board: Board(width: width, height: height, start: start),
-            stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
+            board: Board(width: width, height: height, start: start, injection: injection),
+            follow: follow, stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
         )
     }
 
@@ -121,14 +127,16 @@ public enum Catalog {
         width: Int,
         height: Int,
         start: BoardStart = .center,
+        injection: RandomInjection? = nil,
+        follow: Follow = .none,
         stepsPerSecond: Double? = nil,
         stepLimit: Int? = nil
     ) -> ProgramSpec {
         make(
             id: id, title: title, behavior: behavior, look: look,
             gpu: .k2r2(code: code),
-            board: Board(width: width, height: height, start: start),
-            stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
+            board: Board(width: width, height: height, start: start, injection: injection),
+            follow: follow, stepsPerSecond: stepsPerSecond, stepLimit: stepLimit
         )
     }
 
@@ -153,12 +161,21 @@ public enum Catalog {
             eca(
                 "E28", 28, title: "Rule 28", behavior: .repetition,
                 look: "A wedge of evenly spaced vertical stripes grows down and to the right from a single cell, with a clean diagonal edge and empty white on the left.",
-                width: 321, height: 160
+                width: 321, height: 160, follow: .right
             ),
             eca(
                 "E94", 94, title: "Rule 94", behavior: .repetition,
                 look: "A clean triangle filled with evenly spaced vertical stripes, edged by two sharp diagonals.",
                 width: 401, height: 200
+            ),
+            // E62's single-cell triangle reads as busy, but its interior is a
+            // period-3 weave (verified: rows t and t+3 agree across the whole
+            // triangle, and every column is eventually period 3), so it is a
+            // repetition rule, not complexity.
+            eca(
+                "E62", 62, title: "Rule 62", behavior: .repetition,
+                look: "From a single cell a triangle grows, its interior a fine diagonal weave that repeats every three steps: even striping on the left, a denser fan on the right.",
+                width: 801, height: 400
             ),
             eca(
                 "E77", 77, title: "Rule 77", behavior: .repetition,
@@ -183,7 +200,7 @@ public enum Catalog {
             eca(
                 "E2", 2, title: "Rule 2", behavior: .repetition,
                 look: "A single thin diagonal line slides steadily to the left across an empty white field.",
-                width: 321, height: 160
+                width: 321, height: 160, follow: .left
             ),
             total(
                 "T39", 39, title: "3-color totalistic 39", behavior: .repetition,
@@ -258,7 +275,8 @@ public enum Catalog {
             total(
                 "T1329.seed916", 1329, title: "3-color totalistic 1329, seed 916", behavior: .repetition,
                 look: "From seed 916 a compact object 16 to 32 cells wide drifts slowly across the white background.",
-                width: 321, height: 300, start: .seed(number: 916, colors: 3)
+                width: 321, height: 300, start: .seed(number: 916, colors: 3),
+                follow: Follow(columnsPerStep: 0.22)
             ),
             total(
                 "T357.seed28", 357, title: "3-color totalistic 357, seed 28", behavior: .repetition,
@@ -305,7 +323,7 @@ public enum Catalog {
             eca(
                 "E60", 60, title: "Rule 60", behavior: .nesting,
                 look: "A right-angled Sierpinski triangle growing to one side, with a vertical edge on one side and a diagonal on the other.",
-                width: 401, height: 200
+                width: 401, height: 200, follow: .right
             ),
             eca(
                 "E150", 150, title: "Rule 150", behavior: .nesting,
@@ -433,7 +451,7 @@ public enum Catalog {
                 width: 401, height: 100
             ),
 
-            // MARK: Randomness (26)
+            // MARK: Randomness (29)
             eca(
                 "E30", 30, title: "Rule 30", behavior: .randomness,
                 look: "A clean diagonal left edge and a disordered tangle of black and white with scattered white triangles of every size; the center column is statistically random.",
@@ -498,6 +516,21 @@ public enum Catalog {
                 "E90.rand", 90, title: "Rule 90, random row", behavior: .randomness,
                 look: "A random field with white triangles at every size; rule 90 adds shifted copies of its single-cell triangle, so the picture carries the initial row's randomness.",
                 width: 401, height: 200, start: .random(seed: 90, density: 0.5)
+            ),
+            eca(
+                "E90.inject", 90, title: "Rule 90, injected randomness", behavior: .randomness,
+                look: "Rule 90 with one random cell injected every step: a dense lace of overlapping triangles at every size.",
+                width: 401, height: 200, injection: RandomInjection(seed: 90)
+            ),
+            eca(
+                "E105.rand", 105, title: "Rule 105, random row", behavior: .randomness,
+                look: "Dense black-and-white static with white triangles of many sizes scattered through it.",
+                width: 401, height: 200, start: .random(seed: 105, density: 0.5)
+            ),
+            eca(
+                "E129.rand", 129, title: "Rule 129, random row", behavior: .randomness,
+                look: "A dark field of irregular texture broken by black triangles of many sizes.",
+                width: 401, height: 200, start: .random(seed: 129, density: 0.5)
             ),
             eca(
                 "E22.rand", 22, title: "Rule 22, random row", behavior: .randomness,
@@ -569,7 +602,7 @@ public enum Catalog {
             eca(
                 "E110", 110, title: "Rule 110", behavior: .complexity,
                 look: "From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.",
-                width: 1201, height: 400, start: .rightmost, pinRight: true
+                width: 1201, height: 400, start: .rightmost, pinRight: true, follow: .left
             ),
             eca(
                 "E110.rand", 110, title: "Rule 110, random row", behavior: .complexity,
@@ -590,11 +623,6 @@ public enum Catalog {
                 "E154.rand", 154, title: "Rule 154, random row", behavior: .complexity,
                 look: "Broad diagonal black bands cross a speckled field, with irregular textured regions between them.",
                 width: 400, height: 300, start: .random(seed: 154, density: 0.5)
-            ),
-            eca(
-                "E62", 62, title: "Rule 62", behavior: .complexity,
-                look: "From a single cell a triangle grows with a finely striped left half and a busy textured right half meeting along a ragged seam.",
-                width: 801, height: 400
             ),
             total(
                 "T1041", 1041, title: "3-color totalistic 1041", behavior: .complexity,
@@ -624,7 +652,8 @@ public enum Catalog {
             total(
                 "T1329.seed54889", 1329, title: "3-color totalistic 1329, seed 54889", behavior: .complexity,
                 look: "From seed 54889 a complex region widens by about half a cell per step in total, drifting slowly to one side without bound.",
-                width: 1201, height: 400, start: .seed(number: 54_889, colors: 3)
+                width: 1201, height: 400, start: .seed(number: 54_889, colors: 3),
+                follow: Follow(columnsPerStep: 0.37)
             ),
             total(
                 "T1635.rand", 1635, title: "3-color totalistic 1635, random row", behavior: .complexity,
@@ -644,12 +673,14 @@ public enum Catalog {
             total(
                 "T1329.rand", 1329, title: "3-color totalistic 1329, random row", behavior: .complexity,
                 look: "A white field with gray triangles and black trees that grow downward and collide.",
-                width: 800, height: 400, start: .random(seed: 1329)
+                width: 800, height: 400, start: .random(seed: 1329),
+                follow: Follow(columnsPerStep: -0.11)
             ),
             total(
                 "T357.rand", 357, title: "3-color totalistic 357, random row", behavior: .complexity,
                 look: "White voids with gray-and-black trees of many sizes growing into them.",
-                width: 800, height: 400, start: .random(seed: 357)
+                width: 800, height: 400, start: .random(seed: 357),
+                follow: Follow(columnsPerStep: -0.42)
             ),
             total(
                 "T948.rand", 948, title: "3-color totalistic 948, random row", behavior: .complexity,
@@ -669,7 +700,8 @@ public enum Catalog {
             k2r2(
                 "K2R2-52.rand", 52, title: "K2R2 code 52, random row", behavior: .complexity,
                 look: "Large black and white regions bounded by long vertical and diagonal edges, with small branching structures at their junctions.",
-                width: 600, height: 400, start: .random(seed: 52, density: 0.5)
+                width: 600, height: 400, start: .random(seed: 52, density: 0.5),
+                follow: Follow(columnsPerStep: 0.16)
             ),
         ]
     }

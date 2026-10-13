@@ -28,3 +28,4 @@ renders/
 # Keep the README: it records the verified snapshot hashes.
 Models/*
 !Models/README.md
+tools/catalog-audit/

@@ -15,7 +15,19 @@ public enum ShaderSource {
         uint rule;    // elementary rule bits, or totalistic code
         uint colors;  // 0 selects the elementary kernel
         uint capacity; // history rows; the source step is taken modulo this
+        uint inject;   // 1 = overwrite the centre cell after each step
+        ulong injectSeed; // base of the per-step injection draw
     };
+
+    // The injected-randomness draw: the SplitMix64 mix of `seed + step × golden`,
+    // matching `SplitMix64.injectedValue` so the CPU reference and this kernel
+    // agree row for row without carrying the generator's state.
+    static ulong injection_value(ulong seed, ulong step) {
+        ulong z = seed + step * 0x9E3779B97F4A7C15UL;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+        return z ^ (z >> 31);
+    }
 
     struct FitParams {
         uint boardWidth;
@@ -52,6 +64,10 @@ public enum ShaderSource {
         uint r = history[base + (i + 1) % p.width];
         uint neighborhood = (l << 2) | (c << 1) | r;
         history[writeBase + i] = uchar((p.rule >> neighborhood) & 1u);
+        if (p.inject != 0 && i == p.width / 2) {
+            ulong draw = injection_value(p.injectSeed, ulong(readRow + 1));
+            history[writeBase + i] = uchar(draw % 2);
+        }
     }
 
     kernel void step_totalistic(device uchar* history [[buffer(0)]],
@@ -71,6 +87,10 @@ public enum ShaderSource {
         uint divisor = 1;
         for (uint k = 0; k < sum; ++k) { divisor *= p.colors; }
         history[writeBase + i] = uchar((p.rule / divisor) % p.colors);
+        if (p.inject != 0 && i == p.width / 2) {
+            ulong draw = injection_value(p.injectSeed, ulong(readRow + 1));
+            history[writeBase + i] = uchar(draw % p.colors);
+        }
     }
 
     kernel void step_k2r2(device uchar* history [[buffer(0)]],
@@ -89,6 +109,10 @@ public enum ShaderSource {
                  + history[base + (i + 1) % p.width]
                  + history[base + (i + 2) % p.width];
         history[writeBase + i] = uchar((p.rule >> sum) & 1u);
+        if (p.inject != 0 && i == p.width / 2) {
+            ulong draw = injection_value(p.injectSeed, ulong(readRow + 1));
+            history[writeBase + i] = uchar(draw % 2);
+        }
     }
 
     kernel void bump_head(device uint* head [[buffer(0)]],
