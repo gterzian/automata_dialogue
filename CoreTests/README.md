@@ -6,8 +6,8 @@ Metal 4.
 
 What must be covered:
 
-- **Catalog** — 109 unique ids in inventory order; behavior counts
-  (repetition 32, nesting 28, randomness 29, complexity 20); the listing and the
+- **Catalog** — 111 unique ids in inventory order; behavior counts
+  (repetition 27, nesting 28, randomness 36, complexity 20); the listing and the
   catalog ids agree; per-entry follow rates.
 - **Programs** — CPU reference row hashes for each entry; closed-form local
   rules agree with the rule table for all 8 neighborhoods; the K2R2 code table.

@@ -16,7 +16,7 @@ render core. Built by SwiftPM for tests and the CLI.
 
 ## Layout
 
-- `Catalog/` — the 109 `ProgramSpec` entries, behavior classes, GPU program
+- `Catalog/` — the 111 `ProgramSpec` entries, behavior classes, GPU program
   descriptors, palettes, and the catalog index. See `Catalog/README.md`.
 - `Programs/` — CPU reference implementations and the PRNG. See
   `Programs/README.md`.

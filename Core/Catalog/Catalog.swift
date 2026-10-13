@@ -1,6 +1,6 @@
 import Foundation
 
-/// The curated inventory as one table. Exactly 109 entries, in
+/// The curated inventory as one table. Exactly 111 entries, in
 /// the inventory's order; the system prompt's automata listing and the CLI
 /// catalog print are generated from this table.
 public enum Catalog {
@@ -142,7 +142,7 @@ public enum Catalog {
 
     private static func makeAll() -> [ProgramSpec] {
         [
-            // MARK: Repetition (31)
+            // MARK: Repetition (27)
             eca(
                 "E250", 250, title: "Rule 250", behavior: .repetition,
                 look: "A single cell widens into a triangle at one cell per step, its interior a fine checkerboard that flips each step, bounded by two sharp diagonals.",
@@ -197,26 +197,6 @@ public enum Catalog {
                 look: "A symmetric triangle of stacked arches with a dotted core grows over a horizontally striped background.",
                 width: 401, height: 200
             ),
-            eca(
-                "E2", 2, title: "Rule 2", behavior: .repetition,
-                look: "A single thin diagonal line slides steadily to the left across an empty white field.",
-                width: 321, height: 160, follow: .left
-            ),
-            total(
-                "T39", 39, title: "3-color totalistic 39", behavior: .repetition,
-                look: "A solid gray triangle with razor-sharp edges widens at full speed.",
-                width: 321, height: 160
-            ),
-            total(
-                "T1677", 1677, title: "3-color totalistic 1677", behavior: .repetition,
-                look: "A solid black triangle outlined by a thin beaded gray edge.",
-                width: 321, height: 160
-            ),
-            total(
-                "T1500", 1500, title: "3-color totalistic 1500", behavior: .repetition,
-                look: "A solid gray triangle whose two edges carry a ragged fringe of tiny black and white structures.",
-                width: 321, height: 160
-            ),
             total(
                 "T1047", 1047, title: "3-color totalistic 1047", behavior: .repetition,
                 look: "A dark triangle filled with thin horizontal stripes, with a ragged light fringe along its edges.",
@@ -256,11 +236,6 @@ public enum Catalog {
                 "T1884", 1884, title: "3-color totalistic 1884", behavior: .repetition,
                 look: "A dark-textured triangle filled with a regular arched, scale-like lattice in black and gray.",
                 width: 321, height: 160
-            ),
-            k2r2(
-                "K2R2-62", 62, title: "K2R2 code 62", behavior: .repetition,
-                look: "A very wide, shallow black triangle grows from a single cell, leaving white above its straight sloping edges.",
-                width: 401, height: 100
             ),
             eca(
                 "E30.block1100", 30, title: "Rule 30, block 1100", behavior: .repetition,
@@ -451,16 +426,16 @@ public enum Catalog {
                 width: 401, height: 100
             ),
 
-            // MARK: Randomness (29)
+            // MARK: Randomness (36)
             eca(
                 "E30", 30, title: "Rule 30", behavior: .randomness,
-                look: "A clean diagonal left edge and a disordered tangle of black and white with scattered white triangles of every size; the center column is statistically random.",
-                width: 401, height: 200
+                look: "A disordered black-and-white field of static with scattered white triangles of every size.",
+                width: 401, height: 200, start: .random(seed: 30, density: 0.5)
             ),
             eca(
                 "E45", 45, title: "Rule 45", behavior: .randomness,
-                look: "A regular diagonal on one side and a mix of short vertical dashes and irregular blocks filling the rest, over a horizontally striped background.",
-                width: 401, height: 200
+                look: "Dense black-and-white static with short vertical dashes and irregular blocks.",
+                width: 401, height: 200, start: .random(seed: 45, density: 0.5)
             ),
             total(
                 "T177", 177, title: "3-color totalistic 177", behavior: .randomness,
@@ -504,13 +479,13 @@ public enum Catalog {
             ),
             k2r2(
                 "K2R2-10", 10, title: "K2R2 code 10", behavior: .randomness,
-                look: "A wide, shallow triangle of fine random speckle with faint banding.",
-                width: 401, height: 100
+                look: "Fine random speckle with faint banding.",
+                width: 401, height: 100, start: .random(seed: 10, density: 0.5)
             ),
             k2r2(
                 "K2R2-50", 50, title: "K2R2 code 50", behavior: .randomness,
-                look: "A wide triangle of random speckle dotted with bold black inverted triangles.",
-                width: 401, height: 100
+                look: "Random speckle dotted with bold black inverted triangles.",
+                width: 401, height: 100, start: .random(seed: 50, density: 0.5)
             ),
             eca(
                 "E90.rand", 90, title: "Rule 90, random row", behavior: .randomness,
@@ -597,8 +572,47 @@ public enum Catalog {
                 look: "A mid-gray mottled field with gray triangles of many sizes.",
                 width: 601, height: 300, start: .random(seed: 1182)
             ),
+            // Random rows of the nested entries (inventory §1.4): the same rule
+            // from a random row loses the self-similarity and reads as disorder,
+            // so each gets its own randomness entry rather than reusing the
+            // single-cell one.
+            eca(
+                "E225.rand", 225, title: "Rule 225, random row", behavior: .randomness,
+                look: "Thin diagonal strokes scattered at irregular spacing across a black field.",
+                width: 401, height: 300, start: .random(seed: 225, density: 0.5)
+            ),
+            total(
+                "T1848.rand", 1848, title: "3-color totalistic 1848, random row", behavior: .randomness,
+                look: "A black field strewn with white triangle outlines of many sizes.",
+                width: 401, height: 200, start: .random(seed: 1848)
+            ),
+            total(
+                "T1932.rand", 1932, title: "3-color totalistic 1932, random row", behavior: .randomness,
+                look: "A dark field with white triangles of many sizes.",
+                width: 401, height: 200, start: .random(seed: 1932)
+            ),
+            total(
+                "T1410.rand", 1410, title: "3-color totalistic 1410, random row", behavior: .randomness,
+                look: "A narrow steep column of dense gray-and-black speckle.",
+                width: 321, height: 200, start: .random(seed: 1410)
+            ),
+            k2r2(
+                "K2R2-2.rand", 2, title: "K2R2 code 2, random row", behavior: .randomness,
+                look: "Sparse speckle that spawns white triangles of many sizes.",
+                width: 401, height: 100, start: .random(seed: 2, density: 0.5)
+            ),
+            k2r2(
+                "K2R2-30.rand", 30, title: "K2R2 code 30, random row", behavior: .randomness,
+                look: "Dense speckle with white triangular outlines at many sizes.",
+                width: 401, height: 100, start: .random(seed: 30, density: 0.5)
+            ),
+            k2r2(
+                "K2R2-42.rand", 42, title: "K2R2 code 42, random row", behavior: .randomness,
+                look: "Dense mottled speckle with small white triangles.",
+                width: 401, height: 100, start: .random(seed: 42, density: 0.5)
+            ),
 
-            // MARK: Complex localized structures (21)
+            // MARK: Complex localized structures (20)
             eca(
                 "E110", 110, title: "Rule 110", behavior: .complexity,
                 look: "From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.",
@@ -626,8 +640,13 @@ public enum Catalog {
             ),
             total(
                 "T1041", 1041, title: "3-color totalistic 1041", behavior: .complexity,
-                look: "A growing triangle filling with a mixture of regular stripes and irregular regions.",
-                width: 801, height: 400
+                look: "A mixture of regular vertical stripes and irregular regions.",
+                width: 801, height: 400, start: .random(seed: 1041)
+            ),
+            total(
+                "T1599", 1599, title: "3-color totalistic 1599", behavior: .complexity,
+                look: "A field of irregular trees and columns that grow, die out and return.",
+                width: 1001, height: 600, start: .random(seed: 1599), stepsPerSecond: 1100, stepLimit: 8300
             ),
             total(
                 "T1635", 1635, title: "3-color totalistic 1635", behavior: .complexity,
@@ -640,14 +659,9 @@ public enum Catalog {
                 width: 6101, height: 600, stepLimit: 3000
             ),
             total(
-                "T1599", 1599, title: "3-color totalistic 1599", behavior: .complexity,
-                look: "From one gray cell the pattern grows irregularly for thousands of steps, with regions dying out and bursts of growth returning.",
-                width: 1001, height: 600, stepsPerSecond: 1100, stepLimit: 8300
-            ),
-            total(
                 "T1662", 1662, title: "3-color totalistic 1662", behavior: .complexity,
-                look: "A triangle of diagonal stripes strung with beaded structures that pass through each other along a central seam.",
-                width: 801, height: 400
+                look: "Vertical black columns strung with beaded structures.",
+                width: 801, height: 400, start: .random(seed: 1662)
             ),
             total(
                 "T1329.seed54889", 1329, title: "3-color totalistic 1329, seed 54889", behavior: .complexity,

@@ -3,14 +3,14 @@ import XCTest
 
 final class CatalogTests: XCTestCase {
     func testHasExpectedUniqueEntries() {
-        XCTAssertEqual(Catalog.all.count, 109)
-        XCTAssertEqual(Set(Catalog.ids).count, 109)
+        XCTAssertEqual(Catalog.all.count, 111)
+        XCTAssertEqual(Set(Catalog.ids).count, 111)
     }
 
     func testBehaviorCounts() {
-        XCTAssertEqual(Catalog.count(of: .repetition), 32)
+        XCTAssertEqual(Catalog.count(of: .repetition), 27)
         XCTAssertEqual(Catalog.count(of: .nesting), 28)
-        XCTAssertEqual(Catalog.count(of: .randomness), 29)
+        XCTAssertEqual(Catalog.count(of: .randomness), 36)
         XCTAssertEqual(Catalog.count(of: .complexity), 20)
     }
 
@@ -26,7 +26,6 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(Catalog.spec(id: "E110")?.display.follow, Follow.left)
         XCTAssertEqual(Catalog.spec(id: "E28")?.display.follow, Follow.right)
         XCTAssertEqual(Catalog.spec(id: "E60")?.display.follow, Follow.right)
-        XCTAssertEqual(Catalog.spec(id: "E2")?.display.follow, Follow.left)
         XCTAssertEqual(Catalog.spec(id: "E90")?.display.follow, Follow.none)
     }
 

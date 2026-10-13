@@ -1,14 +1,14 @@
 # Core/Catalog
 
-One table of 109 `ProgramSpec` values feeds the renderer, the system prompt's
+One table of 111 `ProgramSpec` values feeds the renderer, the system prompt's
 automata listing, and the CLI catalog debug print. The listing is built from
 this table, so what the model chooses and what the renderer draws cannot
 diverge.
 
 ## Invariants
 
-- 109 entries, unique ids, in the inventory's order.
-- Behavior counts: **repetition 32, nesting 28, randomness 29, complexity 20**.
+- 111 entries, unique ids, in the inventory's order.
+- Behavior counts: **repetition 27, nesting 28, randomness 36, complexity 20**.
 - Every id appears in `Catalog.ids`, and `Catalog.promptIndexLines` is generated
   from the same table as `id | class | look`.
 
