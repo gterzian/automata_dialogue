@@ -101,9 +101,10 @@ public final class MetalSimulation {
     /// True once the caller pans by hand; the entry's follow then stops for the
     /// rest of the run (a `reset` clears it).
     public private(set) var userPanned = false
-    /// Fractional columns carried between frames while following a drifting
-    /// pattern, so a sub-column rate does not round to zero.
-    private var followCarry = 0.0
+    /// Board column of the seed's leading edge in the follow direction. The
+    /// viewport only scrolls once the growing edge reaches a viewport boundary,
+    /// so the pattern is never pushed out of view.
+    private var leadAnchor = 0.0
     /// Source row currently computed (0 is the seed).
     public private(set) var step = 0
     /// Index of the frame slot that produced the last `render` call.
@@ -252,24 +253,30 @@ public final class MetalSimulation {
         moveOrigin(by: delta)
     }
 
-    private func moveOrigin(by delta: Int) {
-        let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
-        guard origin != viewportOrigin else { return }
-        viewportOrigin = origin
-        fitParams.sourceOrigin = UInt32(origin)
+    private func setOrigin(_ origin: Int) {
+        let clamped = min(max(0, origin), maxViewportOrigin)
+        guard clamped != viewportOrigin else { return }
+        viewportOrigin = clamped
+        fitParams.sourceOrigin = UInt32(clamped)
         memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
     }
 
-    /// Pans the viewport by the entry's follow rate for `steps` source steps.
-    /// A manual pan, a `.fit` mapping, or a zero rate leaves the view fixed.
-    private func follow(by steps: Int) {
+    private func moveOrigin(by delta: Int) {
+        setOrigin(viewportOrigin + delta)
+    }
+
+    /// Scrolls the viewport as the pattern's leading edge advances, but only
+    /// once that edge would leave the viewport: while the edge is still inside,
+    /// the origin does not move. The edge is `leadAnchor` moved by the entry's
+    /// signed rate, so a left-growing pattern is not pushed off the right.
+    private func follow(to currentStep: Int) {
         let rate = spec.display.follow.columnsPerStep
         guard rate != 0, mapping == .window, !userPanned else { return }
-        followCarry += rate * Double(steps)
-        let whole = Int(followCarry.rounded(.towardZero))
-        guard whole != 0 else { return }
-        followCarry -= Double(whole)
-        moveOrigin(by: whole)
+        let lead = leadAnchor + rate * Double(currentStep)
+        let raw = rate > 0
+            ? max(Double(startOrigin), lead - Double(cols - 1))
+            : min(Double(startOrigin), lead)
+        setOrigin(Int(raw.rounded()))
     }
 
     /// Returns the simulation to the seed row (step 0), resets the horizontal
@@ -277,7 +284,6 @@ public final class MetalSimulation {
     /// `.rand` replay); the buffers are reused.
     public func reset(program: (any RowProgram)? = nil) {
         userPanned = false
-        followCarry = 0
         viewportOrigin = startOrigin
         fitParams.sourceOrigin = UInt32(startOrigin)
         memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
@@ -320,7 +326,7 @@ public final class MetalSimulation {
         let target = scrolling
             ? step + requested
             : min(totalSteps - 1, step + requested)
-        if scrolling { follow(by: target - step) }
+        if scrolling { follow(to: target) }
         let (index, slot) = ring.borrow()
         lastSlot = index
 
@@ -354,6 +360,13 @@ public final class MetalSimulation {
         step = 0
         fittedRows = 0
         let seed = (program ?? spec.reference(board)).row()
+        let rate = spec.display.follow.columnsPerStep
+        if rate != 0 {
+            let column = rate > 0
+                ? (seed.lastIndex(where: { $0 != 0 }) ?? 0)
+                : (seed.firstIndex(where: { $0 != 0 }) ?? 0)
+            leadAnchor = Double(column)
+        }
         seed.withUnsafeBytes { bytes in
             if let base = bytes.baseAddress { memcpy(history.contents(), base, width) }
         }

@@ -31,8 +31,9 @@ diverge.
   ring edge needs a board wide enough for the run (inventory §1.1).
 - `DisplayHints` — `stepsPerSecond`, `stepLimit`, `pinRight` (E110 only),
   `follow`, `palette`. `follow` is the review window's sideways tracking rate
-  for a drifting pattern; `.none` keeps the view fixed and a manual pan aborts
-  it (see `Render/README.md`).
+  for a drifting pattern; `.none` keeps the view fixed, and the view scrolls
+  only once the pattern's leading edge reaches the viewport boundary (see
+  `Render/README.md`).
 - `Palette` — up to 16 colors; index 0 is the background. Elementary entries
   use white/black; totalistic entries white/gray/black (inventory §1.2).
 

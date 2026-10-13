@@ -24,9 +24,9 @@ public final class IncrementalRenderer {
     /// True once the caller pans by hand; the entry's follow then stops for the
     /// rest of the run (a `reset` clears it).
     public private(set) var userPanned = false
-    /// Fractional columns carried between frames while following a drifting
-    /// pattern, so a sub-column rate does not round to zero.
-    private var followCarry = 0.0
+    /// Board column of the seed's leading edge in the follow direction; the
+    /// viewport only scrolls once that edge reaches a boundary.
+    private var leadAnchor = 0.0
 
     /// The current source row (0 is the seed).
     public private(set) var step = 0
@@ -80,6 +80,7 @@ public final class IncrementalRenderer {
         self.ring = Array(repeating: [], count: displayRows + 2)
         if scrolling {
             ring[0] = program.row()
+            updateLeadAnchor()
             refit()
         } else {
             fillRowsReady(at: 0)
@@ -105,20 +106,29 @@ public final class IncrementalRenderer {
     }
 
     private func moveOrigin(by delta: Int) {
-        let origin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
-        viewportOrigin = origin
+        viewportOrigin = min(max(0, viewportOrigin + delta), maxViewportOrigin)
     }
 
-    /// Pans the viewport by the entry's follow rate for `steps` source steps.
-    /// A manual pan, a `.fit` mapping, or a zero rate leaves the view fixed.
-    private func follow(by steps: Int) {
+    /// Scrolls only once the pattern's leading edge would leave the viewport;
+    /// the edge is `leadAnchor` advanced by the entry's signed rate.
+    private func follow(to currentStep: Int) {
         let rate = spec.display.follow.columnsPerStep
         guard rate != 0, mapping == .window, !userPanned else { return }
-        followCarry += rate * Double(steps)
-        let whole = Int(followCarry.rounded(.towardZero))
-        guard whole != 0 else { return }
-        followCarry -= Double(whole)
-        moveOrigin(by: whole)
+        let lead = leadAnchor + rate * Double(currentStep)
+        let raw = rate > 0
+            ? max(Double(startOrigin), lead - Double(cols - 1))
+            : min(Double(startOrigin), lead)
+        viewportOrigin = min(max(0, Int(raw.rounded())), maxViewportOrigin)
+    }
+
+    private func updateLeadAnchor() {
+        let rate = spec.display.follow.columnsPerStep
+        guard rate != 0 else { return }
+        let seed = ring[0].isEmpty ? program.row() : ring[0]
+        let column = rate > 0
+            ? (seed.lastIndex(where: { $0 != 0 }) ?? 0)
+            : (seed.firstIndex(where: { $0 != 0 }) ?? 0)
+        leadAnchor = Double(column)
     }
 
     public var progress: Double {
@@ -131,7 +141,7 @@ public final class IncrementalRenderer {
     public func advance(by count: Int) -> Bool {
         if scrolling {
             let target = step + max(0, count)
-            follow(by: target - step)
+            follow(to: target)
             while step < target {
                 program.step()
                 step += 1
@@ -156,7 +166,6 @@ public final class IncrementalRenderer {
     public func reset() {
         program = spec.reference(board)
         userPanned = false
-        followCarry = 0
         viewportOrigin = startOrigin
         step = 0
         settled = false
@@ -165,6 +174,7 @@ public final class IncrementalRenderer {
         if scrolling {
             for index in ring.indices { ring[index] = [] }
             ring[0] = program.row()
+            updateLeadAnchor()
             refit()
         } else {
             fillRowsReady(at: 0)

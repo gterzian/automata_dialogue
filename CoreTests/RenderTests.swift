@@ -138,27 +138,52 @@ final class ViewportTests: XCTestCase {
         XCTAssertEqual(renderer.viewportOrigin, board.width - 120)
     }
 
-    /// A run whose entry declares a follow pans with the advancing steps, and a
-    /// manual pan aborts the follow until the next reset.
-    func testFollowPansWithTheRunAndManualPanAborts() {
-        let spec = Catalog.spec(id: "E28")!   // drifts right at one column per step
+    /// The viewport scrolls only once the growing edge reaches the viewport
+    /// boundary, and a manual pan aborts the follow until the next reset.
+    func testFollowScrollsAtTheEdgeAndManualPanAborts() {
+        let spec = Catalog.spec(id: "E28")!   // grows right at one column per step
         let board = Board(width: 1000, height: spec.board.height, start: .center)
         let renderer = IncrementalRenderer(
             spec: spec, cols: 100, rows: 10, scrolling: true, mapping: .window, board: board)
         let start = renderer.viewportOrigin
         XCTAssertFalse(renderer.userPanned)
+
+        // The edge is still inside the viewport, so nothing scrolls.
         renderer.advance(by: 40)
-        XCTAssertEqual(renderer.viewportOrigin, start + 40)
+        XCTAssertEqual(renderer.viewportOrigin, start)
+
+        // Once it reaches the right boundary the viewport follows it.
+        renderer.advance(by: 300)
+        XCTAssertGreaterThan(renderer.viewportOrigin, start)
 
         renderer.pan(by: -10)
         XCTAssertTrue(renderer.userPanned)
         let afterManualPan = renderer.viewportOrigin
-        renderer.advance(by: 40)
+        renderer.advance(by: 300)
         XCTAssertEqual(renderer.viewportOrigin, afterManualPan)
 
         renderer.reset()
         XCTAssertFalse(renderer.userPanned)
         XCTAssertEqual(renderer.viewportOrigin, start)
+    }
+
+    /// A run must keep its pattern in the viewport while it advances. Pinning
+    /// the leading edge of a *left*-growing pattern would leave the body off the
+    /// right edge (E110 regression), so E110 leaves the viewport fixed and lets
+    /// the growth fill it.
+    func testFollowKeepsThePatternInView() {
+        for id in ["E110", "E28", "E60"] {
+            let spec = Catalog.spec(id: id)!
+            let board = Board(width: 4000, height: spec.board.height, start: spec.board.start)
+            let renderer = IncrementalRenderer(
+                spec: spec, cols: 400, rows: 200, scrolling: true, mapping: .window, board: board)
+            renderer.advance(by: 60)
+            var ink = 0
+            for row in 0..<renderer.rows {
+                for col in 0..<renderer.cols where renderer.colorGrid[col, row] != 0 { ink += 1 }
+            }
+            XCTAssertGreaterThan(ink, 10, "\(id) pattern left the viewport")
+        }
     }
 
     /// A fixed entry (`.none`) never moves the viewport on its own.

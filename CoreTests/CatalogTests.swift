@@ -23,7 +23,6 @@ final class CatalogTests: XCTestCase {
     /// Entries that drift sideways declare a follow rate; a centred or
     /// symmetric entry stays fixed.
     func testFollowRates() {
-        XCTAssertEqual(Catalog.spec(id: "E110")?.display.follow, Follow.left)
         XCTAssertEqual(Catalog.spec(id: "E28")?.display.follow, Follow.right)
         XCTAssertEqual(Catalog.spec(id: "E60")?.display.follow, Follow.right)
         XCTAssertEqual(Catalog.spec(id: "E90")?.display.follow, Follow.none)

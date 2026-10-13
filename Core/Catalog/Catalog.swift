@@ -616,7 +616,7 @@ public enum Catalog {
             eca(
                 "E110", 110, title: "Rule 110", behavior: .complexity,
                 look: "From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.",
-                width: 1201, height: 400, start: .rightmost, pinRight: true, follow: .left
+                width: 1201, height: 400, start: .rightmost, pinRight: true
             ),
             eca(
                 "E110.rand", 110, title: "Rule 110, random row", behavior: .complexity,
@@ -688,13 +688,11 @@ public enum Catalog {
                 "T1329.rand", 1329, title: "3-color totalistic 1329, random row", behavior: .complexity,
                 look: "A white field with gray triangles and black trees that grow downward and collide.",
                 width: 800, height: 400, start: .random(seed: 1329),
-                follow: Follow(columnsPerStep: -0.11)
             ),
             total(
                 "T357.rand", 357, title: "3-color totalistic 357, random row", behavior: .complexity,
                 look: "White voids with gray-and-black trees of many sizes growing into them.",
                 width: 800, height: 400, start: .random(seed: 357),
-                follow: Follow(columnsPerStep: -0.42)
             ),
             total(
                 "T948.rand", 948, title: "3-color totalistic 948, random row", behavior: .complexity,
@@ -715,7 +713,6 @@ public enum Catalog {
                 "K2R2-52.rand", 52, title: "K2R2 code 52, random row", behavior: .complexity,
                 look: "Large black and white regions bounded by long vertical and diagonal edges, with small branching structures at their junctions.",
                 width: 600, height: 400, start: .random(seed: 52, density: 0.5),
-                follow: Follow(columnsPerStep: 0.16)
             ),
         ]
     }
