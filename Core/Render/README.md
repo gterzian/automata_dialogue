@@ -75,7 +75,7 @@ carries.
   recompacts the whole grid each frame.
 - **On-screen sink** (`DisplayLinkClock`, `LayerSink`, `LayerRenderer`) —
   `DisplayLinkClock` conforms to `FrameClock` over `CAMetalDisplayLink`
-  (`preferredFrameLatency = 2`); `LayerSink` is a `FrameSink` that owns the
+  (`preferredFrameLatency = 1`); `LayerSink` is a `FrameSink` that owns the
   layer and the clock, and `LayerRenderer` turns a frame into a draw: a `runs`
   kernel compacts each same-colour non-background run into a `Span`, an
   `encode_draw` kernel writes the `MTLDrawPrimitivesIndirectArguments` on the
@@ -170,10 +170,13 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
 
 ## Remaining work
 
-- **`MetalSimulation.commit` waits on the GPU after every frame**, so the
-  three-slot ring never overlaps and the CPU stalls each tick. The GPU-resident
-  path could skip the wait with per-slot `FitParams`/uniform buffers; the
-  readback path must keep it.
+- **The on-screen pipeline serializes every frame.** `MetalSimulation.commit`
+  and `LayerSink`'s layer commit both wait for the GPU, because the simulation's
+  color buffer and the renderer's span, counter, uniform, and palette buffers
+  are shared across frames and the frame slots only rotate the command
+  allocators. A 2-deep pipeline would need a per-slot copy of each shared
+  buffer (and a fit window that cannot overlap the next advance); the readback
+  path must keep its wait regardless.
 - **`LEDSink`** behind the `RATER_SINK_LED` flag. Its geometry, colour order,
   and transport are open decisions, so it waits on hardware.
 

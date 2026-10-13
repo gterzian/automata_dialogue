@@ -11,8 +11,9 @@ extension CAMetalLayer: @unchecked @retroactive Sendable {}
 
 /// A `FrameClock` over `CAMetalDisplayLink`. It is added to the
 /// render actor's run loop, so ticks and the `LayerSink` draw happen on the
-/// thread that owns the Metal objects. `preferredFrameLatency = 2` keeps two
-/// frames in flight, matching the three frame slots.
+/// thread that owns the Metal objects. `preferredFrameLatency = 1` matches the
+/// serialized frame pipeline: the sink waits for each frame's GPU work, so a
+/// second frame in flight would only alias the shared buffers.
 @available(macOS 26.0, *)
 public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDelegate, @unchecked Sendable {
     private let link: CAMetalDisplayLink
@@ -27,10 +28,10 @@ public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDel
         self.link = CAMetalDisplayLink(metalLayer: layer)
         super.init()
         link.delegate = self
-        link.preferredFrameLatency = 2
+        link.preferredFrameLatency = 1
     }
 
-    /// Frames kept in flight; two matches the three frame slots.
+    /// Frames kept in flight; one, because the sink serializes each frame.
     public var preferredFrameLatency: Float {
         get { link.preferredFrameLatency }
         set { link.preferredFrameLatency = newValue }
@@ -112,13 +113,9 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         let frame = latest
         let done = finished
         lock.unlock()
-        guard !done, let frame, let spec = Catalog.spec(id: frame.specID) else { return }
+        guard !done, let frame else { return }
         do {
-            if let gpu = frame.gpu {
-                try renderer.render(gpu: gpu, palette: spec.display.palette, into: drawable.texture)
-            } else if let grid = frame.grid {
-                try renderer.render(grid: grid, palette: spec.display.palette, into: drawable.texture)
-            }
+            try render(frame: frame, into: drawable.texture)
         } catch {
             lock.lock()
             lastError = error.localizedDescription
@@ -126,5 +123,20 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
             return
         }
         drawable.present()
+    }
+
+    /// Renders one delivered frame into `texture` and blocks until the GPU
+    /// finishes. The on-screen path must serialize frames: the simulation
+    /// reuses one color buffer, and this renderer reuses its span, counter,
+    /// uniform, and palette buffers, so a frame that is still reading them must
+    /// complete before the next frame writes them. Offscreen tests drive this
+    /// directly; `render(_:)` adds the drawable and `present`.
+    func render(frame: RenderFrame, into texture: MTLTexture) throws {
+        guard let spec = Catalog.spec(id: frame.specID) else { return }
+        if let gpu = frame.gpu {
+            try renderer.render(gpu: gpu, palette: spec.display.palette, into: texture, wait: true)
+        } else if let grid = frame.grid {
+            try renderer.render(grid: grid, palette: spec.display.palette, into: texture, wait: true)
+        }
     }
 }
