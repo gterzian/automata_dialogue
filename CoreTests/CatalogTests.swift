@@ -8,16 +8,38 @@ final class CatalogTests: XCTestCase {
     }
 
     func testBehaviorCounts() {
-        XCTAssertEqual(Catalog.count(of: .repetition), 27)
+        XCTAssertEqual(Catalog.count(of: .repetition), 29)
         XCTAssertEqual(Catalog.count(of: .nesting), 28)
-        XCTAssertEqual(Catalog.count(of: .randomness), 36)
-        XCTAssertEqual(Catalog.count(of: .complexity), 20)
+        XCTAssertEqual(Catalog.count(of: .randomness), 40)
+        XCTAssertEqual(Catalog.count(of: .complexity), 14)
     }
 
     /// E62's single-cell triangle looks busy but is a period-3 weave, so it is
     /// repetition, not complexity (see `artifacts/`).
     func testE62IsRepetition() {
         XCTAssertEqual(Catalog.spec(id: "E62")?.behavior, .repetition)
+    }
+
+    /// Rule 106's random-row picture is a field of diagonal static, not the
+    /// localized interacting structures complexity requires; its single-cell
+    /// start is a single straight diagonal line (see `artifacts/`).
+    func testE106RandIsRandomness() {
+        XCTAssertEqual(Catalog.spec(id: "E106.rand")?.behavior, .randomness)
+    }
+
+    /// Rules that settle quickly (short whole-row period, or near-zero damage)
+    /// are not complexity, however busy the transient looks. `E154.rand` comes
+    /// from a non-spreading rule whose random row forms a fixed diagonal
+    /// texture; `T1662` repeats every 8 steps; `T219.rand` freezes into a fixed
+    /// field of straight lines (NKS ch. 6 calls rule 219 class 2 or 4, not 3);
+    /// `T2046.rand` freezes; `K2R2-52.rand` repeats every 1 to 3 steps (all
+    /// verified over several seeds with `tools/catalog-audit`).
+    func testSettlingRandomRowsAreNotComplexity() {
+        XCTAssertEqual(Catalog.spec(id: "E154.rand")?.behavior, .randomness)
+        XCTAssertEqual(Catalog.spec(id: "T1662")?.behavior, .repetition)
+        XCTAssertEqual(Catalog.spec(id: "T219.rand")?.behavior, .repetition)
+        XCTAssertEqual(Catalog.spec(id: "T2046.rand")?.behavior, .randomness)
+        XCTAssertEqual(Catalog.spec(id: "K2R2-52.rand")?.behavior, .randomness)
     }
 
     /// Entries that drift sideways declare a follow rate; a centred or

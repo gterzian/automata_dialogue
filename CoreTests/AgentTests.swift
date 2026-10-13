@@ -43,7 +43,7 @@ final class SystemPromptTests: XCTestCase {
 
     func testDropsTheRetiredRatingRubric() {
         let prompt = SystemPrompt.build()
-        for retired in ["rate_and_choose", "confidence", "borderline", "## Method", "## Calibration anchors"] {
+        for retired in ["rate_and_choose", "confidence", "## Method", "## Calibration anchors"] {
             XCTAssertFalse(prompt.contains(retired), "prompt still mentions \(retired)")
         }
     }
@@ -51,6 +51,39 @@ final class SystemPromptTests: XCTestCase {
     func testPrefixStaysWithinBudget() {
         let tokens = SystemPrompt.estimatedTokenCount(of: SystemPrompt.build())
         XCTAssertLessThan(tokens, 5000, "system prompt is larger than the ~4k budget")
+    }
+
+    /// The rubric must separate randomness from complexity: class 3 can show
+    /// local motifs but no non-local interaction, while class 4 has structures
+    /// that travel and interact (NKS ch. 6).
+    func testDistinguishesRandomnessFromComplexity() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains("nothing persists or travels to meet and interact with another structure"))
+        XCTAssertTrue(prompt.contains("localized structures travel between them"))
+    }
+
+    /// The artifact is the human-readable copy of the prompt; nothing generates
+    /// one from the other, so this fails when they drift (see `AGENTS.md`).
+    func testArtifactMatchesTheBuiltPrompt() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // CoreTests
+            .deletingLastPathComponent()   // repository root
+        let artifact = repoRoot
+            .appendingPathComponent("artifacts")
+            .appendingPathComponent("System prompt_ choosing an automaton.md")
+        let markdown = try String(contentsOf: artifact, encoding: .utf8)
+        guard let separator = markdown.range(of: "\n---\n") else {
+            return XCTFail("artifact has no prompt body separator")
+        }
+        let body = markdown[separator.upperBound...]
+            .replacingOccurrences(
+                of: "<!-- AUTOMATA -->",
+                with: Catalog.promptIndexLines.joined(separator: "\n")
+            )
+        XCTAssertEqual(
+            body.trimmingCharacters(in: .whitespacesAndNewlines),
+            SystemPrompt.build().trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 }
 

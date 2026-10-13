@@ -80,6 +80,16 @@ chain (including `AGENTS.md`). A task that loads the lower README always loads
 the higher one. If a lower README needs something explained above it, point to
 the file that owns it ("see `Core/Catalog/README.md`") rather than restating it.
 
+### Artifacts and code stay in sync
+
+`artifacts/Curated Inventory of Cellular Automata.md` and
+`Core/Catalog/Catalog.swift` are two views of one table; likewise
+`artifacts/System prompt_ choosing an automaton.md` and
+`Core/Agent/SystemPrompt.swift` are two views of one prompt. The artifact is
+the human-readable reference, the Swift is what runs, and nothing generates one
+from the other. A change to either side must be mirrored by hand in the same
+change, along with the affected tests, counts, READMEs, and golden hashes.
+
 ## Build and test
 
 - **`xcodebuild` does not work in this sandbox.** Build and test with SwiftPM:

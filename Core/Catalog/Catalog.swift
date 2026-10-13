@@ -142,7 +142,7 @@ public enum Catalog {
 
     private static func makeAll() -> [ProgramSpec] {
         [
-            // MARK: Repetition (27)
+            // MARK: Repetition (29)
             eca(
                 "E250", 250, title: "Rule 250", behavior: .repetition,
                 look: "A single cell widens into a triangle at one cell per step, its interior a fine checkerboard that flips each step, bounded by two sharp diagonals.",
@@ -279,9 +279,19 @@ public enum Catalog {
                 width: 400, height: 300, start: .random(seed: 14, density: 0.5)
             ),
             total(
+                "T1662", 1662, title: "3-color totalistic 1662", behavior: .repetition,
+                look: "A dark field crossed by evenly spaced vertical columns strung with beaded structures.",
+                width: 801, height: 400, start: .random(seed: 1662)
+            ),
+            total(
                 "T1587.rand", 1587, title: "3-color totalistic 1587, random row", behavior: .repetition,
                 look: "A flat gray field crossed by evenly spaced vertical columns of small beaded structures.",
                 width: 400, height: 300, start: .random(seed: 1587)
+            ),
+            total(
+                "T219.rand", 219, title: "3-color totalistic 219, random row", behavior: .repetition,
+                look: "A sparse white field crossed by straight vertical lines that stay fixed in place.",
+                width: 800, height: 400, start: .random(seed: 219)
             ),
 
             // MARK: Nesting (28)
@@ -426,7 +436,7 @@ public enum Catalog {
                 width: 401, height: 100
             ),
 
-            // MARK: Randomness (36)
+            // MARK: Randomness (40)
             eca(
                 "E30", 30, title: "Rule 30", behavior: .randomness,
                 look: "A disordered black-and-white field of static with scattered white triangles of every size.",
@@ -562,6 +572,16 @@ public enum Catalog {
                 look: "Thin diagonal lines lean to the right, scattered at irregular spacing across white.",
                 width: 400, height: 300, start: .random(seed: 2, density: 0.5)
             ),
+            eca(
+                "E106.rand", 106, title: "Rule 106, random row", behavior: .randomness,
+                look: "A dense field of diagonal black-and-white strokes with white triangles of many sizes scattered through it.",
+                width: 400, height: 300, start: .random(seed: 106, density: 0.5)
+            ),
+            eca(
+                "E154.rand", 154, title: "Rule 154, random row", behavior: .randomness,
+                look: "Dense fine diagonal black-and-white lines cross the field at irregular spacing.",
+                width: 400, height: 300, start: .random(seed: 154, density: 0.5)
+            ),
             total(
                 "T237.rand", 237, title: "3-color totalistic 237, random row", behavior: .randomness,
                 look: "Dense random black-and-white texture with white triangles of many sizes scattered throughout.",
@@ -571,6 +591,11 @@ public enum Catalog {
                 "T1182.rand", 1182, title: "3-color totalistic 1182, random row", behavior: .randomness,
                 look: "A mid-gray mottled field with gray triangles of many sizes.",
                 width: 601, height: 300, start: .random(seed: 1182)
+            ),
+            total(
+                "T2046.rand", 2046, title: "3-color totalistic 2046, random row", behavior: .randomness,
+                look: "A black field crossed by thin vertical lines of irregular spacing.",
+                width: 800, height: 400, start: .random(seed: 2046)
             ),
             // Random rows of the nested entries (inventory §1.4): the same rule
             // from a random row loses the self-similarity and reads as disorder,
@@ -611,8 +636,13 @@ public enum Catalog {
                 look: "Dense mottled speckle with small white triangles.",
                 width: 401, height: 100, start: .random(seed: 42, density: 0.5)
             ),
+            k2r2(
+                "K2R2-52.rand", 52, title: "K2R2 code 52, random row", behavior: .randomness,
+                look: "Vertical black and gray bars of irregular widths over a white field.",
+                width: 600, height: 400, start: .random(seed: 52, density: 0.5),
+            ),
 
-            // MARK: Complex localized structures (20)
+            // MARK: Complex localized structures (14)
             eca(
                 "E110", 110, title: "Rule 110", behavior: .complexity,
                 look: "From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.",
@@ -627,16 +657,6 @@ public enum Catalog {
                 "E54.rand", 54, title: "Rule 54, random row", behavior: .complexity,
                 look: "From a random row, a regular background crossed by moving localized structures that collide and interact.",
                 width: 400, height: 300, start: .random(seed: 54, density: 0.5)
-            ),
-            eca(
-                "E106.rand", 106, title: "Rule 106, random row", behavior: .complexity,
-                look: "Diagonal strokes and white triangles of many sizes interlock across the picture, with irregular regions between them.",
-                width: 400, height: 300, start: .random(seed: 106, density: 0.5)
-            ),
-            eca(
-                "E154.rand", 154, title: "Rule 154, random row", behavior: .complexity,
-                look: "Broad diagonal black bands cross a speckled field, with irregular textured regions between them.",
-                width: 400, height: 300, start: .random(seed: 154, density: 0.5)
             ),
             total(
                 "T1041", 1041, title: "3-color totalistic 1041", behavior: .complexity,
@@ -659,11 +679,6 @@ public enum Catalog {
                 width: 6101, height: 600, stepLimit: 3000
             ),
             total(
-                "T1662", 1662, title: "3-color totalistic 1662", behavior: .complexity,
-                look: "Vertical black columns strung with beaded structures.",
-                width: 801, height: 400, start: .random(seed: 1662)
-            ),
-            total(
                 "T1329.seed54889", 1329, title: "3-color totalistic 1329, seed 54889", behavior: .complexity,
                 look: "From seed 54889 a complex region widens by about half a cell per step in total, drifting slowly to one side without bound.",
                 width: 1201, height: 400, start: .seed(number: 54_889, colors: 3),
@@ -678,11 +693,6 @@ public enum Catalog {
                 "T2049.rand", 2049, title: "3-color totalistic 2049, random row", behavior: .complexity,
                 look: "A black field with thin gray vertical lines, hung with branching white trees that reach down from above.",
                 width: 800, height: 400, start: .random(seed: 2049)
-            ),
-            total(
-                "T2046.rand", 2046, title: "3-color totalistic 2046, random row", behavior: .complexity,
-                look: "A black field with clusters of branching white trees growing and merging near the center.",
-                width: 800, height: 400, start: .random(seed: 2046)
             ),
             total(
                 "T1329.rand", 1329, title: "3-color totalistic 1329, random row", behavior: .complexity,
@@ -703,16 +713,6 @@ public enum Catalog {
                 "T1920.rand", 1920, title: "3-color totalistic 1920, random row", behavior: .complexity,
                 look: "Black columns split by bright vertical seams, each filled with nested triangles of its own size.",
                 width: 800, height: 400, start: .random(seed: 1920)
-            ),
-            total(
-                "T219.rand", 219, title: "3-color totalistic 219, random row", behavior: .complexity,
-                look: "A sparse white field crossed by vertical lines and diagonal strands that meet and bend.",
-                width: 800, height: 400, start: .random(seed: 219)
-            ),
-            k2r2(
-                "K2R2-52.rand", 52, title: "K2R2 code 52, random row", behavior: .complexity,
-                look: "Large black and white regions bounded by long vertical and diagonal edges, with small branching structures at their junctions.",
-                width: 600, height: 400, start: .random(seed: 52, density: 0.5),
             ),
         ]
     }

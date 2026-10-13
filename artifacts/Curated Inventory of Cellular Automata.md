@@ -114,7 +114,9 @@ one-sentence description of how it looks.
 - **E178.rand** (repetition): A woven zigzag texture runs down the picture in vertical columns separated by faint seams.
 - **E15.rand** (repetition): Smooth wavy ribbons curve diagonally across the picture.
 - **E14.rand** (repetition): Thick parallel diagonal stripes lean to the right, with a few broader bands crossing them.
+- **T1662** (repetition): A dark field crossed by evenly spaced vertical columns strung with beaded structures.
 - **T1587.rand** (repetition): A flat gray field crossed by evenly spaced vertical columns of small beaded structures.
+- **T219.rand** (repetition): A sparse white field crossed by straight vertical lines that stay fixed in place.
 - **E90** (nesting): The Sierpinski triangle: white triangular holes at every scale inside a black lace, symmetric left to right.
 - **E22** (nesting): A symmetric nested triangle in the same family as rule 90, with slightly different detail inside the holes.
 - **E60** (nesting): A right-angled Sierpinski triangle growing to one side, with a vertical edge on one side and a diagonal on the other.
@@ -170,8 +172,11 @@ one-sentence description of how it looks.
 - **E232.rand** (randomness): Vertical bars of random width in black and white, frozen from the first rows.
 - **E170.rand** (randomness): Thick diagonal stripes of irregular widths lean to the right.
 - **E2.rand** (randomness): Thin diagonal lines lean to the right, scattered at irregular spacing across white.
+- **E106.rand** (randomness): A dense field of diagonal black-and-white strokes with white triangles of many sizes scattered through it.
+- **E154.rand** (randomness): Dense fine diagonal black-and-white lines cross the field at irregular spacing.
 - **T237.rand** (randomness): Dense random black-and-white texture with white triangles of many sizes scattered throughout.
 - **T1182.rand** (randomness): A mid-gray mottled field with gray triangles of many sizes.
+- **T2046.rand** (randomness): A black field crossed by thin vertical lines of irregular spacing.
 - **E225.rand** (randomness): Thin diagonal strokes scattered at irregular spacing across a black field.
 - **T1848.rand** (randomness): A black field strewn with white triangle outlines of many sizes.
 - **T1932.rand** (randomness): A dark field with white triangles of many sizes.
@@ -179,23 +184,18 @@ one-sentence description of how it looks.
 - **K2R2-2.rand** (randomness): Sparse speckle that spawns white triangles of many sizes.
 - **K2R2-30.rand** (randomness): Dense speckle with white triangular outlines at many sizes.
 - **K2R2-42.rand** (randomness): Dense mottled speckle with small white triangles.
+- **K2R2-52.rand** (randomness): Vertical black and gray bars of irregular widths over a white field.
 - **E110** (complexity): From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.
 - **E110.rand** (complexity): Within a few steps a random row organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.
 - **E54.rand** (complexity): From a random row, a regular background crossed by moving localized structures that collide and interact.
-- **E106.rand** (complexity): Diagonal strokes and white triangles of many sizes interlock across the picture, with irregular regions between them.
-- **E154.rand** (complexity): Broad diagonal black bands cross a speckled field, with irregular textured regions between them.
 - **T1041** (complexity): A mixture of regular vertical stripes and irregular regions.
 - **T1599** (complexity): A field of irregular trees and columns that grow, die out and return.
-- **T1662** (complexity): Vertical black columns strung with beaded structures.
 - **T1329.seed54889** (complexity): From seed 54889 a complex region widens by about half a cell per step in total, drifting slowly to one side without bound.
 - **T1635** (complexity): Black triangular regions of many sizes separated by textured, irregular zones, with localized structures crossing between them.
 - **T1635.rand** (complexity): Black voids and bright textured regions are split by tall branching structures that grow, collide and merge.
 - **T2049** (complexity): A large solid black wedge near the center flanked by long vertical lines, with a busy irregular fringe of small structures along both outer sides.
 - **T2049.rand** (complexity): A black field with thin gray vertical lines, hung with branching white trees that reach down from above.
-- **T2046.rand** (complexity): A black field with clusters of branching white trees growing and merging near the center.
 - **T1329.rand** (complexity): A white field with gray triangles and black trees that grow downward and collide.
 - **T357.rand** (complexity): White voids with gray-and-black trees of many sizes growing into them.
 - **T948.rand** (complexity): Bold black-and-white branching structures at diagonal angles that run into each other.
 - **T1920.rand** (complexity): Black columns split by bright vertical seams, each filled with nested triangles of its own size.
-- **T219.rand** (complexity): A sparse white field crossed by vertical lines and diagonal strands that meet and bend.
-- **K2R2-52.rand** (complexity): Large black and white regions bounded by long vertical and diagonal edges, with small branching structures at their junctions.

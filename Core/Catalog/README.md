@@ -8,7 +8,7 @@ diverge.
 ## Invariants
 
 - 111 entries, unique ids, in the inventory's order.
-- Behavior counts: **repetition 27, nesting 28, randomness 36, complexity 20**.
+- Behavior counts: **repetition 29, nesting 28, randomness 40, complexity 14**.
 - Every id appears in `Catalog.ids`, and `Catalog.promptIndexLines` is generated
   from the same table as `id | class | look`.
 
