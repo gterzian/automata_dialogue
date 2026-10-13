@@ -669,25 +669,25 @@ public enum Catalog {
                 width: 1001, height: 600, start: .random(seed: 1599), stepsPerSecond: 1100, stepLimit: 8300
             ),
             total(
-                "T1635", 1635, title: "3-color totalistic 1635", behavior: .complexity,
-                look: "Black triangular regions of many sizes separated by textured, irregular zones, with localized structures crossing between them.",
-                width: 6101, height: 600, stepLimit: 3000
-            ),
-            total(
-                "T2049", 2049, title: "3-color totalistic 2049", behavior: .complexity,
-                look: "A large solid black wedge near the center flanked by long vertical lines, with a busy irregular fringe of small structures along both outer sides.",
-                width: 6101, height: 600, stepLimit: 3000
-            ),
-            total(
                 "T1329.seed54889", 1329, title: "3-color totalistic 1329, seed 54889", behavior: .complexity,
                 look: "From seed 54889 a complex region widens by about half a cell per step in total, drifting slowly to one side without bound.",
                 width: 1201, height: 400, start: .seed(number: 54_889, colors: 3),
                 follow: Follow(columnsPerStep: 0.37)
             ),
             total(
+                "T1635", 1635, title: "3-color totalistic 1635", behavior: .complexity,
+                look: "Black triangular regions of many sizes separated by textured, irregular zones, with localized structures crossing between them.",
+                width: 6101, height: 600, stepLimit: 3000
+            ),
+            total(
                 "T1635.rand", 1635, title: "3-color totalistic 1635, random row", behavior: .complexity,
                 look: "Black voids and bright textured regions are split by tall branching structures that grow, collide and merge.",
                 width: 800, height: 400, start: .random(seed: 1635)
+            ),
+            total(
+                "T2049", 2049, title: "3-color totalistic 2049", behavior: .complexity,
+                look: "A large solid black wedge near the center flanked by long vertical lines, with a busy irregular fringe of small structures along both outer sides.",
+                width: 6101, height: 600, stepLimit: 3000
             ),
             total(
                 "T2049.rand", 2049, title: "3-color totalistic 2049, random row", behavior: .complexity,

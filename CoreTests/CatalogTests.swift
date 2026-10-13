@@ -71,6 +71,37 @@ final class CatalogTests: XCTestCase {
         }
     }
 
+    /// The inventory artifact and the catalog table are two views of one list;
+    /// nothing generates one from the other, so this fails when they drift
+    /// (see `AGENTS.md`). It checks order, class and look, not just the id.
+    func testInventoryMatchesCatalog() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // CoreTests
+            .deletingLastPathComponent()   // repository root
+        let inventoryURL = repoRoot
+            .appendingPathComponent("artifacts")
+            .appendingPathComponent("Curated Inventory of Cellular Automata.md")
+        let inventory = try String(contentsOf: inventoryURL, encoding: .utf8)
+
+        var parsed: [(id: String, behavior: Behavior, look: String)] = []
+        for line in inventory.split(separator: "\n") {
+            guard line.hasPrefix("- **"), let openRange = line.range(of: "** ("),
+                  let closeRange = line.range(of: "): ", range: openRange.upperBound..<line.endIndex),
+                  let behavior = Behavior(rawValue: String(line[openRange.upperBound..<closeRange.lowerBound]))
+            else { continue }
+            let id = String(line[line.index(line.startIndex, offsetBy: 4)..<openRange.lowerBound])
+            parsed.append((id, behavior, String(line[closeRange.upperBound...])))
+        }
+
+        XCTAssertEqual(parsed.count, Catalog.all.count, "inventory entry count differs")
+        for (index, spec) in Catalog.all.enumerated() where index < parsed.count {
+            let entry = parsed[index]
+            XCTAssertEqual(entry.id, spec.id, "inventory order differs at index \(index)")
+            XCTAssertEqual(entry.behavior, spec.behavior, "\(spec.id) class differs")
+            XCTAssertEqual(entry.look, spec.look, "\(spec.id) look differs")
+        }
+    }
+
     func testStartConditionsMatchInventory() {
         XCTAssertEqual(Catalog.spec(id: "E110")?.board.start, .rightmost)
         XCTAssertEqual(Catalog.spec(id: "E54")?.board.start, .center)
