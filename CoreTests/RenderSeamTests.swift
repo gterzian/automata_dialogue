@@ -334,7 +334,7 @@ final class RenderActorTests: XCTestCase {
         let spec = Catalog.spec(id: "E90")!
         let cols = 120
         let rows = 30
-        // A board ten windows wide, as the panel simulates.
+        // A board ten windows wide, as the review window simulates.
         let board = Board(width: 1200, height: spec.board.height, start: .center)
         let sink = ReadbackSink()
         let actor = RenderActor()

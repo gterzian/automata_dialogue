@@ -54,8 +54,8 @@ final class FitTests: XCTestCase {
 final class ViewportTests: XCTestCase {
     func testGridSizesCellsToTheWindow() {
         let size = CGSize(width: 1600, height: 1000)
-        XCTAssertEqual(ViewportGeometry.columns(size: size), 400)
-        XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 400), 250)
+        XCTAssertEqual(ViewportGeometry.columns(size: size), 800)
+        XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 800), 500)
         XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 161), 101)
     }
 
@@ -63,18 +63,19 @@ final class ViewportTests: XCTestCase {
     /// leave the first view and the view has room to pan; a catalog board wider
     /// than that is kept.
     func testBoardIsMuchWiderThanTheViewport() {
-        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 161, cols: 400), 4000)
-        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 401, cols: 400), 4000)
-        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 6101, cols: 400), 6101)
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 161, cols: 800), 8000)
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 401, cols: 800), 8000)
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 6101, cols: 800), 8000)
+        XCTAssertEqual(ViewportGeometry.boardWidth(specWidth: 9001, cols: 800), 9001)
     }
 
     func testInitialOriginCentresOrPins() {
         XCTAssertEqual(
-            ViewportGeometry.initialOrigin(boardWidth: 4000, cols: 400, start: .center, pinRight: false), 1800)
+            ViewportGeometry.initialOrigin(boardWidth: 8000, cols: 800, start: .center, pinRight: false), 3600)
         XCTAssertEqual(
-            ViewportGeometry.initialOrigin(boardWidth: 4000, cols: 400, start: .rightmost, pinRight: true), 3600)
+            ViewportGeometry.initialOrigin(boardWidth: 8000, cols: 800, start: .rightmost, pinRight: true), 7200)
         XCTAssertEqual(
-            ViewportGeometry.initialOrigin(boardWidth: 321, cols: 400, start: .center, pinRight: false), 0)
+            ViewportGeometry.initialOrigin(boardWidth: 321, cols: 800, start: .center, pinRight: false), 0)
     }
 
     /// `.window` shows one source cell per display column at `viewportOrigin`;
@@ -83,7 +84,7 @@ final class ViewportTests: XCTestCase {
         let spec = Catalog.spec(id: "E90")!
         let cols = 80
         let rows = 10
-        // A board ten windows wide, centred on the seed like the panel.
+        // A board ten windows wide, centred on the seed like the review window.
         let board = Board(width: cols * ViewportGeometry.boardWindows, height: spec.board.height, start: .center)
         let renderer = IncrementalRenderer(
             spec: spec, cols: cols, rows: rows, scrolling: true, mapping: .window, board: board)
@@ -143,8 +144,7 @@ final class CPURendererTests: XCTestCase {
         let spec = Catalog.spec(id: "E90")!
         let renderer = CPUAutomatonRenderer()
         // Render at the board's native width so `fit` uses k = 1. (Downsampling
-        // a sparse fractal by majority vote drops its single-cell features; the
-        // app renders most entries at native width or upscaled.)
+        // a sparse fractal by majority vote drops its single-cell features.)
         let a = renderer.grid(spec: spec, cols: 401, rows: 200)
         let b = renderer.grid(spec: spec, cols: 401, rows: 200)
         XCTAssertEqual(a.cols, 401)

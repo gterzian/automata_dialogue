@@ -2,7 +2,7 @@ import Foundation
 
 /// Metal Shading Language sources, compiled at startup from strings with the
 /// Metal 4 compiler. SwiftPM cannot build a `.metallib`, and keeping the source
-/// in strings lets the headless CLI and the app share it. `simulation` matches
+/// in strings lets the CLI's headless and on-screen paths share it. `simulation` matches
 /// `Core/Programs` row-for-row; `layer` compacts the fitted grid into spans and
 /// draws them through a GPU-built indirect draw (see `LayerRenderer`).
 public enum ShaderSource {

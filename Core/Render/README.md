@@ -19,8 +19,8 @@ never moves cell data. One frame is three passes —
 
 Nothing crosses the CPU between the passes. A sink that asks for
 `wantsGPUResidentFrames` gets a `GPUColorGrid` aliasing the simulation's
-buffer, and the pass draws the compute output directly. That is why the panel
-simulates a **board much wider than the window**
+buffer, and the pass draws the compute output directly. That is why the review
+window simulates a **board much wider than the window**
 (`ViewportGeometry.boardWidth`) and renders only a viewport, instead of fitting
 a whole board into a still frame: the pattern can leave the window and keep
 going, and the view pans to follow it. The catalog board width is a property of
@@ -41,7 +41,7 @@ carries.
 - **CPU reference path** (`CPUAutomatonRenderer`, `IncrementalRenderer`) — runs
   the `Core/Programs` reference and fits the rows to a `ColorGrid` /
   `CGImage`. Always available; the correctness reference for the GPU path and
-  the backend for the CLI and the current app panel.
+  the backend for the CLI's `render` command.
 - **Metal 4 compute** (`GPUContext`, `MetalSimulation`, `MetalAutomaton`) —
   macOS 26 / Apple silicon. `MTL4CommandQueue`, `MTL4CommandAllocator`, one
   reusable `MTL4CommandBuffer`, a residency set, and the `step_*`/`bump_head`/
@@ -102,11 +102,11 @@ Both paths converge on the same `ColorGrid`; the readback test compares them.
 (E110). A display column that reaches past the board reads background; it never
 wraps to the left edge.
 
-The animating panel sizes its grid with `ViewportGeometry` instead of `Fit`: a
-cell edge of `minimumCellPoints` (4 points, the reference visualizer's cell)
-sets `cols`, and the run simulates a board `boardWindows` (10) windows wide so
-the pattern keeps going after it leaves the first window and the view has room
-to pan. `ColumnMapping.window` maps one board cell per display column at a
+The animating review window sizes its grid with `ViewportGeometry` instead of
+`Fit`: a cell edge of `minimumCellPoints` (2 points — the reference
+visualizer's 4-pixel cell at the 2× scale a Retina display uses) sets `cols`,
+and the run simulates a board `boardWindows` (10) windows wide so the pattern
+keeps going after it leaves the first window and the view has room to pan. `ColumnMapping.window` maps one board cell per display column at a
 movable `viewportOrigin` (kernel block 1), and `LayerRenderer` stretches the
 small cell grid over the whole drawable. `IncrementalRenderer`/`MetalSimulation`
 take the simulated board explicitly, so a narrow catalog entry still runs on a
@@ -119,7 +119,7 @@ and the CLI's `render` command.
 
 Remaining work: majority vote erases sparse single-cell features when a board
 is downsampled (E90's Sierpinski seeds at a reduced width). Under `.fit`,
-boards narrower than the panel use `k = 1`, so this only affects the 6101-wide
+boards narrower than the window use `k = 1`, so this only affects the 6101-wide
 entries, which are dense. If a sparse entry ever needs downsampling, revisit
 `Fit` and the Metal `fit` kernel together.
 
@@ -163,14 +163,6 @@ entries, which are dense. If a sparse entry ever needs downsampling, revisit
 
 ## Remaining work
 
-- **App wiring.** `RaterModel` still animates with `IncrementalRenderer` on the
-  main actor and draws a `CGImage`; it should host a `CAMetalLayer`, ask the
-  actor for a `LayerSink` with `makeLayerSink(layer:)`, `configure` the actor
-  with `mapping: .window` and a `ViewportGeometry` grid, set the layer's
-  `drawableSize` to that cell grid (re-applied after layout), and `drive` its
-  clock with `.timed`. The app target cannot be type-checked in this sandbox
-  (the SwiftUI macro plugin is blocked), so this is untested here. The CLI's
-  `rate` window now exercises this same wiring (`CLI/README.md`).
 - **`MetalSimulation.commit` waits on the GPU after every frame**, so the
   three-slot ring never overlaps and the CPU stalls each tick. The GPU-resident
   path could skip the wait with per-slot `FitParams`/uniform buffers; the

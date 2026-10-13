@@ -1,15 +1,14 @@
 # Core
 
-AppKit-free foundation of the app: catalog, CPU reference programs, agent
+AppKit-free foundation of the CLI: catalog, CPU reference programs, agent
 prompt/schema/dispatch logic, image import, transcript store, and the Metal
-render core. Built by SwiftPM for tests and by the Xcode project as a framework
-for the app.
+render core. Built by SwiftPM for tests and the CLI.
 
 ## Constraints
 
 - **AppKit-free.** `Core` compiles without AppKit so it stays testable and so
   the render core can run headless. Anything that needs a view or an
-  `NSView`-backed layer lives in `Client`.
+  `NSView`-backed layer lives in `CLI`.
 - **No external package dependencies.** The MLX VLM lives in a separate
   `Agent` target that depends on `Core`, never the reverse.
 - Default actor isolation is `nonisolated` (see `AGENTS.md` for the repo-wide

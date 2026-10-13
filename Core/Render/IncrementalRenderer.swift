@@ -29,8 +29,8 @@ public final class IncrementalRenderer {
     private var program: any RowProgram
     private var grid: ColorGrid
     private let fit: Fit
-    /// The board the run simulates. Wider than the catalog board when the panel
-    /// needs room to pan; see `ViewportGeometry.boardWidth`.
+    /// The board the run simulates. Wider than the catalog board when the
+    /// review window needs room to pan; see `ViewportGeometry.boardWidth`.
     private let board: Board
     /// The origin a `reset()` returns to (rightmost for a right-pinned entry).
     private let startOrigin: Int

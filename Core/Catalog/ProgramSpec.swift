@@ -103,7 +103,7 @@ public struct ProgramSpec: Sendable {
     public func makeProgram() -> any RowProgram { reference(board) }
 
     /// A copy whose `.rand` start draws from `seed`; a start that is not a
-    /// random row is returned unchanged. Each app run calls this with a fresh
+    /// random row is returned unchanged. Each CLI run calls this with a fresh
     /// seed so re-choosing an entry gives a different picture, while
     /// `makeProgram()` stays deterministic for the tests.
     public func withRandomSeed(_ seed: UInt64) -> ProgramSpec {

@@ -10,15 +10,15 @@
   drawings and print the chosen id and latency per image, then a summary table.
   A path may be an image file or a directory, in which case its top-level
   images are rated (so `rate artifacts/` runs all six). Each image is
-  normalized to the model's 512×512 input through `Core/Import`, the same path
-  the app uses. The engine keeps its recent-choice window across the batch, so
-  each image is asked to pick an automaton the earlier images did not. Debug
+  normalized to the model's 512×512 input through `Core/Import`. The engine
+  keeps its recent-choice window across the batch, so each image is asked to
+  pick an automaton the earlier images did not. Debug
   output is on by default (the resolved model, the prompt
   size, the model's raw answer, and the parsed class per image); `--quiet`
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
-  on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`, the path
-  the app should adopt; see `Core/Render/README.md`). It shows the submitted
+  on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`; see
+  `Core/Render/README.md`). It shows the submitted
   image until Return,
   runs the model, scrolls the chosen automaton until the next Return, and
   cycles the images until the window is closed. While the model runs the

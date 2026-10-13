@@ -75,7 +75,7 @@ final class ImageImportTests: XCTestCase {
         let stale = UUID()
         let fileManager = FileManager.default
         // A scoped root: purging the real `<tmp>/Rater` would delete the
-        // session folder of a concurrently running rater-cli or app process.
+        // session folder of a concurrently running rater-cli process.
         try fileManager.createDirectory(
             at: tempRoot.appendingPathComponent(kept.uuidString), withIntermediateDirectories: true)
         try fileManager.createDirectory(

@@ -1,7 +1,7 @@
 # Core/Import
 
-Image input without an in-app canvas: the user drags a file onto the input and
-it becomes an attachment on the next agent turn.
+Image input without a drawing canvas: the user passes a file path and it
+becomes the input image for the next agent turn.
 
 ## Attachment lifecycle
 
@@ -9,10 +9,8 @@ it becomes an attachment on the next agent turn.
    scales it to **512×512** (the model's configured image size), and writes a
    PNG into the session's temp folder:
    `<tmp>/Rater/<session-id>/drawing-<uuid>.png`.
-2. The prompt input holds an `ImageAttachment` (source name + normalized path)
-   and shows a thumbnail chip.
-3. On send, the transcript input row references the normalized path. The agent
-   receives that path as `AgentInput.imageURL`.
+2. The caller holds an `ImageAttachment` (source name + normalized path).
+3. The agent receives that path as `AgentInput.imageURL`.
 4. On close, the session's temp folder is removed; at launch, temp session
    folders with no open session are purged.
 

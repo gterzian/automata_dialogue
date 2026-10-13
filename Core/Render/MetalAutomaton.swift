@@ -4,7 +4,7 @@ import Metal
 /// One-shot convenience over `MetalSimulation`: runs a catalog entry to
 /// completion on the Metal 4 compute path and reads the result back. The GPU
 /// kernels must produce the same grid as `CPUAutomatonRenderer`; `MetalTests`
-/// asserts that. Animated callers (the app, the render actor) drive
+/// asserts that. Animated callers (the render actor) drive
 /// `MetalSimulation` directly so they can advance a chunk at a time.
 @available(macOS 26.0, *)
 public enum MetalAutomaton {

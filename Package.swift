@@ -1,9 +1,8 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// SwiftPM is the iteration and test path (xcodebuild is unavailable in the
-// sandbox). The Xcode project in project.yml builds the app bundle from the
-// same sources. Both include the MLX `Agent` target.
+// SwiftPM is the only build path (xcodebuild is unavailable in the sandbox).
+// It builds the CLI, `Core`, and the MLX `Agent` target.
 let packageDependencies: [Package.Dependency] = [
     .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "3.32.3"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),

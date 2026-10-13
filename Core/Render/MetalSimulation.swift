@@ -107,7 +107,7 @@ public final class MetalSimulation {
     private let context: GPUContext
     private let width: Int
     /// The board the run simulates. Wider than the catalog board when the
-    /// panel needs room to pan; see `ViewportGeometry.boardWidth`.
+    /// review window needs room to pan; see `ViewportGeometry.boardWidth`.
     private let board: Board
     /// Rows the history buffer holds; the source step indexes it modulo this.
     private let capacity: Int

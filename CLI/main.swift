@@ -250,7 +250,7 @@ final class MetalHostView: NSView {
 /// `MetalHostView.metalLayer`. `showInput` holds the image until Return;
 /// `showThinking` shows the Metal rings while the model runs; `present` swaps
 /// the scrolling automaton into the same window and suspends until Return or
-/// close. The app's key monitor calls `submit()`; `NSApplication.run()` keeps
+/// close. The key monitor calls `submit()`; `NSApplication.run()` keeps
 /// delivering events while suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
@@ -310,8 +310,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             drawableSize: CGSize(width: cols, height: rows))
         host.metalLayer.magnificationFilter = .nearest
 
-        // A `.rand` entry draws a fresh row each time it is shown, matching the
-        // app (inventory §1.4); `makeProgram()` stays deterministic for the
+        // A `.rand` entry draws a fresh row each time it is shown
+        // (inventory §1.4); `makeProgram()` stays deterministic for the
         // golden hashes.
         let runSpec = spec.withRandomSeed(UInt64.random(in: .min ... .max))
         let board = Board(
@@ -603,9 +603,8 @@ func rateOne(
     var choice: Choice?
     var failure: String?
     do {
-        // Normalize to the model's 512×512 input, as the app does, so an
-        // oversized or malformed image never reaches the preprocessor's far
-        // larger edge limits.
+        // Normalize to the model's 512×512 input so an oversized or malformed
+        // image never reaches the preprocessor's far larger edge limits.
         let normalized = try ImageImport.normalize(url, into: directory)
         if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
         for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {

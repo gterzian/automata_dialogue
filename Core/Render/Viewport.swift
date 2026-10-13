@@ -1,18 +1,20 @@
 import CoreGraphics
 import Foundation
 
-/// Display geometry for the animating panel.
+/// Display geometry for the animating review window.
 ///
-/// `Fit` maps a whole board onto a still frame. The panel instead simulates a
-/// board much wider than the window (the reference visualizer runs one ten
-/// windows wide) and renders only a movable viewport into it, so the pattern
-/// keeps evolving after it leaves the first window and the view can pan to
-/// follow it. The `LayerRenderer` stretches the small cell grid over the whole
-/// drawable.
+/// `Fit` maps a whole board onto a still frame. The review window instead
+/// simulates a board much wider than the window (the reference visualizer runs
+/// one ten windows wide) and renders only a movable viewport into it, so the
+/// pattern keeps evolving after it leaves the first window and the view can pan
+/// to follow it. The `LayerRenderer` stretches the small cell grid over the
+/// whole drawable.
 public enum ViewportGeometry {
     /// Cell edge in points. The reference visualizer advances a cell every 4
-    /// screen pixels; points keep that apparent size on a Retina display.
-    public static let minimumCellPoints: CGFloat = 4
+    /// screen pixels; at the 2× scale a Retina display uses, 2 points is that
+    /// cell, so the pattern shows the visualizer's detail instead of blocks
+    /// twice its size.
+    public static let minimumCellPoints: CGFloat = 2
 
     /// How many viewport widths the simulated board spans. The pattern must be
     /// able to leave the viewport and keep going, and the view needs room to
@@ -59,8 +61,8 @@ public enum ColumnMapping: Sendable, Hashable {
     /// used by `CPUAutomatonRenderer` and the CLI's `render` command.
     case fit
     /// One board cell per display column at the current horizontal origin. The
-    /// panel uses this so the wide simulated board pans instead of being
-    /// downsampled. Only meaningful for a scrolling run, which keeps the source
-    /// rows a pan re-fits.
+    /// review window uses this so the wide simulated board pans instead of
+    /// being downsampled. Only meaningful for a scrolling run, which keeps the
+    /// source rows a pan re-fits.
     case window
 }

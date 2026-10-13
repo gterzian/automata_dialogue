@@ -45,6 +45,6 @@ through `ProgramFactory`, the one place that maps a spec's
 entry point for the golden hashes and the CPU/GPU comparison.
 
 `ProgramSpec.withRandomSeed(_:)` returns a copy whose `.rand` start uses the
-given seed; any other start is returned unchanged. The app calls it once per run
+given seed; any other start is returned unchanged. The CLI calls it once per run
 so re-showing a `.rand` entry gives a different picture (inventory §1.4),
 without moving the deterministic `makeProgram()` that the tests pin.

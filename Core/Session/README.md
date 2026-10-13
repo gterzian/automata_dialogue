@@ -1,8 +1,9 @@
 # Core/Session
 
 The transcript model and its incremental-update machinery, adapted from
-uni03C0's `Core/Session`. It is pure data (no AppKit): the view coordinator in
-`Client` supplies measurement closures and renders the materialized window.
+uni03C0's `Core/Session`. It is pure data (no AppKit): a host supplies
+measurement closures and draws the materialized window. Nothing consumes it
+today — the CLI does not use it.
 
 ## Entries
 
