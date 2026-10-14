@@ -97,6 +97,13 @@ public actor AgentEngine: AgentRunning {
         try await modelContainer()
     }
 
+    /// Drops the recent-choice window, so the next run is not asked to avoid
+    /// earlier ids. `classify` uses it to measure each image's class
+    /// independently of the others.
+    public func resetHistory() {
+        history = ChoiceHistory()
+    }
+
     public nonisolated func run(_ input: AgentInput) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task { await self.perform(input, into: continuation) }

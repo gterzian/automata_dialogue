@@ -89,6 +89,10 @@ func printUsage() -> Never {
         Runs each image once with no window or automaton and prints the prompt
         and generation cost, so a prompt or model change can be measured from
         a terminal script.
+      classify <path|dir> ...           print each image's chosen class, headless
+        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
+        Runs each image once with no window and prints `name<TAB>class<TAB>id`
+        plus a class tally, so a labeled reference set can be scored.
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
@@ -656,6 +660,38 @@ func runBench(_ setup: RateSetup) async {
         Double(generationTokens) / max(generationSeconds, 0.001)))
 }
 
+/// Headless classification: run the agent once per image with no window and
+/// print the chosen behavior class, so a labeled reference set can be scored.
+/// Each image is classified independently (the choice history is cleared), so
+/// the score measures the model, not the order of the batch; `bench` is the
+/// same path with timing and the product's no-repeat window.
+func runClassify(_ setup: RateSetup) async {
+    printRateDebugHeader(setup)
+    let engine = AgentEngine(configuration: setup.configuration)
+    let sessionID = UUID()
+    let directory = ImageImport.sessionDirectory(for: sessionID)
+    var classified = 0
+    var tally: [Behavior: Int] = [:]
+    for path in setup.paths {
+        await engine.resetHistory()
+        let outcome = await rateOne(
+            engine: engine, path: path, directory: directory,
+            dimension: setup.configuration.imageDimension, verbose: false)
+        guard let choice = outcome.choice, let spec = Catalog.spec(id: choice.id) else {
+            print("\(outcome.name)\tFAILED\t\(outcome.failure ?? "no catalog id")")
+            continue
+        }
+        classified += 1
+        tally[spec.behavior, default: 0] += 1
+        print("\(outcome.name)\t\(spec.behavior.rawValue)\t\(choice.id)")
+    }
+    ImageImport.removeSessionDirectory(for: sessionID)
+    let summary = Behavior.allCases
+        .map { "\($0.rawValue) \(tally[$0, default: 0])" }
+        .joined(separator: ", ")
+    print("\n\(classified)/\(setup.paths.count) classified: \(summary)")
+}
+
 /// The windowed review: one screen-sized window, driven by Return. The review
 /// loop is a main-actor task started before `NSApplication.run()`, so it can
 /// suspend and still receive the key and close events.
@@ -729,6 +765,8 @@ case "rate":
     await runRateWindowed(rateSetup())
 case "bench":
     await runBench(rateSetup())
+case "classify":
+    await runClassify(rateSetup())
 default:
     printUsage()
 }

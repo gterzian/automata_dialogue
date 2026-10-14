@@ -44,6 +44,11 @@
   since `rate` blocks on Return. `--image-size <px>` sets the square input
   dimension (default 512), so a single command sweeps the vision-token
   tradeoff.
+- `rater-cli classify <path|dir>...` — the headless accuracy path. Runs each
+  image once with no window, clears the no-repeat window between images so the
+  score measures classification and not batch order, and prints
+  `name<TAB>class<TAB>id` plus a class tally, so a labeled reference set can be
+  scored against the model.
 - `rater-cli catalog` — print the catalog and the generated index.
 
 `catalog` is AppKit-free. `rate` links AppKit to host the window and drives

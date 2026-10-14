@@ -67,8 +67,10 @@ final class SystemPromptTests: XCTestCase {
     /// that travel and interact (NKS ch. 6).
     func testDistinguishesRandomnessFromComplexity() {
         let prompt = SystemPrompt.build()
-        XCTAssertTrue(prompt.contains("nothing persists or travels to meet and interact with another structure"))
-        XCTAssertTrue(prompt.contains("localized structures travel between them"))
+        XCTAssertTrue(prompt.contains("marks placed without an organizing idea"))
+        XCTAssertTrue(prompt.contains("Local structure does not change this"))
+        XCTAssertTrue(prompt.contains("reads as designed or meaningful"))
+        XCTAssertTrue(prompt.contains("choose randomness unless the organizing idea is clear"))
     }
 
     /// The artifact is the human-readable copy of the prompt; nothing generates
