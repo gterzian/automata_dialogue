@@ -1,10 +1,10 @@
 import Foundation
 
 /// Metal Shading Language sources, compiled at startup from strings with the
-/// Metal 4 compiler. SwiftPM cannot build a `.metallib`, and keeping the source
-/// in strings lets the CLI's headless and on-screen paths share it. `simulation` matches
-/// `Core/Programs` row-for-row; `layer` compacts the fitted grid into spans and
-/// draws them through a GPU-built indirect draw (see `LayerRenderer`).
+/// Metal 4 compiler. SwiftPM cannot build a `.metallib`, so the source lives in
+/// strings. `simulation` seeds the board and advances it; `layer` compacts the
+/// fitted grid into spans and draws them through a GPU-built indirect draw (see
+/// `LayerRenderer`).
 public enum ShaderSource {
     public static let simulation = """
     #include <metal_stdlib>
@@ -20,8 +20,7 @@ public enum ShaderSource {
     };
 
     // The injected-randomness draw: the SplitMix64 mix of `seed + step × golden`,
-    // matching `SplitMix64.injectedValue` so the CPU reference and this kernel
-    // agree row for row without carrying the generator's state.
+    // indexed by step so no thread carries the generator's state.
     static ulong injection_value(ulong seed, ulong step) {
         ulong z = seed + step * 0x9E3779B97F4A7C15UL;
         z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
@@ -29,19 +28,27 @@ public enum ShaderSource {
         return z ^ (z >> 31);
     }
 
-    struct FitParams {
+    struct ViewParams {
         uint boardWidth;
         uint displayCols;
         uint displayRows;
-        uint totalSteps;
-        uint block;
-        uint sourceOrigin;
-        uint padLeft;
-        uint rowOffset;
-        uint capacity;      // history rows, modulo index
-        uint viewportStart; // newest window's top source step (scrolling)
-        uint currentStep;   // source rows computed so far (scrolling)
-        uint scrolling;     // 1 = window over `capacity`, 0 = stretch to fit
+        uint capacity;       // history rows, modulo index
+        uint viewportStart;  // newest window's top source step
+        uint viewportOrigin; // first source column the window shows
+        uint currentStep;    // source rows computed so far
+    };
+
+    // The seed row. `mode` selects the `BoardStart` shape: 0 center cell,
+    // 1 rightmost cell, 2 random row, 3 random 2-cell blocks, 4 repeated
+    // block, 5 base-`colors` number written from the center.
+    struct SeedParams {
+        uint width;
+        uint colors;
+        uint mode;
+        uint blockLength;
+        uint number;
+        float density;
+        ulong seed;
     };
 
     // The row being computed is read from a GPU-side head counter that
@@ -120,53 +127,74 @@ public enum ShaderSource {
         if (gid == 0) { *head = *head + 1; }
     }
 
-    // Nearest for a single-cell block; majority vote (ties to the smaller
-    // palette index) when downsampling. Out-of-board columns read background.
-    static uchar fit_value(device const uchar* history, constant FitParams& p,
-                           uint sourceStep, uint displayCol) {
-        uint base = (sourceStep % p.capacity) * p.boardWidth;
-        if (p.boardWidth < p.displayCols) {
-            int idx = int(displayCol) - int(p.padLeft);
-            if (idx < 0 || idx >= int(p.boardWidth)) return 0;
-            return history[base + uint(idx)];
-        }
-        uint counts[4] = {0, 0, 0, 0};
-        uint total = 0;
-        for (uint offset = 0; offset < p.block; ++offset) {
-            uint idx = p.sourceOrigin + displayCol * p.block + offset;
-            if (idx >= p.boardWidth) continue;
-            uchar value = history[base + idx];
-            if (value < 4) counts[value] += 1;
-            total += 1;
-        }
-        if (total == 0) return 0;
-        uchar best = 0;
-        uint bestCount = 0;
-        for (uint v = 0; v < 4; ++v) {
-            if (counts[v] > bestCount) { bestCount = counts[v]; best = uchar(v); }
-        }
-        return best;
+    // The `index`-th (1-based) SplitMix64 draw, so a random seed row can be
+    // built per cell without carrying the generator's state between threads.
+    static ulong seed_value(ulong seed, uint index) {
+        return injection_value(seed, ulong(index));
     }
 
+    static uint digit_count(uint number, uint colors) {
+        uint count = 1;
+        uint n = number;
+        while (n >= colors) { n /= colors; count += 1; }
+        return count;
+    }
+
+    // `index` 0 is the most significant base-`colors` digit.
+    static uchar number_digit(uint number, uint colors, uint index, uint count) {
+        uint power = 1;
+        for (uint k = 0; k < count - 1 - index; ++k) { power *= colors; }
+        return uchar((number / power) % colors);
+    }
+
+    kernel void seed_row(device uchar* history [[buffer(0)]],
+                         constant SeedParams& p [[buffer(1)]],
+                         device const uchar* block [[buffer(2)]],
+                         uint gid [[thread_position_in_grid]]) {
+        if (gid >= p.width) return;
+        uchar value = 0;
+        if (p.mode == 0) {
+            value = (gid == p.width / 2) ? 1 : 0;
+        } else if (p.mode == 1) {
+            value = (gid == p.width - 1) ? 1 : 0;
+        } else if (p.mode == 2) {
+            ulong draw = seed_value(p.seed, gid + 1);
+            if (p.colors == 3) {
+                value = uchar(draw % 3);
+            } else if (p.density == 0.5f) {
+                value = uchar(draw & 1);
+            } else {
+                value = ((draw >> 11) * (1.0 / 9007199254740992.0) < p.density) ? 1 : 0;
+            }
+        } else if (p.mode == 3) {
+            value = uchar(seed_value(p.seed, gid / 2 + 1) & 1);
+        } else if (p.mode == 4) {
+            if (p.blockLength > 0) { value = block[gid % p.blockLength]; }
+        } else {
+            uint origin = p.width / 2;
+            uint count = digit_count(p.number, p.colors);
+            if (gid >= origin && gid - origin < count) {
+                value = number_digit(p.number, p.colors, gid - origin, count);
+            }
+        }
+        history[gid] = value;
+    }
+
+    // The window shows one board cell per display column at `viewportOrigin`.
+    // Rows the run has not reached yet stay background, so a short board grows
+    // from the top before it starts to scroll.
     kernel void fit(device const uchar* history [[buffer(0)]],
                     device uchar* colorGrid [[buffer(1)]],
-                    constant FitParams& p [[buffer(2)]],
+                    constant ViewParams& p [[buffer(2)]],
                     uint2 gid [[thread_position_in_grid]]) {
-        uint row = p.rowOffset + gid.y;
-        if (gid.x >= p.displayCols || row >= p.displayRows) return;
-        uint target;
-        if (p.scrolling != 0) {
-            // A window over the newest source rows: row 0 is the oldest still
-            // visible. Rows the run has not reached yet stay background, so a
-            // short board grows from the top before it starts to scroll.
-            target = p.viewportStart + row;
-            if (target > p.currentStep) { colorGrid[row * p.displayCols + gid.x] = 0; return; }
-        } else {
-            target = p.displayRows == 1
-                ? p.totalSteps - 1
-                : (row * (p.totalSteps - 1)) / (p.displayRows - 1);
+        if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
+        uint target = p.viewportStart + gid.y;
+        uint index = p.viewportOrigin + gid.x;
+        uchar value = 0;
+        if (target <= p.currentStep && index < p.boardWidth) {
+            value = history[(target % p.capacity) * p.boardWidth + index];
         }
-        colorGrid[row * p.displayCols + gid.x] = fit_value(history, p, target, gid.x);
+        colorGrid[gid.y * p.displayCols + gid.x] = value;
     }
     """
 
@@ -186,8 +214,8 @@ public enum ShaderSource {
     struct LayerUniforms {
         uint cols;
         uint rows;
-        uint rowOffset;
-        uint padding;
+        uint padding0;
+        uint padding1;
     };
 
     // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
@@ -209,9 +237,7 @@ public enum ShaderSource {
                      constant LayerUniforms& u [[buffer(3)]],
                      uint2 gid [[thread_position_in_grid]]) {
         uint col = gid.x;
-        // Only the rows a frame added are dispatched; `rowOffset` places them in
-        // the shared grid.
-        uint row = u.rowOffset + gid.y;
+        uint row = gid.y;
         if (col >= u.cols || row >= u.rows) return;
         uint index = row * u.cols + col;
         uchar value = cells[index];
@@ -240,8 +266,7 @@ public enum ShaderSource {
         float4 color;
     };
 
-    // One instance per span; six vertices form the quad. Row 0 is the top edge,
-    // matching `IncrementalRenderer`'s top-down grid.
+    // One instance per span; six vertices form the quad. Row 0 is the top edge.
     vertex LayerVertexOut layer_vertex(uint vid [[vertex_id]],
                                        uint iid [[instance_id]],
                                        const device Span* spans [[buffer(0)]],

@@ -21,12 +21,13 @@ public final class GPUContext {
     public let device: any MTLDevice
     public let queue: any MTL4CommandQueue
     public let compiler: any MTL4Compiler
-    public let library: any MTLLibrary
+    private let library: any MTLLibrary
     public let stepElementary: any MTLComputePipelineState
     public let stepTotalistic: any MTLComputePipelineState
     public let stepK2R2: any MTLComputePipelineState
     public let bumpHead: any MTLComputePipelineState
     public let fitPipeline: any MTLComputePipelineState
+    public let seedPipeline: any MTLComputePipelineState
     public let residency: any MTLResidencySet
 
     public static var isAvailable: Bool {
@@ -72,6 +73,9 @@ public final class GPUContext {
         )
         self.fitPipeline = try Self.makePipeline(
             compiler: compiler, library: library, name: "fit"
+        )
+        self.seedPipeline = try Self.makePipeline(
+            compiler: compiler, library: library, name: "seed_row"
         )
 
         let residencyDescriptor = MTLResidencySetDescriptor()

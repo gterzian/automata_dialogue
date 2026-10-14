@@ -3,8 +3,8 @@ import Metal
 
 /// A reusable per-frame command allocator and command buffer. `FrameSlotRing`
 /// rotates three of them so frame N+1/N+2 could be encoded while the GPU runs
-/// N. `MetalSimulation.commit` waits after every commit today, so the rotation
-/// is structural until that wait is dropped (see `README.md`).
+/// N. `MetalSimulation` waits after every commit today, so the rotation is
+/// structural until that wait is dropped (see `README.md`).
 @available(macOS 26.0, *)
 final class FrameSlot: @unchecked Sendable {
     let allocator: any MTL4CommandAllocator
@@ -49,12 +49,15 @@ final class FrameSlotRing {
     }
 }
 
-/// The GPU simulation core, sink-independent. It owns the
-/// history buffer, the GPU-side `head` counter, and the `step`/`fit` kernels,
-/// and advances a caller-sized chunk of source rows so a caller can animate
-/// instead of running the whole board in one commit. `render(chunk:)` produces
-/// exactly the grid `IncrementalRenderer` would for the same step count;
-/// `MetalTests` and `RenderActorTests` assert that.
+/// The GPU simulation core, sink-independent. It owns the history buffer, the
+/// GPU-side `head` counter, and the `seed`/`step`/`fit` kernels, and advances a
+/// caller-sized chunk of source rows so a caller can animate instead of running
+/// the whole board in one commit.
+///
+/// The run is a window over a board much wider than the display: it keeps only
+/// the newest `rows + 2` source rows in a ring and maps display row `d` to
+/// source step `step - (rows - 1) + d`, so a short board grows from the top and
+/// then the window follows the newest row without an end.
 @available(macOS 26.0, *)
 public final class MetalSimulation {
     private struct StepParams {
@@ -66,51 +69,38 @@ public final class MetalSimulation {
         var injectSeed: UInt64
     }
 
-    private struct FitParams {
+    private struct ViewParams {
         var boardWidth: UInt32
         var displayCols: UInt32
         var displayRows: UInt32
-        var totalSteps: UInt32
-        var block: UInt32
-        var sourceOrigin: UInt32
-        var padLeft: UInt32
-        var rowOffset: UInt32
         var capacity: UInt32
         var viewportStart: UInt32
+        var viewportOrigin: UInt32
         var currentStep: UInt32
-        var scrolling: UInt32
+    }
+
+    private struct SeedParams {
+        var width: UInt32
+        var colors: UInt32
+        var mode: UInt32
+        var blockLength: UInt32
+        var number: UInt32
+        var density: Float
+        var seed: UInt64
     }
 
     public let spec: ProgramSpec
     public let cols: Int
     public let rows: Int
-    /// Total source rows in the run, including the seed (`min(board.height,
-    /// stepLimit)` unless overridden). `Int.max` in scrolling mode, where the
-    /// run has no end.
-    public let totalSteps: Int
-    /// A scrolling run keeps only the newest `rows + 2` source rows and maps
-    /// display row `d` to source step `step - (rows - 1) + d`, so the newest
-    /// row stays at the bottom. A non-scrolling run stretches its whole history
-    /// across the display and stops at `totalSteps`.
-    public let scrolling: Bool
-    /// Which column mapping the grid uses; see `ColumnMapping`.
-    public let mapping: ColumnMapping
-    /// First source column shown by a `.window` mapping, clamped to
-    /// `maxViewportOrigin`.
+    /// First source column the window shows, clamped to `maxViewportOrigin`.
     public private(set) var viewportOrigin: Int
     /// True once the caller pans by hand; the entry's follow then stops for the
-    /// rest of the run (a `reset` clears it).
-    public private(set) var userPanned = false
-    /// Board column of the seed's leading edge in the follow direction. The
-    /// viewport only scrolls once the growing edge reaches a viewport boundary,
-    /// so the pattern is never pushed out of view.
-    private var leadAnchor = 0.0
+    /// rest of the run.
+    private var userPanned = false
     /// Source row currently computed (0 is the seed).
-    public private(set) var step = 0
-    /// Index of the frame slot that produced the last `render` call.
-    public private(set) var lastSlot = 0
+    private var step = 0
 
-    /// The origin a `reset()` returns to (rightmost for a right-pinned entry).
+    /// The origin a `reseed` returns to (rightmost for a right-pinned entry).
     private let startOrigin: Int
 
     private let context: GPUContext
@@ -118,51 +108,53 @@ public final class MetalSimulation {
     /// The board the run simulates. Wider than the catalog board when the
     /// review window needs room to pan; see `ViewportGeometry.boardWidth`.
     private let board: Board
-    /// Rows the history buffer holds; the source step indexes it modulo this.
+    /// Source rows the history ring holds; a step indexes it modulo this. It is
+    /// only ever a little larger than the window.
     private let capacity: Int
     private let history: any MTLBuffer
     private let colorBuffer: any MTLBuffer
     private let stepBuffer: any MTLBuffer
-    private let fitBuffer: any MTLBuffer
+    private let viewBuffer: any MTLBuffer
+    private let seedBuffer: any MTLBuffer
+    private let blockBuffer: any MTLBuffer
     private let headBuffer: any MTLBuffer
     private let stepTable: any MTL4ArgumentTable
     private let bumpTable: any MTL4ArgumentTable
     private let fitTable: any MTL4ArgumentTable
+    private let seedTable: any MTL4ArgumentTable
     private let stepPipeline: any MTLComputePipelineState
     private let ring: FrameSlotRing
-    /// Display rows already written into `colorBuffer`; a frame only fits the
-    /// rows that became ready since the last one.
-    private var fittedRows = 0
-    private var fitParams: FitParams
+    /// Board column of the seed's leading edge in the follow direction. The
+    /// viewport only scrolls once the growing edge reaches a viewport boundary,
+    /// so the pattern is never pushed out of view.
+    private var leadAnchor = 0.0
+    private var stepParams: StepParams
+    private var viewParams: ViewParams
 
     public init(
         spec: ProgramSpec,
         cols: Int,
         rows: Int,
-        steps: Int? = nil,
         context: GPUContext,
-        scrolling: Bool = false,
-        mapping: ColumnMapping = .fit,
         board: Board? = nil
     ) throws {
         let displayCols = max(1, cols)
         let displayRows = max(1, rows)
         let runBoard = board ?? spec.board
-        let nominalSteps = max(1, steps ?? min(runBoard.height, spec.display.stepLimit))
         let width = runBoard.width
         let device = context.device
-        // A scrolling run only ever reads the last `rows` rows, so its history
-        // is a ring of that size; a stretched run needs the whole history.
-        let capacity = scrolling ? displayRows + 2 : nominalSteps
+        let capacity = displayRows + 2
 
         guard let history = device.makeBuffer(length: max(1, capacity * width), options: .storageModeShared),
               let colorBuffer = device.makeBuffer(length: displayCols * displayRows, options: .storageModeShared),
               let stepBuffer = device.makeBuffer(length: MemoryLayout<StepParams>.stride, options: .storageModeShared),
-              let fitBuffer = device.makeBuffer(length: MemoryLayout<FitParams>.stride, options: .storageModeShared),
+              let viewBuffer = device.makeBuffer(length: MemoryLayout<ViewParams>.stride, options: .storageModeShared),
+              let seedBuffer = device.makeBuffer(length: MemoryLayout<SeedParams>.stride, options: .storageModeShared),
+              let blockBuffer = device.makeBuffer(length: max(1, width), options: .storageModeShared),
               let headBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared) else {
             throw GPUContext.GPUError.resource("simulation buffers")
         }
-        context.makeResident([history, colorBuffer, stepBuffer, fitBuffer, headBuffer])
+        context.makeResident([history, colorBuffer, stepBuffer, viewBuffer, seedBuffer, blockBuffer, headBuffer])
 
         let pipeline: any MTLComputePipelineState
         let rule: UInt32
@@ -185,9 +177,6 @@ public final class MetalSimulation {
         self.spec = spec
         self.cols = displayCols
         self.rows = displayRows
-        self.totalSteps = scrolling ? Int.max : nominalSteps
-        self.scrolling = scrolling
-        self.mapping = mapping
         self.context = context
         self.width = width
         self.board = runBoard
@@ -195,74 +184,59 @@ public final class MetalSimulation {
         self.history = history
         self.colorBuffer = colorBuffer
         self.stepBuffer = stepBuffer
-        self.fitBuffer = fitBuffer
+        self.viewBuffer = viewBuffer
+        self.seedBuffer = seedBuffer
+        self.blockBuffer = blockBuffer
         self.headBuffer = headBuffer
         self.stepPipeline = pipeline
         self.ring = try FrameSlotRing(device: device)
 
         self.stepTable = try Self.makeTable(device: device, history: history, second: stepBuffer, third: headBuffer)
         self.bumpTable = try Self.makeTable(device: device, history: headBuffer, second: nil, third: nil)
-        self.fitTable = try Self.makeTable(device: device, history: history, second: colorBuffer, third: fitBuffer)
+        self.fitTable = try Self.makeTable(device: device, history: history, second: colorBuffer, third: viewBuffer)
+        self.seedTable = try Self.makeTable(device: device, history: history, second: seedBuffer, third: blockBuffer)
 
-        let fit = Fit(boardWidth: width, displayCols: displayCols, pinRight: spec.display.pinRight)
-        // A `.window` mapping shows one cell per column at a movable origin, so
-        // a board wider than the display pans instead of being downsampled.
-        let startOrigin = mapping == .window
-            ? ViewportGeometry.initialOrigin(
-                boardWidth: width, cols: displayCols, start: runBoard.start,
-                pinRight: spec.display.pinRight)
-            : fit.sourceOrigin
+        let startOrigin = ViewportGeometry.initialOrigin(
+            boardWidth: width, cols: displayCols, start: runBoard.start,
+            pinRight: spec.display.pinRight)
         self.startOrigin = startOrigin
         self.viewportOrigin = startOrigin
 
-        var stepParams = StepParams(
+        self.stepParams = StepParams(
             width: UInt32(width), rule: rule, colors: colors, capacity: UInt32(capacity),
             inject: runBoard.injection == nil ? 0 : 1,
             injectSeed: runBoard.injection?.seed ?? 0)
-        memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
-        self.fitParams = FitParams(
+        self.viewParams = ViewParams(
             boardWidth: UInt32(width),
             displayCols: UInt32(displayCols),
             displayRows: UInt32(displayRows),
-            totalSteps: UInt32(clamping: nominalSteps),
-            block: UInt32(mapping == .window ? 1 : fit.block),
-            sourceOrigin: UInt32(startOrigin),
-            padLeft: UInt32(mapping == .window ? 0 : fit.padLeft),
-            rowOffset: 0,
             capacity: UInt32(capacity),
             viewportStart: 0,
-            currentStep: 0,
-            scrolling: scrolling ? 1 : 0
-        )
-        memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
+            viewportOrigin: UInt32(startOrigin),
+            currentStep: 0)
 
-        reseed()
+        try reseed()
     }
 
-    /// Largest `viewportOrigin` a `.window` mapping can pan to; 0 for `.fit`.
-    public var maxViewportOrigin: Int {
-        mapping == .window ? max(0, width - cols) : 0
+    /// Largest `viewportOrigin` the window can pan to.
+    private var maxViewportOrigin: Int {
+        max(0, width - cols)
     }
 
-    /// Shifts a `.window` mapping `delta` source columns, clamped to the board.
-    /// A manual pan also aborts the entry's follow for the rest of the run; the
-    /// caller re-fits (`advance(chunk: 0)`) to show the new window.
+    /// Shifts the window `delta` source columns, clamped to the board. A manual
+    /// pan also aborts the entry's follow for the rest of the run; the caller
+    /// re-fits (`renderGPU(chunk: 0)`) to show the new window.
     public func pan(by delta: Int) {
-        guard mapping == .window else { return }
         userPanned = true
-        moveOrigin(by: delta)
+        setOrigin(viewportOrigin + delta)
     }
 
     private func setOrigin(_ origin: Int) {
         let clamped = min(max(0, origin), maxViewportOrigin)
         guard clamped != viewportOrigin else { return }
         viewportOrigin = clamped
-        fitParams.sourceOrigin = UInt32(clamped)
-        memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
-    }
-
-    private func moveOrigin(by delta: Int) {
-        setOrigin(viewportOrigin + delta)
+        viewParams.viewportOrigin = UInt32(clamped)
+        memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
     }
 
     /// Scrolls the viewport as the pattern's leading edge advances, but only
@@ -271,7 +245,7 @@ public final class MetalSimulation {
     /// signed rate, so a left-growing pattern is not pushed off the right.
     private func follow(to currentStep: Int) {
         let rate = spec.display.follow.columnsPerStep
-        guard rate != 0, mapping == .window, !userPanned else { return }
+        guard rate != 0, !userPanned else { return }
         let lead = leadAnchor + rate * Double(currentStep)
         let raw = rate > 0
             ? max(Double(startOrigin), lead - Double(cols - 1))
@@ -279,56 +253,76 @@ public final class MetalSimulation {
         setOrigin(Int(raw.rounded()))
     }
 
-    /// Returns the simulation to the seed row (step 0), resets the horizontal
-    /// origin, and clears the grid. `program` supplies a different seed row (a
-    /// `.rand` replay); the buffers are reused.
-    public func reset(program: (any RowProgram)? = nil) {
+    /// Regenerates the seed row on the GPU, resets the head counter and grid,
+    /// and clears any manual pan. `seed` reseeds a random start and injected
+    /// randomness (a `.rand` replay); other starts ignore it.
+    public func reseed(seed: UInt64? = nil) throws {
+        var start = board.start
+        var injectionSeed = board.injection?.seed
+        if let seed {
+            if case .random(_, let density) = start {
+                start = .random(seed: seed, density: density)
+            }
+            if board.injection != nil { injectionSeed = seed }
+        }
+
+        stepParams.inject = board.injection == nil ? 0 : 1
+        stepParams.injectSeed = injectionSeed ?? 0
+        memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
+
+        var seedParams = Self.seedParams(start: start, width: width, colors: spec.stateCount)
+        memcpy(seedBuffer.contents(), &seedParams.params, MemoryLayout<SeedParams>.stride)
+        seedParams.block.withUnsafeBufferPointer { buffer in
+            if let base = buffer.baseAddress {
+                memcpy(blockBuffer.contents(), base, min(width, seedParams.block.count))
+            }
+        }
+
+        var head: UInt32 = 0
+        memcpy(headBuffer.contents(), &head, MemoryLayout<UInt32>.stride)
+        memset(colorBuffer.contents(), 0, cols * rows)
+        step = 0
         userPanned = false
         viewportOrigin = startOrigin
-        fitParams.sourceOrigin = UInt32(startOrigin)
-        memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
-        reseed(program: program)
+        viewParams.viewportStart = 0
+        viewParams.currentStep = 0
+        viewParams.viewportOrigin = UInt32(startOrigin)
+        memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
+
+        let (_, slot) = ring.borrow()
+        slot.command.beginCommandBuffer(allocator: slot.allocator)
+        slot.command.useResidencySet(context.residency)
+        guard let encoder = slot.command.makeComputeCommandEncoder() else {
+            throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
+        }
+        encoder.setArgumentTable(seedTable)
+        encoder.setComputePipelineState(context.seedPipeline)
+        encoder.dispatchThreads(
+            threadsPerGrid: MTLSize(width: width, height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: min(64, width), height: 1, depth: 1)
+        )
+        encoder.endEncoding()
+        slot.command.endCommandBuffer()
+        try commit(slot)
+
+        leadAnchor = Self.leadColumn(
+            start: start, width: width, colors: spec.stateCount,
+            rate: spec.display.follow.columnsPerStep)
     }
 
-    /// Advances up to `count` source rows and returns the grid at the new
-    /// position. Display rows whose target step has not been reached stay at
-    /// the background palette index, matching `IncrementalRenderer`.
-    @discardableResult
-    public func render(chunk: Int) throws -> ColorGrid {
-        try advance(chunk: chunk)
-        return readColorGrid()
-    }
-
-    /// Advances without reading the grid back, returning the run's GPU color
-    /// buffer and the display rows this call fitted. A GPU-resident sink binds
-    /// the buffer directly and compacts only the new rows.
+    /// Advances the run and returns the run's GPU color buffer. The window
+    /// refits every display row, so a sink recompacts the whole grid each frame.
     @discardableResult
     public func renderGPU(chunk: Int) throws -> GPUColorGrid {
-        // A scrolling frame refits every display row (the window moves), so it
-        // always starts at row 0 and a sink must recompact the whole grid. A
-        // stretched frame only fits the rows that just became ready.
-        let firstRow = scrolling ? 0 : fittedRows
         try advance(chunk: chunk)
-        return GPUColorGrid(
-            buffer: colorBuffer,
-            cols: cols,
-            rows: rows,
-            firstRow: firstRow,
-            rowCount: fittedRows - firstRow
-        )
+        return GPUColorGrid(buffer: colorBuffer, cols: cols, rows: rows)
     }
 
-    /// Encodes the step and fit work for `chunk` rows and commits it. Returns
-    /// the number of display rows fitted by this frame.
-    @discardableResult
-    func advance(chunk: Int) throws -> Int {
-        let requested = max(0, chunk)
-        let target = scrolling
-            ? step + requested
-            : min(totalSteps - 1, step + requested)
-        if scrolling { follow(to: target) }
-        let (index, slot) = ring.borrow()
-        lastSlot = index
+    /// Encodes the step and fit work for `chunk` rows and commits it.
+    func advance(chunk: Int) throws {
+        let target = step + max(0, chunk)
+        follow(to: target)
+        let (_, slot) = ring.borrow()
 
         slot.command.beginCommandBuffer(allocator: slot.allocator)
         slot.command.useResidencySet(context.residency)
@@ -336,43 +330,103 @@ public final class MetalSimulation {
             throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
         }
         encodeSteps(from: step, to: target, encoder: encoder)
-        if scrolling {
-            fitParams.viewportStart = UInt32(max(0, target - (rows - 1)))
-            fitParams.currentStep = UInt32(clamping: target)
-            encodeFit(from: 0, to: rows, encoder: encoder)
-            fittedRows = rows
-        } else {
-            let ready = readyRowCount(at: target)
-            encodeFit(from: fittedRows, to: ready, encoder: encoder)
-            fittedRows = ready
-        }
+        encodeFit(target: target, encoder: encoder)
         encoder.endEncoding()
         slot.command.endCommandBuffer()
 
         try commit(slot)
         step = target
-        return fittedRows
     }
 
     // MARK: - Private
 
-    private func reseed(program: (any RowProgram)? = nil) {
-        step = 0
-        fittedRows = 0
-        let seed = (program ?? spec.reference(board)).row()
-        let rate = spec.display.follow.columnsPerStep
-        if rate != 0 {
-            let column = rate > 0
-                ? (seed.lastIndex(where: { $0 != 0 }) ?? 0)
-                : (seed.firstIndex(where: { $0 != 0 }) ?? 0)
-            leadAnchor = Double(column)
+    private static func seedParams(start: BoardStart, width: Int, colors: Int) -> (params: SeedParams, block: [UInt8]) {
+        var p = SeedParams(
+            width: UInt32(width), colors: UInt32(colors), mode: 0,
+            blockLength: 0, number: 0, density: 0.5, seed: 0)
+        var block: [UInt8] = [0]
+        switch start {
+        case .center:
+            p.mode = 0
+        case .rightmost:
+            p.mode = 1
+        case .random(let seed, let density):
+            p.mode = 2
+            p.seed = seed
+            p.density = Float(density)
+        case .randomBlocks(let seed):
+            p.mode = 3
+            p.seed = seed
+        case .block(let bytes):
+            p.mode = 4
+            p.blockLength = UInt32(bytes.count)
+            block = bytes
+        case .seed(let number, let startColors):
+            p.mode = 5
+            p.number = UInt32(number)
+            p.colors = UInt32(startColors)
         }
-        seed.withUnsafeBytes { bytes in
-            if let base = bytes.baseAddress { memcpy(history.contents(), base, width) }
+        return (p, block)
+    }
+
+    /// The seed's leading non-zero board column in the follow direction. It
+    /// mirrors `seed_row` so the viewport can follow without reading the seed
+    /// row back from the GPU.
+    static func leadColumn(start: BoardStart, width: Int, colors: Int, rate: Double) -> Double {
+        guard rate != 0 else { return 0 }
+        var leading = 0
+        for index in 0..<width where seedValue(start: start, index: index, width: width, colors: colors) != 0 {
+            if rate > 0 {
+                leading = index
+            } else {
+                return Double(index)
+            }
         }
-        var head: UInt32 = 0
-        memcpy(headBuffer.contents(), &head, MemoryLayout<UInt32>.stride)
-        memset(colorBuffer.contents(), 0, cols * rows)
+        return Double(leading)
+    }
+
+    private static func seedValue(start: BoardStart, index: Int, width: Int, colors: Int) -> UInt8 {
+        switch start {
+        case .center:
+            return index == width / 2 ? 1 : 0
+        case .rightmost:
+            return index == width - 1 ? 1 : 0
+        case .random(let seed, let density):
+            let draw = splitMix(seed: seed, index: index + 1)
+            if colors == 3 { return UInt8(draw % 3) }
+            if density == 0.5 { return UInt8(draw & 1) }
+            return Double(draw >> 11) * (1.0 / 9_007_199_254_740_992.0) < density ? 1 : 0
+        case .randomBlocks(let seed):
+            return UInt8(splitMix(seed: seed, index: index / 2 + 1) & 1)
+        case .block(let block):
+            return block.isEmpty ? 0 : block[index % block.count]
+        case .seed(let number, let startColors):
+            let origin = width / 2
+            let count = digitCount(number: number, colors: startColors)
+            guard index >= origin, index - origin < count else { return 0 }
+            return UInt8(numberDigit(number: number, colors: startColors, index: index - origin, count: count))
+        }
+    }
+
+    /// The `index`-th (1-based) SplitMix64 draw, matching `seed_row`.
+    private static func splitMix(seed: UInt64, index: Int) -> UInt64 {
+        var z = seed &+ UInt64(index) &* 0x9E37_79B9_7F4A_7C15
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+
+    private static func digitCount(number: Int, colors: Int) -> Int {
+        var count = 1
+        var n = number
+        while n >= colors { n /= colors; count += 1 }
+        return count
+    }
+
+    private static func numberDigit(number: Int, colors: Int, index: Int, count: Int) -> Int {
+        var power = 1
+        for _ in 0..<(count - 1 - index) { power *= colors }
+        return (number / power) % colors
     }
 
     private func encodeSteps(from: Int, to: Int, encoder: any MTL4ComputeCommandEncoder) {
@@ -400,30 +454,16 @@ public final class MetalSimulation {
         }
     }
 
-    private func encodeFit(from: Int, to: Int, encoder: any MTL4ComputeCommandEncoder) {
-        guard to > from else { return }
-        fitParams.rowOffset = UInt32(from)
-        memcpy(fitBuffer.contents(), &fitParams, MemoryLayout<FitParams>.stride)
+    private func encodeFit(target: Int, encoder: any MTL4ComputeCommandEncoder) {
+        viewParams.viewportStart = UInt32(max(0, target - (rows - 1)))
+        viewParams.currentStep = UInt32(clamping: target)
+        memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
         encoder.setArgumentTable(fitTable)
         encoder.setComputePipelineState(context.fitPipeline)
         encoder.dispatchThreads(
-            threadsPerGrid: MTLSize(width: cols, height: to - from, depth: 1),
-            threadsPerThreadgroup: MTLSize(
-                width: min(16, cols), height: min(16, to - from), depth: 1
-            )
+            threadsPerGrid: MTLSize(width: cols, height: rows, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: min(16, cols), height: min(16, rows), depth: 1)
         )
-    }
-
-    /// Number of display rows whose target source step has been reached. The
-    /// mapping matches `IncrementalRenderer.targetStep`.
-    private func readyRowCount(at step: Int) -> Int {
-        var ready = 0
-        for displayRow in 0..<rows {
-            let target = rows == 1 ? totalSteps - 1 : (displayRow * (totalSteps - 1)) / (rows - 1)
-            if target > step { break }
-            ready += 1
-        }
-        return ready
     }
 
     private func commit(_ slot: FrameSlot) throws {
@@ -434,16 +474,6 @@ public final class MetalSimulation {
         done.wait()
         slot.allocator.reset()
         slot.release()
-    }
-
-    private func readColorGrid() -> ColorGrid {
-        let pointer = colorBuffer.contents().bindMemory(to: UInt8.self, capacity: cols * rows)
-        // SAFETY: the commit feedback handler has fired, so the GPU is done
-        // writing `colorBuffer`; the buffer is `.storageModeShared` and was
-        // allocated with exactly `cols * rows` bytes, so the typed pointer and
-        // the count stay in bounds.
-        let cells = Array(UnsafeBufferPointer(start: pointer, count: cols * rows))
-        return ColorGrid(cols: cols, rows: rows, cells: cells)
     }
 
     private static func makeTable(

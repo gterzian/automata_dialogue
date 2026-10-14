@@ -46,9 +46,7 @@ let package = Package(
                 "Agent/README.md",
                 "Catalog/README.md",
                 "Import/README.md",
-                "Programs/README.md",
                 "Render/README.md",
-                "Session/README.md",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

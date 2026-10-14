@@ -50,20 +50,6 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(Catalog.spec(id: "E90")?.display.follow, Follow.none)
     }
 
-    /// Injected randomness is deterministic, so `makeProgram()` stays the
-    /// golden entry point.
-    func testInjectedRandomnessIsDeterministic() {
-        guard let spec = Catalog.spec(id: "E90.inject") else { return XCTFail("missing E90.inject") }
-        XCTAssertNotNil(spec.board.injection)
-        var a = spec.makeProgram()
-        var b = spec.makeProgram()
-        for _ in 0..<32 {
-            a.step()
-            b.step()
-        }
-        XCTAssertEqual(RowHash.fnv1a(a.row()), RowHash.fnv1a(b.row()))
-    }
-
     func testEverySpecHasALookLine() {
         for spec in Catalog.all {
             XCTAssertFalse(spec.look.isEmpty, "\(spec.id) has no look line")
@@ -133,40 +119,17 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(spec.gpu, .k2r2(code: 20))
     }
 
-    /// A run reseeds `.rand` entries so re-showing one gives a different
-    /// picture, while `makeProgram()` stays the deterministic entry point for
-    /// the goldens (inventory §1.4).
+    /// `.rand` entries draw a fresh seed per run; other starts are unchanged.
     func testRandomStartsReseedPerRun() {
         guard let rand = Catalog.spec(id: "E90.rand"),
               case .random(let seed, let density) = rand.board.start else {
             return XCTFail("missing E90.rand random start")
         }
-        let fresh = rand.withRandomSeed(seed &+ 1)
         XCTAssertEqual(
-            fresh.board,
+            rand.withRandomSeed(seed &+ 1).board,
             Board(width: rand.board.width, height: rand.board.height,
-                  start: .random(seed: seed &+ 1, density: density))
-        )
-        XCTAssertNotEqual(
-            RowHash.fnv1a(fresh.makeProgram().row()),
-            RowHash.fnv1a(rand.makeProgram().row())
-        )
-        // Re-applying the stored seed reproduces the deterministic entry.
-        XCTAssertEqual(
-            RowHash.fnv1a(rand.withRandomSeed(seed).makeProgram().row()),
-            RowHash.fnv1a(rand.makeProgram().row())
-        )
-    }
-
-    func testWithRandomSeedLeavesNonRandomStartsAlone() {
+                  start: .random(seed: seed &+ 1, density: density)))
         guard let deterministic = Catalog.spec(id: "E90") else { return XCTFail("missing E90") }
         XCTAssertEqual(deterministic.withRandomSeed(7).board, deterministic.board)
-        XCTAssertEqual(
-            RowHash.fnv1a(deterministic.withRandomSeed(7).makeProgram().row()),
-            RowHash.fnv1a(deterministic.makeProgram().row())
-        )
-        // `.pairs` is a fixed 2-cell block draw, not a `.rand` row.
-        guard let pairs = Catalog.spec(id: "E126.pairs") else { return XCTFail("missing E126.pairs") }
-        XCTAssertEqual(pairs.withRandomSeed(7).board, pairs.board)
     }
 }

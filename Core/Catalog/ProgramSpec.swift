@@ -29,7 +29,7 @@ public enum BoardStart: Sendable, Hashable {
 
 /// The atlas's "continuously injected randomness": after every step, one cell
 /// is overwritten with a pseudo-random value. `seed` makes the draw
-/// deterministic so the CPU reference and the GPU kernel agree row for row.
+/// deterministic.
 public struct RandomInjection: Sendable, Hashable {
     public var seed: UInt64
 
@@ -110,7 +110,6 @@ public struct DisplayHints: Sendable, Hashable {
 }
 
 /// One row of the single table that feeds the renderer and the prompt index.
-/// `reference` builds the CPU program that the GPU kernels are tested against.
 public struct ProgramSpec: Sendable {
     public let id: String
     public let title: String
@@ -121,10 +120,6 @@ public struct ProgramSpec: Sendable {
     public let gpu: GPUProgram
     public let board: Board
     public let display: DisplayHints
-    /// Builds the CPU `RowProgram` for a board. The catalog routes this through
-    /// `ProgramFactory`, so the mapping from `GPUProgram`/`Board` to a concrete
-    /// program lives in one place.
-    public let reference: @Sendable (Board) -> any RowProgram
 
     public init(
         id: String,
@@ -133,8 +128,7 @@ public struct ProgramSpec: Sendable {
         look: String,
         gpu: GPUProgram,
         board: Board,
-        display: DisplayHints,
-        reference: @escaping @Sendable (Board) -> any RowProgram
+        display: DisplayHints
     ) {
         self.id = id
         self.title = title
@@ -143,17 +137,11 @@ public struct ProgramSpec: Sendable {
         self.gpu = gpu
         self.board = board
         self.display = display
-        self.reference = reference
     }
-
-    /// A fresh CPU program for this entry's stored board. Deterministic, so it
-    /// is the entry point for the golden hashes and the CPU/GPU comparison.
-    public func makeProgram() -> any RowProgram { reference(board) }
 
     /// A copy whose `.rand` start draws from `seed`; a start that is not a
     /// random row is returned unchanged. Each CLI run calls this with a fresh
-    /// seed so re-choosing an entry gives a different picture, while
-    /// `makeProgram()` stays deterministic for the tests.
+    /// seed so re-choosing an entry gives a different picture.
     public func withRandomSeed(_ seed: UInt64) -> ProgramSpec {
         // A random row and injected randomness both redraw each run; an entry
         // that has neither is returned unchanged.
@@ -173,7 +161,7 @@ public struct ProgramSpec: Sendable {
                              start: start, injection: injection)
         return ProgramSpec(
             id: id, title: title, behavior: behavior, look: look,
-            gpu: gpu, board: reseeded, display: display, reference: reference)
+            gpu: gpu, board: reseeded, display: display)
     }
 
     public var stateCount: Int {

@@ -88,7 +88,7 @@ the file that owns it ("see `Core/Catalog/README.md`") rather than restating it.
 `Core/Agent/SystemPrompt.swift` are two views of one prompt. The artifact is
 the human-readable reference, the Swift is what runs, and nothing generates one
 from the other. A change to either side must be mirrored by hand in the same
-change, along with the affected tests, counts, READMEs, and golden hashes.
+change, along with the affected tests, counts, and READMEs.
 
 ## Build and test
 
@@ -146,11 +146,9 @@ change, along with the affected tests, counts, READMEs, and golden hashes.
 
 - Swift 6 strict. `Core` is `nonisolated` by default; `rater-cli`'s window
   code is `MainActor`. New Metal work must be confined to a dedicated
-  `RenderActor` on its own run loop; today `MetalAutomaton` runs synchronously
-  on the caller
-  (remaining work — see `Core/Render/README.md`).
-- Never block the main thread. Model load, image decode/export, hashing, and
-  all GPU work run off-main; the main thread receives finished values.
+  `RenderActor` on its own run loop (see `Core/Render/README.md`).
+- Never block the main thread. Model load, image decode/export, and all GPU
+  work run off-main; the main thread receives finished values.
 
 ## Style
 
@@ -213,7 +211,6 @@ sentence did not earn its place.
 ## Reference sources
 
 - Inventory and rubric: `artifacts/`.
-- `uni03C0` conventions (transcript store, window): clone at
-  `/tmp/uni03C0`.
+- `uni03C0` window conventions: clone at `/tmp/uni03C0`.
 - `mlx-swift-lm` API: clone at `/tmp/mlx-swift-lm`. Verify API against the
   cloned source; never from memory.

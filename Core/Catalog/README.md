@@ -25,7 +25,7 @@ diverge.
   random row (`.random(seed:density:)`), `.randomBlocks(seed:)`, a repeated
   `.block([UInt8])`, or a `.seed(number:colors:)` written most-significant
   first from the center (inventory §1.4). `injection` adds the atlas's
-  continuously injected randomness on top of the start (see `Programs/README.md`).
+  continuously injected randomness on top of the start (see `Render/README.md`).
   Widths/heights are chosen per entry so
   a run fills the frame before it wraps; a start whose pattern would reach the
   ring edge needs a board wide enough for the run (inventory §1.1).
@@ -42,17 +42,13 @@ diverge.
 `ProgramSpec.look` is a one-sentence visual description. It is the matching text
 in the system prompt's automata listing and must stay one line.
 
-## `reference` and per-run seeds
+## Per-run seeds
 
-`ProgramSpec.reference` is a `(Board) -> any RowProgram`; the catalog routes it
-through `ProgramFactory`, the one place that maps a spec's
-`GPUProgram`/`Board` onto `ElementaryCA`/`TotalisticCA`/`K2R2CA`.
-`makeProgram()` builds from the stored board and is deterministic, so it is the
-entry point for the golden hashes and the CPU/GPU comparison.
+The seed row is built on the GPU by `MetalSimulation`'s `seed_row` kernel from
+the board's `BoardStart`; the catalog carries no CPU program.
 
 `ProgramSpec.withRandomSeed(_:)` returns a copy whose `.rand` start uses the
 given seed; any other start is returned unchanged. The CLI calls it once per run
-so re-showing a `.rand` entry gives a different picture (inventory §1.4),
-without moving the deterministic `makeProgram()` that the tests pin. It also
-reseeds an entry's `injection`, so an `.inject` entry redraws each run the same
-way.
+so re-showing a `.rand` entry gives a different picture (inventory §1.4). It
+also reseeds an entry's `injection`, so an `.inject` entry redraws each run the
+same way.

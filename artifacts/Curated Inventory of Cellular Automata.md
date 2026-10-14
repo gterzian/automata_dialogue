@@ -81,8 +81,8 @@ one-sentence description of how it looks.
   random between white-white and black-black.
 - **Injected randomness (`.inject`):** on top of any start, after every step
   one cell is overwritten with a pseudo-random value drawn from the entry's
-  seed. The draw is deterministic so the CPU reference and the GPU kernel agree
-  row for row; a fresh seed per run makes re-choosing the entry differ.
+  seed. The draw is deterministic for a given seed; a fresh seed per run makes
+  re-choosing the entry differ.
 - An id such as `E90.rand` names a rule together with a special starting row;
   entries without a suffix start from a single cell.
 

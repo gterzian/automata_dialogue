@@ -6,9 +6,9 @@ The pure agent logic: nothing here links MLX. The MLX VLM wrapper
 ## Per-input model
 
 Each submitted input is one self-contained run: system prompt, one user turn
-(image and optional text), then one plain-text answer. The full session history
-is shown in the transcript, but the model context holds only the current input,
-so latency is constant and the system prompt is a stable cacheable prefix.
+(image and optional text), then one plain-text answer. The model context holds
+only the current input, so latency is constant and the system prompt is a
+stable cacheable prefix.
 
 ## One answer, no tool call
 

@@ -1,8 +1,7 @@
 # Core
 
-AppKit-free foundation of the CLI: catalog, CPU reference programs, agent
-prompt/schema/dispatch logic, image import, transcript store, and the Metal
-render core. Built by SwiftPM for tests and the CLI.
+AppKit-free foundation of the CLI: catalog, agent prompt/parsing, image import,
+and the Metal render core. Built by SwiftPM for tests and the CLI.
 
 ## Constraints
 
@@ -18,13 +17,9 @@ render core. Built by SwiftPM for tests and the CLI.
 
 - `Catalog/` — the 111 `ProgramSpec` entries, behavior classes, GPU program
   descriptors, palettes, and the catalog index. See `Catalog/README.md`.
-- `Programs/` — CPU reference implementations and the PRNG. See
-  `Programs/README.md`.
 - `Agent/` — the `Choice` type, the plain-text answer parser, and
   system-prompt assembly. See `Agent/README.md`.
 - `Import/` — dragged-in image attachments and normalization to the model's
   512×512 input. See `Import/README.md`.
-- `Session/` — transcript entries, the append-only store, the streaming
-  refresh gate, and the height cache. See `Session/README.md`.
-- `Render/` — geometry, the frame-sink seam, the CPU reference renderer, and
-  the Metal 4 simulation core. See `Render/README.md`.
+- `Render/` — geometry, the frame-sink seam, and the Metal 4 simulation core.
+  See `Render/README.md`.

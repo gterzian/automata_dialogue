@@ -3,12 +3,11 @@ import Foundation
 
 /// Display geometry for the animating review window.
 ///
-/// `Fit` maps a whole board onto a still frame. The review window instead
-/// simulates a board much wider than the window (the reference visualizer runs
-/// one ten windows wide) and renders only a movable viewport into it, so the
-/// pattern keeps evolving after it leaves the first window and the view can pan
-/// to follow it. The `LayerRenderer` stretches the small cell grid over the
-/// whole drawable.
+/// The review window simulates a board much wider than the window (the
+/// reference visualizer runs one ten windows wide) and renders only a movable
+/// viewport into it, so the pattern keeps evolving after it leaves the first
+/// window and the view can pan to follow it. The `LayerRenderer` stretches the
+/// small cell grid over the whole drawable.
 public enum ViewportGeometry {
     /// Cell edge in points. The reference visualizer advances a cell every 4
     /// screen pixels; at the 2× scale a Retina display uses, 2 points is that
@@ -53,16 +52,4 @@ public enum ViewportGeometry {
         if case .rightmost = start { return maximum }
         return maximum / 2
     }
-}
-
-/// How a render core maps board columns onto display columns.
-public enum ColumnMapping: Sendable, Hashable {
-    /// Fit the whole board into the display (`Fit`): the still-image mapping
-    /// used by `CPUAutomatonRenderer` and the CLI's `render` command.
-    case fit
-    /// One board cell per display column at the current horizontal origin. The
-    /// review window uses this so the wide simulated board pans instead of
-    /// being downsampled. Only meaningful for a scrolling run, which keeps the
-    /// source rows a pan re-fits.
-    case window
 }

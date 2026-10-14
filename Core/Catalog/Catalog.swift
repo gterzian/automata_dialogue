@@ -68,8 +68,7 @@ public enum Catalog {
             look: look,
             gpu: gpu,
             board: board,
-            display: display,
-            reference: { ProgramFactory.make(gpu: gpu, board: $0) }
+            display: display
         )
     }
 
