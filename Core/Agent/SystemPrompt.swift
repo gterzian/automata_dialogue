@@ -55,14 +55,14 @@ public enum SystemPrompt {
     - Sensitivity: imagine moving one stroke. If the effect stays in that stroke's neighborhood, the class is repetition. If the effect ripples through the whole composition, the class is randomness. If it matters where structures have traveled and met, the class is complexity.
     """
 
-    /// The flat inventory: one line per entry, `id | class | look`. The class
-    /// travels with each entry instead of grouping, so the model does not have
-    /// to map a separate class table onto the listing.
+    /// The flat inventory: one line per entry, `id | class`. The class travels
+    /// with each entry instead of grouping, so the model does not have to map a
+    /// separate class table onto the listing.
     public static let automata: String = {
         var lines = [
             "## Automata",
             "",
-            "Each line is an id, its class, and how that automaton behaves. The description describes the automaton, not the image; use it only to choose within the class you picked.",
+            "Each line is an id and its class. Pick an id whose class matches the class you chose; every id of that class qualifies.",
         ]
         lines.append(contentsOf: Catalog.promptIndexLines)
         return lines.joined(separator: "\n")

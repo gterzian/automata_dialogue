@@ -35,24 +35,28 @@ relies on and keeps the build independent of the macro plugin. When bumping
 - Thinking is off (`additionalContext: ["enable_thinking": false]`), so the
   model does not spend tokens on a reasoning preamble before its `id:` line.
 - The container is loaded once and shared; a failed load is retried on the next
-  run. Load runs off the main actor.
+  run. Load runs off the main actor. `AgentEngine.prepare()` starts that load so
+  the first run pays only prefill and generation; it is best-effort, since the
+  run retries and reports the error.
 
 ## Run
 
 `AgentEngine.perform` loads the shared container, builds a fresh `ChatSession`
 with the immutable system prompt, thinking off, and the tool list omitted, then
-calls `respond(to:image:)` once. There is no tool dispatch and no second
-generation round. It emits the whole answer as `.text`, then the parsed
-`.choice`, or `.failed` when no catalog id appears; the parser is
-`Core/Agent`'s `ChoiceParser`. If the first answer names no catalog id, the
-engine appends a correction and asks once more (the session still holds the
-image); only a second miss fails the run.
+calls `streamDetails` once. There is no tool dispatch and no tool-dispatch round.
+It emits the whole answer as `.text`, one `.metrics` event per generation pass
+(prompt and generation token counts and times), then the parsed `.choice`, or
+`.failed` when no catalog id appears; the parser is `Core/Agent`'s
+`ChoiceParser`. If the first answer names no catalog id, the engine appends a
+correction and asks once more (the session still holds the image); only a second
+miss fails the run.
 
 ## Remaining work
 
-- Model choice is a heuristic, not settled. On the six `artifacts/example_*.png`
-  with the no-repeat window, `Qwen3.5-4B-MLX-4bit` was the smallest model that
-  held up (6/6 then 5/6, six distinct ids). `Qwen3.5-2B-6bit` is smaller but
+- Model choice is a heuristic, not settled. On the `artifacts/example_*.png`
+  reference set with the no-repeat window, `Qwen3.5-4B-MLX-4bit` was the
+  smallest model that held up (6/6 then 5/6, six distinct ids).
+  `Qwen3.5-2B-6bit` is smaller but
   fails to name a usable id once the exclusion list is present;
   `gemma-4-e2b-it-4bit` is larger and weaker; `Qwen3.5-9B-4bit` is accurate but
   too slow. Re-check when the prompt or an example changes.

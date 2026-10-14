@@ -16,10 +16,12 @@ public enum Catalog {
 
     public static func spec(id: String) -> ProgramSpec? { byID[id] }
 
-    /// One line per entry: `id | class | look`. The system prompt embeds the
-    /// flat list, so each entry carries its class instead of being grouped.
+    /// One line per entry: `id | class`. The system prompt embeds the flat
+    /// list, so each entry carries its class instead of being grouped. The
+    /// `look` sentence stays in the table for the inventory sync but is not
+    /// submitted, keeping the prefill short.
     public static var promptIndexLines: [String] {
-        all.map { "\($0.id) | \($0.behavior.rawValue) | \($0.look)" }
+        all.map { "\($0.id) | \($0.behavior.rawValue)" }
     }
 
     public static func count(of behavior: Behavior) -> Int {

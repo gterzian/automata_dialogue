@@ -79,11 +79,16 @@ func printUsage() -> Never {
       catalog                         print the catalog and prompt index
       rate <path|dir> ...               run the MLX agent over reference images
         a directory contributes its top-level images; the batch cycles
-        options: --model <dir> [--quiet] [--show-prompt]
+        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
         Enter shows each image, submits it on the next Enter, then scrolls the
         chosen automaton until Enter advances to the next image. Closing the
         window stops the run.
         (--model default: RATER_MODEL_PATH; downloads are disabled)
+      bench <path|dir> ...              time the agent on the images, headless
+        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
+        Runs each image once with no window or automaton and prints the prompt
+        and generation cost, so a prompt or model change can be measured from
+        a terminal script.
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
@@ -434,6 +439,14 @@ func rateSetup() -> RateSetup {
         configuration.modelDirectory = URL(
             fileURLWithPath: NSString(string: model).expandingTildeInPath, isDirectory: true)
     }
+    if let raw = flags["image-size"] {
+        guard let size = Int(raw), size > 0 else {
+            FileHandle.standardError.write(
+                Data("rate: --image-size must be a positive integer\n".utf8))
+            exit(2)
+        }
+        configuration.imageDimension = size
+    }
     guard let directory = configuration.modelDirectory else {
         FileHandle.standardError.write(Data(
             "rate: no local model; pass --model <dir> or set RATER_MODEL_PATH (network downloads are disabled)\n".utf8))
@@ -477,6 +490,8 @@ struct RateOutcome: Sendable {
     let seconds: String
     let choice: Choice?
     let failure: String?
+    /// One entry per generation pass; a repair turn adds a second entry.
+    let metrics: [GenerationMetrics]
 }
 
 /// Runs the agent over one image. The engine carries the recent-choice window
@@ -485,6 +500,7 @@ func rateOne(
     engine: AgentEngine,
     path: String,
     directory: URL,
+    dimension: Int,
     verbose: Bool
 ) async -> RateOutcome {
     let url = URL(fileURLWithPath: path)
@@ -492,14 +508,16 @@ func rateOne(
     var response = ""
     var choice: Choice?
     var failure: String?
+    var metrics: [GenerationMetrics] = []
     do {
-        // Normalize to the model's 512×512 input so an oversized or malformed
+        // Normalize to the model's input size so an oversized or malformed
         // image never reaches the preprocessor's far larger edge limits.
-        let normalized = try ImageImport.normalize(url, into: directory)
+        let normalized = try ImageImport.normalize(url, into: directory, dimension: dimension)
         if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
         for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {
             switch event {
             case .text(let text): response = text
+            case .metrics(let pass): metrics.append(pass)
             case .choice(let picked): choice = picked
             case .failed(let message): failure = message
             case .finished: break
@@ -510,13 +528,22 @@ func rateOne(
     }
     let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
     if verbose {
+        for (index, pass) in metrics.enumerated() {
+            let turn = index == 0 ? "turn 1" : "turn \(index + 1) (repair)"
+            let promptSeconds = String(format: "%.2f", pass.promptTime)
+            let generateSeconds = String(format: "%.2f", pass.generationTime)
+            print(
+                "[debug] \(turn): prompt \(pass.promptTokenCount) tokens / \(promptSeconds)s, generation \(pass.generationTokenCount) tokens / \(generateSeconds)s")
+        }
         print("[debug] \(url.lastPathComponent) answer after \(seconds)s:")
         print(response.isEmpty ? "[debug]   (empty response)" : response)
         if let choice, let spec = Catalog.spec(id: choice.id) {
             print("[debug]   parsed \(choice.id) [\(spec.behavior.rawValue)] \(spec.title)")
         }
     }
-    return RateOutcome(name: url.lastPathComponent, seconds: seconds, choice: choice, failure: failure)
+    return RateOutcome(
+        name: url.lastPathComponent, seconds: seconds, choice: choice, failure: failure,
+        metrics: metrics)
 }
 
 /// Prints the `name<TAB>id<TAB>seconds` result line and returns the chosen
@@ -542,6 +569,17 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
 func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
+    // Load the weights while the first image is on screen. The first run then
+    // pays only prefill and generation, not the snapshot load. A failure is
+    // logged but not fatal: the run retries and reports it again.
+    Task {
+        do {
+            try await engine.prepare()
+        } catch {
+            FileHandle.standardError.write(
+                Data("rate: model preload failed: \(error.localizedDescription)\n".utf8))
+        }
+    }
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     var chosen = 0
@@ -556,7 +594,9 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             await presenter.waitForEnter()
             if presenter.isClosed { break }
             await presenter.showThinking()
-            let outcome = await rateOne(engine: engine, path: path, directory: directory, verbose: setup.verbose)
+            let outcome = await rateOne(
+                engine: engine, path: path, directory: directory,
+                dimension: setup.configuration.imageDimension, verbose: setup.verbose)
             await presenter.stopThinking()
             shown += 1
             if let spec = printRateOutcome(outcome) {
@@ -575,6 +615,45 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     await presenter.shutdownIndicator()
     ImageImport.removeSessionDirectory(for: sessionID)
     print("\n\(chosen)/\(shown) chosen")
+}
+
+/// Headless inference timing: run the agent once per image with no window and
+/// no automaton, then print the prompt and generation cost plus a total.
+/// `rate` is the product flow; this is the measurement path for a prompt or
+/// model change, where the interactive Returns of `rate` would block a script.
+func runBench(_ setup: RateSetup) async {
+    printRateDebugHeader(setup)
+    let engine = AgentEngine(configuration: setup.configuration)
+    let sessionID = UUID()
+    let directory = ImageImport.sessionDirectory(for: sessionID)
+    var chosen = 0
+    var repairs = 0
+    var promptTokens = 0
+    var promptSeconds = 0.0
+    var generationTokens = 0
+    var generationSeconds = 0.0
+    for path in setup.paths {
+        let outcome = await rateOne(
+            engine: engine, path: path, directory: directory,
+            dimension: setup.configuration.imageDimension, verbose: setup.verbose)
+        if printRateOutcome(outcome) != nil { chosen += 1 }
+        for (index, pass) in outcome.metrics.enumerated() {
+            promptTokens += pass.promptTokenCount
+            promptSeconds += pass.promptTime
+            generationTokens += pass.generationTokenCount
+            generationSeconds += pass.generationTime
+            if index > 0 { repairs += 1 }
+        }
+    }
+    ImageImport.removeSessionDirectory(for: sessionID)
+    print("\n\(chosen)/\(setup.paths.count) chosen, \(repairs) repair turn(s)")
+    print(String(
+        format: "prompt: %d tokens / %.2fs (%.1f tok/s)",
+        promptTokens, promptSeconds, Double(promptTokens) / max(promptSeconds, 0.001)))
+    print(String(
+        format: "generation: %d tokens / %.2fs (%.1f tok/s)",
+        generationTokens, generationSeconds,
+        Double(generationTokens) / max(generationSeconds, 0.001)))
 }
 
 /// The windowed review: one screen-sized window, driven by Return. The review
@@ -648,6 +727,8 @@ case "catalog":
     printCatalog()
 case "rate":
     await runRateWindowed(rateSetup())
+case "bench":
+    await runBench(rateSetup())
 default:
     printUsage()
 }

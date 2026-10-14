@@ -5,9 +5,10 @@ becomes the input image for the next agent turn.
 
 ## Attachment lifecycle
 
-1. A drop provides a file `URL`. `ImageImport.normalize(_:into:)` decodes it,
-   scales it to **512×512** (the model's configured image size), and writes a
-   PNG into the session's temp folder:
+1. A drop provides a file `URL`. `ImageImport.normalize(_:into:dimension:)`
+   decodes it, scales it to a square of `dimension` pixels (512 by default,
+   overridable through the engine's `imageDimension`), and writes a PNG into
+   the session's temp folder:
    `<tmp>/Rater/<session-id>/drawing-<uuid>.png`.
 2. The caller holds an `ImageAttachment` (source name + normalized path).
 3. The agent receives that path as `AgentInput.imageURL`.

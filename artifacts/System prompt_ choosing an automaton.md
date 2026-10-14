@@ -4,9 +4,9 @@ Reference for `Core/Agent/SystemPrompt.swift`, which runs the prompt. The body
 below the rule is the exact prompt text; `SystemPrompt.build()` joins it with a
 generated automata listing in place of the `<!-- AUTOMATA -->` marker. The
 automata list is not repeated here: `SystemPrompt.automata` builds it from
-`Catalog.promptIndexLines`, one line per entry as `id | class | look` (the same
-entries as `Curated Inventory of Cellular Automata.md`). Nothing generates one
-file from the other, so edit both by hand and keep them in sync.
+`Catalog.promptIndexLines`, one line per entry as `id | class` (the same entries
+as `Curated Inventory of Cellular Automata.md`). Nothing generates one file
+from the other, so edit both by hand and keep them in sync.
 
 ---
 
@@ -45,7 +45,7 @@ Signals, checked in this order:
 
 ## Automata
 
-Each line is an id, its class, and how that automaton behaves. The description describes the automaton, not the image; use it only to choose within the class you picked.
+Each line is an id and its class. Pick an id whose class matches the class you chose; every id of that class qualifies.
 <!-- AUTOMATA -->
 
 ## How to answer

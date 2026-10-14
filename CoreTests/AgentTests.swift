@@ -13,9 +13,18 @@ final class SystemPromptTests: XCTestCase {
         let prompt = SystemPrompt.build()
         for spec in Catalog.all {
             XCTAssertTrue(
-                prompt.contains("\(spec.id) | \(spec.behavior.rawValue) | \(spec.look)"),
+                prompt.contains("\(spec.id) | \(spec.behavior.rawValue)"),
                 "prompt is missing the class line for \(spec.id)"
             )
+        }
+    }
+
+    /// The `look` sentence stays out of the submitted prompt: it is the bulk of
+    /// the catalog and the class, not the look, is what the model must match.
+    func testPromptOmitsTheLookSentences() {
+        let prompt = SystemPrompt.build()
+        for spec in Catalog.all where !spec.look.isEmpty {
+            XCTAssertFalse(prompt.contains(spec.look), "prompt still carries the look for \(spec.id)")
         }
     }
 
@@ -50,7 +59,7 @@ final class SystemPromptTests: XCTestCase {
 
     func testPrefixStaysWithinBudget() {
         let tokens = SystemPrompt.estimatedTokenCount(of: SystemPrompt.build())
-        XCTAssertLessThan(tokens, 5000, "system prompt is larger than the ~4k budget")
+        XCTAssertLessThan(tokens, 2500, "system prompt is larger than the ~1k budget")
     }
 
     /// The rubric must separate randomness from complexity: class 3 can show

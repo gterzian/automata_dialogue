@@ -10,7 +10,7 @@ diverge.
 - 111 entries, unique ids, in the inventory's order.
 - Behavior counts: **repetition 29, nesting 28, randomness 40, complexity 14**.
 - Every id appears in `Catalog.ids`, and `Catalog.promptIndexLines` is generated
-  from the same table as `id | class | look`.
+  from the same table as `id | class`.
 
 ## Types
 
@@ -39,8 +39,11 @@ diverge.
 
 ## `look`
 
-`ProgramSpec.look` is a one-sentence visual description. It is the matching text
-in the system prompt's automata listing and must stay one line.
+`ProgramSpec.look` is a one-sentence visual description that stays in sync with
+the inventory artifact (`testInventoryMatchesCatalog`). It is not submitted in
+the system prompt, which lists only `id | class`: the class is what the model
+matches, and keeping the 111 sentences out of the prompt holds the prefill to
+~1k tokens. It must stay one line.
 
 ## Per-run seeds
 

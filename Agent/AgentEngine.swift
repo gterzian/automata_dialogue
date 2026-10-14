@@ -23,9 +23,10 @@ public enum AgentEngineError: Error, LocalizedError {
 /// constant and the prompt prefix is cacheable. The model container is loaded
 /// once and shared across runs.
 ///
-/// There is no tool call and no second generation round: the model replies with
-/// an `id:` line, and `ChoiceParser` reads the chosen entry out of the text. A
-/// reply without a catalog id fails the run.
+/// There is no tool call and no tool-dispatch round: the model replies with an
+/// `id:` line, and `ChoiceParser` reads the chosen entry out of the text. A
+/// reply without a catalog id gets one repair turn; a second miss fails the
+/// run.
 public actor AgentEngine: AgentRunning {
     public struct Configuration: Sendable {
         /// The local Hugging Face snapshot directory to load. Models are never
@@ -34,17 +35,23 @@ public actor AgentEngine: AgentRunning {
         public var modelDirectory: URL?
         public var maxTokens: Int
         public var temperature: Float
+        /// The square side, in pixels, the image is resized to before the model
+        /// sees it. Qwen3.5 turns this into `(side / 32)²` vision tokens, so
+        /// 512 costs 256 prompt tokens. See `Core/Import/README.md`.
+        public var imageDimension: Int
         public var tokenizerLoader: any TokenizerLoader
 
         public init(
             modelDirectory: URL? = nil,
-            maxTokens: Int = 900,
+            maxTokens: Int = 100,
             temperature: Float = 0.2,
+            imageDimension: Int = 512,
             tokenizerLoader: any TokenizerLoader = HuggingFaceBridges.tokenizerLoader()
         ) {
             self.modelDirectory = modelDirectory
             self.maxTokens = maxTokens
             self.temperature = temperature
+            self.imageDimension = imageDimension
             self.tokenizerLoader = tokenizerLoader
         }
 
@@ -83,6 +90,13 @@ public actor AgentEngine: AgentRunning {
         self.configuration = configuration
     }
 
+    /// Loads the shared container so the first `run` does not also pay the
+    /// weight load. The load is cached and a failure is retried, so a failed
+    /// preload is not fatal: the first `run` reports the error again.
+    public func prepare() async throws {
+        try await modelContainer()
+    }
+
     public nonisolated func run(_ input: AgentInput) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task { await self.perform(input, into: continuation) }
@@ -107,22 +121,31 @@ public actor AgentEngine: AgentRunning {
                     maxTokens: configuration.maxTokens,
                     temperature: configuration.temperature
                 ),
+                processing: UserInput.Processing(
+                    resize: CGSize(
+                        width: configuration.imageDimension,
+                        height: configuration.imageDimension)),
                 // Thinking is off, so the model answers instead of spending
                 // tokens on a reasoning preamble before the `id:` line.
                 additionalContext: ["enable_thinking": false]
             )
 
             let image = input.imageURL.map { UserInput.Image.url($0) }
-            var response = try await session.respond(to: prompt, image: image)
+            let first = try await answer(session, to: prompt, image: image)
+            var response = first.text
             var choice = Self.allowed(ChoiceParser.choice(from: response), excluding: excluded)
+            var passes = first.metrics.map { [$0] } ?? []
             // One repair turn if the model named no usable id (an unknown id,
             // or one the history excluded); the dispatcher-era repair, kept as
             // a single retry. The session still holds the image.
             if choice == nil, !response.isEmpty {
-                response = try await session.respond(to: Self.repairPrompt)
+                let repaired = try await answer(session, to: Self.repairPrompt, image: nil)
+                response = repaired.text
+                if let metrics = repaired.metrics { passes.append(metrics) }
                 choice = Self.allowed(ChoiceParser.choice(from: response), excluding: excluded)
             }
             if !response.isEmpty { continuation.yield(.text(response)) }
+            for metrics in passes { continuation.yield(.metrics(metrics)) }
 
             if let choice {
                 history.record(choice.id)
@@ -143,6 +166,37 @@ public actor AgentEngine: AgentRunning {
         return choice
     }
 
+    /// One generation pass over `prompt`; returns the full text and, when the
+    /// model reported it, the completion metrics. `image` is nil on the repair
+    /// turn because the session already holds the image from the first turn.
+    private func answer(
+        _ session: ChatSession,
+        to prompt: String,
+        image: UserInput.Image?
+    ) async throws -> (text: String, metrics: GenerationMetrics?) {
+        var text = ""
+        var metrics: GenerationMetrics?
+        for try await generation in session.streamDetails(
+            to: prompt, images: image.map { [$0] } ?? []
+        ) {
+            switch generation {
+            case .chunk(let chunk):
+                text += chunk
+            case .info(let info):
+                metrics = GenerationMetrics(
+                    promptTokenCount: info.promptTokenCount,
+                    cachedPromptTokenCount: info.cachedPromptTokenCount,
+                    generationTokenCount: info.generationTokenCount,
+                    promptTime: info.promptTime,
+                    generationTime: info.generateTime)
+            case .toolCall, .rejectedToolCall:
+                break
+            }
+        }
+        return (text, metrics)
+    }
+
+    @discardableResult
     private func modelContainer() async throws -> ModelContainer {
         if let containerTask {
             return try await containerTask.value

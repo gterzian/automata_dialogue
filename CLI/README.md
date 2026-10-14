@@ -5,12 +5,14 @@
 - `rater-cli rate <path|dir>...` — run the real MLX agent over reference
   drawings and print the chosen id and latency per image, then a summary table.
   A path may be an image file or a directory, in which case its top-level
-  images are rated (so `rate artifacts/` runs all six). Each image is
-  normalized to the model's 512×512 input through `Core/Import`. The engine
+  images are rated (so `rate artifacts/` runs every drawing in the folder).
+  Each image is normalized to the model's input through `Core/Import` (512×512
+  by default; `--image-size <px>` overrides it). The engine
   keeps its recent-choice window across the batch, so each image is asked to
   pick an automaton the earlier images did not. Debug
   output is on by default (the resolved model, the prompt
-  size, the model's raw answer, and the parsed class per image); `--quiet`
+  size, the per-turn prompt/generation token counts and seconds, the model's raw
+  answer, and the parsed class per image); `--quiet`
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
   on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`; see
@@ -35,6 +37,13 @@
   going off the top.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
+- `rater-cli bench <path|dir>...` — the headless measurement path. Runs the
+  agent once per image with no window or automaton, then prints each image's
+  prompt/generation token counts and seconds plus batch totals. `rate` is the
+  product flow; use `bench` to compare a prompt or model change from a script,
+  since `rate` blocks on Return. `--image-size <px>` sets the square input
+  dimension (default 512), so a single command sweeps the vision-token
+  tradeoff.
 - `rater-cli catalog` — print the catalog and the generated index.
 
 `catalog` is AppKit-free. `rate` links AppKit to host the window and drives

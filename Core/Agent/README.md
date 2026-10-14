@@ -12,7 +12,7 @@ stable cacheable prefix.
 
 ## One answer, no tool call
 
-There is no tool schema and no second generation round. The prompt asks for two
+There is no tool schema and no tool-dispatch round. The prompt asks for two
 lines:
 
 ```
@@ -42,16 +42,20 @@ accepted id.
 
 `SystemPrompt.build()` joins three parts into one immutable string: the four
 behavior classes described plainly, the flat catalog
-(`Catalog.promptIndexLines`, one line per entry as `id | class | look`), and the
+(`Catalog.promptIndexLines`, one line per entry as `id | class`), and the
 answer format. Each entry carries its own class instead of being grouped, so
 the model does not have to map a separate class table onto a listing. The string
-is identical on every run, so it is a cacheable prefix; keep `look` one line
-each.
+is identical on every run, so it is a cacheable prefix. The per-entry `look`
+sentence stays in `Catalog` for the inventory sync but is not submitted: the
+class is what the model matches, and the prompt's ~1k-token budget assumes the
+listing is `id | class`.
 
 ## Events
 
-`AgentEvent`: `.text` (the model's full answer, batched by the UI), `.choice`,
-`.finished`, `.failed`. `AgentInput` carries `text` and an optional `imageURL`.
+`AgentEvent`: `.text` (the model's full answer, batched by the UI), `.metrics`
+(one generation pass's prompt and generation token counts and times, so a repair
+turn shows as a second event), `.choice`, `.finished`, `.failed`. `AgentInput`
+carries `text` and an optional `imageURL`.
 
 ## Tests
 

@@ -36,6 +36,7 @@ public enum ImageImportError: Error, LocalizedError, Equatable {
 /// it into the session's temp folder. Pure CoreGraphics + ImageIO so `Core`
 /// stays AppKit-free.
 public enum ImageImport {
+    /// Default square side; the engine's `imageDimension` may override it.
     public static let modelDimension = 512
 
     /// `<tmp>/Rater/<session-id>/`
