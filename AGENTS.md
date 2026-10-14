@@ -90,6 +90,21 @@ the human-readable reference, the Swift is what runs, and nothing generates one
 from the other. A change to either side must be mirrored by hand in the same
 change, along with the affected tests, counts, and READMEs.
 
+### Keeping the chain sharp and current
+
+- Keep guidance general and durable. One-off implementation details belong in
+  the source or its tests, not in repository docs.
+- State a rule once, at the level that covers every subject of it, phrased as
+  an operational test rather than an adjective ("be clear" says nothing about
+  how to tell a violation from the allowed case). A rule's own examples must
+  obey it.
+- When a rule is tightened after a violation, collapse any duplicate or vaguer
+  restatement of it rather than adding another copy, and cross-reference the
+  one sharp statement from the places that used to state it.
+- When editing a README, check whether the same fact now also lives above it
+  in the chain; if so, collapse to one copy at the level the placement
+  invariant dictates.
+
 ## Build and test
 
 - **`xcodebuild` does not work in this sandbox.** Build and test with SwiftPM:
@@ -152,8 +167,10 @@ change, along with the affected tests, counts, and READMEs.
 
 ## Style
 
-- Comments explain *why*, not *what*. Cite the inventory when a constant or
-  rule comes from there.
+- Comments explain *why*, not *what*, and never restate the item they sit on.
+  Cite the inventory when a constant or rule comes from there.
+- Prefer descriptive names. A single letter is fine only where a tight scope
+  makes it unambiguous (a loop index, a color channel).
 - Keep additions small and tested.
 
 ## README documentation policy
@@ -179,8 +196,9 @@ sentence did not earn its place.
 - Never assume a test failure is pre-existing. Every failure is a regression
   until proven otherwise; establish the baseline from committed code, not a
   guess.
-- Document only verified facts. Do not speculate about causes or fixes; state
-  what was observed, what was tried, and what was ruled out.
+- Document only verified facts, in neutral factual language. Do not speculate
+  about causes or fixes; state what was observed, what was tried, and what was
+  ruled out.
 - Never silently discard an error: no bare `try?` for a fallible operation
   whose failure matters, and no `let _ =` to silence a result. Log or propagate
   it. `try?` is allowed only when the missing value carries no diagnostic
@@ -188,9 +206,28 @@ sentence did not earn its place.
 - Name files by domain concept; no `Utils.swift` / `Helpers.swift` catch-alls.
 - Remove unused bindings; never silence a warning with `_`-prefixed names or
   `let _ =`.
-- Describe code as it is now. No migration or design-history narration; a
-  comment earns its place by carrying a reason the code cannot show, not by
-  paraphrasing the code around it.
+- Describe code as it is now. Never refer to an earlier design, a state that
+  never existed, or a change not present in the repository: no "previously",
+  "no longer", "now uses X instead of Y", no counterfactual ("would
+  otherwise…"), and no justification by what the code does not do. Name an
+  entity as it is at the point of the code, and state what changed concretely
+  or what the current state is — never an alternative that was never taken.
+  Operational test: if deleting the clause leaves the sentence complete and
+  accurate, it only contrasted with history.
+- Every `unsafe` block and every unchecked claim (`withUnsafe…` access that
+  reads or writes raw memory, `@unchecked Sendable`, `unsafeBitCast`) states
+  the precondition it relies on in a `// SAFETY:` comment, and asserts that
+  precondition when the check is O(1). An unchecked claim that cannot be
+  justified in writing is a bug.
+- Avoid `!` force-unwraps and `try!`: they are unhandled failures. Propagate
+  with `try`, or handle the missing case. Force only behind an invariant
+  proven at that point, and name the invariant. Test code may force after an
+  explicit check such as `XCTUnwrap`.
+- Remove development-time tracing and temporary debug output when the work
+  lands; keep only instrumentation that serves ongoing diagnosis.
+- Edit source with targeted edits, not scripts or bulk renames. A scripted
+  rewrite hides intent, breaks blame and review, and drifts from the code
+  around it.
 - `grep`/`find` only within the repository and only narrowly; never walk large
   system directories (`~/Library`, caches, `.build`, `/tmp` clones). Read
   large compiler/test logs with the `read` tool or a single narrow `grep`;
@@ -202,11 +239,22 @@ sentence did not earn its place.
 
 1. Build and test: `swift build --disable-sandbox -c release` and `swift test
    --disable-sandbox`; fix warnings and failures.
-2. Apply the README deletion test to every subtree touched.
-3. Review the work against Rule Number One (actions relate to a coding task in
+2. Double-check the work for completeness and accuracy. Search the whole repo,
+   not only the files you touched, for dangling references to anything you
+   removed or renamed; confirm every call site, test, and doc is updated;
+   re-read `git diff HEAD` for stray debug code and for wording that refers to
+   an earlier design or a state that never existed; and confirm each claimed
+   behavior has a call site and a test. State what you verified.
+3. Apply the README deletion test to every subtree touched.
+4. Record general lessons. When the session surfaced a general rule (a
+   pitfall, a convention, a repeated mistake), add it to the README that owns
+   that subtree, or here if it is repo-wide — once, at the level the placement
+   invariant dictates, with an operational test.
+5. Review the work against Rule Number One (actions relate to a coding task in
    this repository).
-4. If asked for a commit message, propose one for `git diff HEAD`. Never
-   include a `Signed-off-by` trailer; it is added automatically.
+6. Suggest a commit message for `git diff HEAD` (run `git diff --stat HEAD`
+   and read `git diff HEAD` first). Never include a `Signed-off-by` trailer;
+   it is added automatically.
 
 ## Reference sources
 
