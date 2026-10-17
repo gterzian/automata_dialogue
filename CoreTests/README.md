@@ -17,10 +17,14 @@ What must be covered:
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle.
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
   frames, and advances on clock ticks; the pacing math; (Metal 4 only) the GPU
-  seed shapes, a growing run, and the window follow.
+  seed shapes, a growing run, the window follow, a zoom refit, and zoom's grid
+  resize.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
-  and the centred or rightmost start origin.
+  the centred or rightmost start origin, and the visible span under zoom.
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
-  palette colour, and the sink serializes frames that share buffers.
-- **Working indicator** — (Metal 4 only) the rings draw over the background and
-  a different `time` paints a different frame.
+  palette colour, a renderer handles a grid resize, and the sink serializes
+  frames that share buffers.
+- **Collapse intro** — the ten-second timeline freezes on its final frame;
+  (Metal 4 only) the discs and rays draw, different times paint different
+  frames, the ending goes mostly black, and the black field then shrinks into a
+  bare white page.

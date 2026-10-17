@@ -1,7 +1,7 @@
 import Foundation
 import QuartzCore
 
-/// Owns the Metal objects for the "working" indicator on a dedicated run loop,
+/// Owns the Metal objects for the collapse intro on a dedicated run loop,
 /// the way `RenderActor` does for a run. `start(layer:)` creates the GPU
 /// context on the render thread and adds the display link there, so drawable
 /// acquisition, the draw, and `present` all stay off the main thread.
@@ -18,9 +18,9 @@ public actor IndicatorActor {
 
     public init() {}
 
-    /// Starts the animation on `layer`, creating the GPU context on first use.
-    /// Reusing the same layer only restarts the clock, so the shader pipeline
-    /// is not recompiled for every run.
+    /// Starts the intro on `layer`, creating the GPU context on first use.
+    /// Reusing the same layer only restarts the clock, so the pipeline is not
+    /// recompiled for every run.
     public func start(layer: CAMetalLayer) throws {
         if context == nil {
             context = try GPUContext()

@@ -55,9 +55,10 @@ final class FrameSlotRing {
 /// the whole board in one commit.
 ///
 /// The run is a window over a board much wider than the display: it keeps only
-/// the newest `rows + 2` source rows in a ring and maps display row `d` to
-/// source step `step - (rows - 1) + d`, so a short board grows from the top and
-/// then the window follows the newest row without an end.
+/// the newest `capacity` source rows in a ring and maps display row `d` to a
+/// source step at or before the newest one, so a short board grows from the top
+/// and then the window follows the newest row without an end. `setZoom` resizes
+/// the display grid and the viewport, reusing the same ring and color buffer.
 @available(macOS 26.0, *)
 public final class MetalSimulation {
     private struct StepParams {
@@ -90,10 +91,16 @@ public final class MetalSimulation {
     }
 
     public let spec: ProgramSpec
-    public let cols: Int
-    public let rows: Int
+    /// Current display grid, resized by `setZoom`.
+    public private(set) var cols: Int
+    public private(set) var rows: Int
+    /// Grid at zoom 1; a zoom scales it.
+    private let baseCols: Int
+    private let baseRows: Int
     /// First source column the window shows, clamped to `maxViewportOrigin`.
     public private(set) var viewportOrigin: Int
+    /// Display cells per board cell; see `ViewportGeometry.minimumZoom`.
+    public private(set) var zoom = 1.0
     /// True once the caller pans by hand; the entry's follow then stops for the
     /// rest of the run.
     private var userPanned = false
@@ -101,15 +108,15 @@ public final class MetalSimulation {
     private var step = 0
 
     /// The origin a `reseed` returns to (rightmost for a right-pinned entry).
-    private let startOrigin: Int
+    private var startOrigin: Int
 
     private let context: GPUContext
     private let width: Int
     /// The board the run simulates. Wider than the catalog board when the
     /// review window needs room to pan; see `ViewportGeometry.boardWidth`.
     private let board: Board
-    /// Source rows the history ring holds; a step indexes it modulo this. It is
-    /// only ever a little larger than the window.
+    /// Source rows the history ring holds; a step indexes it modulo this. Sized
+    /// for the widest zoom-out so zooming never reallocates the ring.
     private let capacity: Int
     private let history: any MTLBuffer
     private let colorBuffer: any MTLBuffer
@@ -143,10 +150,16 @@ public final class MetalSimulation {
         let runBoard = board ?? spec.board
         let width = runBoard.width
         let device = context.device
-        let capacity = displayRows + 2
+        // Size the ring and the grid for the widest zoom-out, so a zoom later
+        // never reallocates the buffers or rebinds the fit table.
+        let maxCols = ViewportGeometry.zoomedColumns(
+            baseCols: displayCols, zoom: ViewportGeometry.minimumZoom)
+        let maxRows = ViewportGeometry.zoomedRows(
+            baseRows: displayRows, zoom: ViewportGeometry.minimumZoom)
+        let capacity = maxRows + 2
 
         guard let history = device.makeBuffer(length: max(1, capacity * width), options: .storageModeShared),
-              let colorBuffer = device.makeBuffer(length: displayCols * displayRows, options: .storageModeShared),
+              let colorBuffer = device.makeBuffer(length: max(1, maxCols * maxRows), options: .storageModeShared),
               let stepBuffer = device.makeBuffer(length: MemoryLayout<StepParams>.stride, options: .storageModeShared),
               let viewBuffer = device.makeBuffer(length: MemoryLayout<ViewParams>.stride, options: .storageModeShared),
               let seedBuffer = device.makeBuffer(length: MemoryLayout<SeedParams>.stride, options: .storageModeShared),
@@ -177,6 +190,8 @@ public final class MetalSimulation {
         self.spec = spec
         self.cols = displayCols
         self.rows = displayRows
+        self.baseCols = displayCols
+        self.baseRows = displayRows
         self.context = context
         self.width = width
         self.board = runBoard
@@ -231,6 +246,26 @@ public final class MetalSimulation {
         setOrigin(viewportOrigin + delta)
     }
 
+    /// Resizes the display grid for `value`, keeping the board column at the
+    /// viewport's centre fixed. Clamped to `ViewportGeometry`'s bounds; the
+    /// caller re-fits (`renderGPU(chunk: 0)`) to show the new view.
+    public func setZoom(_ value: Double) {
+        let clamped = min(max(value, ViewportGeometry.minimumZoom), ViewportGeometry.maximumZoom)
+        guard clamped != zoom else { return }
+        let centre = Double(viewportOrigin) + Double(cols) / 2
+        zoom = clamped
+        cols = ViewportGeometry.zoomedColumns(baseCols: baseCols, zoom: clamped)
+        rows = ViewportGeometry.zoomedRows(baseRows: baseRows, zoom: clamped)
+        startOrigin = ViewportGeometry.initialOrigin(
+            boardWidth: width, cols: cols, start: board.start, pinRight: spec.display.pinRight)
+        viewportOrigin = min(
+            max(0, Int((centre - Double(cols) / 2).rounded())), maxViewportOrigin)
+        viewParams.displayCols = UInt32(cols)
+        viewParams.displayRows = UInt32(rows)
+        viewParams.viewportOrigin = UInt32(viewportOrigin)
+        memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
+    }
+
     private func setOrigin(_ origin: Int) {
         let clamped = min(max(0, origin), maxViewportOrigin)
         guard clamped != viewportOrigin else { return }
@@ -283,9 +318,13 @@ public final class MetalSimulation {
         memset(colorBuffer.contents(), 0, cols * rows)
         step = 0
         userPanned = false
+        startOrigin = ViewportGeometry.initialOrigin(
+            boardWidth: width, cols: cols, start: start, pinRight: spec.display.pinRight)
         viewportOrigin = startOrigin
-        viewParams.viewportStart = 0
         viewParams.currentStep = 0
+        viewParams.viewportStart = 0
+        viewParams.displayCols = UInt32(cols)
+        viewParams.displayRows = UInt32(rows)
         viewParams.viewportOrigin = UInt32(startOrigin)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
 

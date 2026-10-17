@@ -188,4 +188,23 @@ final class RenderActorTests: XCTestCase {
         XCTAssertEqual(sink.frames.count, 3)
         await actor.shutdown()
     }
+
+    /// `setZoom` refits the run and delivers the new frame, so the View menu and
+    /// the pinch both go through the actor.
+    func testSetZoomDeliversARefittedFrame() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let sink = RecordingSink()
+        let actor = RenderActor()
+        _ = try await actor.configure(spec: spec, cols: 40, rows: 20, sink: sink)
+        XCTAssertEqual(sink.frames.count, 1)
+
+        await actor.setZoom(2)
+        XCTAssertEqual(sink.frames.count, 2)
+        let error = await actor.lastError
+        XCTAssertNil(error)
+        await actor.shutdown()
+    }
 }

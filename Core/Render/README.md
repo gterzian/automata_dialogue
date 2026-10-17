@@ -16,11 +16,14 @@ One frame is a batch of dispatches plus a render pass, with explicit barriers.
    SplitMix64 draw is indexed by cell, not carried across threads.
 2. **Advance the board** (`step_eca`/`step_totalistic`/`step_k2r2` plus
    `bump_head`): each step reads the row at a GPU-side `head` counter and writes
-   the next row into a ring of the newest `rows + 2` rows. `injection`
+   the next row into a ring of the newest `capacity` rows (sized for the widest
+   zoom-out). `injection`
    overwrites the centre cell after each step.
 3. **Clip to the window** (`fit`): display row `d` reads source step
    `step - (rows - 1) + d` at column `viewportOrigin + d`; rows the run has not
-   reached stay background, so a short board grows from the top.
+   reached stay background, so a short board grows from the top. Zoom changes
+   `displayCols`/`displayRows` (and the drawable), so the same one-cell-per-cell
+   mapping shows more or fewer board cells.
 4. **Draw** (`LayerRenderer`): `runs` compacts each same-colour non-background
    run into a `Span`, `encode_draw` writes the indirect draw arguments on the
    GPU, and the render pass clears to the background and draws one instanced
@@ -37,6 +40,13 @@ that edge at the boundary. A manual pan aborts the follow for the rest of the
 run (a `restart` restores it). E110 (left-growing, seed at the right edge)
 leaves the viewport fixed and lets the growth fill it.
 
+Zoom is a real window resize, not a resample: `setZoom` scales the display grid,
+its drawable, and the viewport together, so a zoomed-out view shows more board at
+native resolution instead of skipping cells (which aliases a fractal into a
+different-looking one). The history ring and color buffer are sized once for the
+widest zoom-out, so a zoom reuses them; the layer's span buffer only grows when a
+new maximum grid is reached.
+
 The two barriers are different: a **dispatch→dispatch** barrier separates the
 sequential step rows (row *n+1* reads the row *n* just wrote), and a
 **dispatch→vertex** barrier publishes the spans and draw arguments before the
@@ -45,6 +55,29 @@ than a threadgroup, tile halos would have to grow with the row count — so they
 are a batch of dispatches. A full `MTLIndirectCommandBuffer` is unnecessary: the
 command shape is constant and only the instance count varies, which the indirect
 argument buffer already carries.
+
+## Collapse intro
+
+`CollapseTimeline` drives the intro the review window shows while the model
+runs. It is a fixed ten-second timeline that freezes on its final frame, so the
+window rests on the white page if the model is still working.
+
+One full-resolution render pass (`collapse_fragment`) composites the whole
+sequence in draw order:
+
+1. A mottled mauve field, darkest at the corners.
+2. Large discs from a nine-entry list, drawn back to front. Each disc is white,
+   a shaded gradient, a ring, or a soft glow, with a dark rim and an optional
+   penumbra.
+3. Up to eight soft rays with their apexes at the center.
+4. The late starburst, 48 alternating dark and light wedges.
+5. The center discs and rings, which cover the rays where they converge.
+6. The final blackout, the shrinking black field, and the ink point.
+
+The CPU recomputes the disc/ray lists and the timeline uniforms each frame. The
+scene shader writes the drawable directly; there are no offscreen targets,
+upscale, or bloom passes. The renderer waits for the GPU before rewriting the
+shared uniform, disc, and ray buffers.
 
 ## What exists
 
@@ -68,17 +101,15 @@ argument buffer already carries.
   (`preferredFrameLatency = 1`); `LayerSink` owns the layer and the clock, and
   `LayerRenderer` turns a `GPUColorGrid` into a draw. The window refits every
   display row each frame, so every frame recompacts the whole grid.
-- **Working indicator** (`ShaderSource.indicator`, `IndicatorRenderer`,
-  `WorkingIndicator`, `IndicatorActor`) — the beating ring animation the review
-  window shows while the model runs: rings grow out to the edge and pull back
-  in. One full-screen triangle; the fragment shader paints the rings from a
-  `time` uniform. `IndicatorActor` owns the `GPUContext`, renderer, and
-  `DisplayLinkClock` on its own `RenderExecutor`, the way `RenderActor` does for
-  a run, and reuses the indicator and layer across runs so the pipeline compiles
-  once.
+- **Collapse intro** (`ShaderSource.collapse`, `CollapseRenderer`,
+  `CollapseTimeline`, `WorkingIndicator`, `IndicatorActor`) — the discs, rays,
+  starburst, and final shrink the review window shows while the model runs.
+  `IndicatorActor` owns the `GPUContext`, renderer, and `DisplayLinkClock` on
+  its own `RenderExecutor`, the way `RenderActor` does for a run, and reuses the
+  indicator and layer across runs so the pipeline compiles once.
 - **Viewport geometry** (`ViewportGeometry`) — the cell size, `cols`/`rows` for
-  a window, the ten-window board width, and the centred or right-pinned start
-  origin.
+  a window, the ten-window board width, the centred or right-pinned start
+  origin, the zoom bounds and levels, and the grid those levels produce.
 
 ## Metal 4 gotchas
 
@@ -119,22 +150,28 @@ argument buffer already carries.
 
 ## Remaining work
 
-- **The on-screen pipeline serializes every frame.** `MetalSimulation.commit`
-  and `LayerSink`'s layer commit both wait for the GPU, because the simulation's
-  color buffer and the renderer's span, counter, uniform, and palette buffers
-  are shared across frames and the frame slots only rotate the command
-  allocators. A 2-deep pipeline would need a per-slot copy of each shared
-  buffer.
+- **The collapse intro has a fixed timeline.** It does not track the model's
+  actual progress; Metal exposes no per-frame utilization figure. The ten-second
+  build carries the wait on its own, then holds its final white page.
+- **The on-screen pipeline serializes every frame.** `MetalSimulation.commit`,
+  `LayerSink`'s layer commit, and `CollapseRenderer.render` all wait for the
+  GPU, because their buffers are shared across frames and the frame slots only
+  rotate the command allocators. A deeper pipeline would need a per-slot copy of
+  each shared buffer and texture.
 
 ## Testing
 
 When `MTLCreateSystemDefaultDevice()` reports `.metal4`, `MetalTests` checks the
 `seed_row` kernel against every `BoardStart` shape, that a run grows from the
-seed, and that a followed pattern scrolls the window at the boundary.
+seed, that a followed pattern scrolls the window at the boundary, and that zoom
+resizes the grid without restarting the run.
 `RenderActorTests` asserts the actor runs off the main thread, delivers
-GPU-resident frames, advances on a clock tick, and restarts. `RenderTests`
+GPU-resident frames, advances on a clock tick, restarts, and refits on zoom.
+`RenderTests`
 pins the pan anchor (`leadColumn`) to each start shape. `LayerTests` reads the
-rendered texture back to check spans are filled with palette colours and
-that the sink serializes frames sharing buffers. `IndicatorTests` checks the
-beating rings draw over the background and change with `time`. The display-link
-presentation itself needs a screen and is not tested here.
+rendered texture back to check spans are filled with palette colours, that a
+renderer handles a grid resize, and that the sink serializes frames sharing
+buffers. `CollapseTests` checks the ten-second timeline freezes, that the discs
+and rays draw, and that the ending goes mostly black and then shrinks to a bare
+white page. The display-link presentation itself needs a screen and is not
+tested here.

@@ -110,4 +110,11 @@ public final class GPUContext {
         for buffer in buffers { residency.addAllocation(buffer) }
         residency.commit()
     }
+
+    /// Textures the renderer creates after its first frame (the intro's noise
+    /// volume) join the same residency set.
+    public func makeResident(_ textures: [any MTLTexture]) {
+        for texture in textures { residency.addAllocation(texture) }
+        residency.commit()
+    }
 }

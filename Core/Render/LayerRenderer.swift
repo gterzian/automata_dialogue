@@ -37,6 +37,8 @@ final class LayerRenderer {
     private struct Buffers {
         let cells: any MTLBuffer
         let spans: any MTLBuffer
+        /// Spans the buffer holds; a larger grid is only allocated when needed.
+        let spansCapacity: Int
         let counter: any MTLBuffer
         let arguments: any MTLBuffer
         let uniforms: any MTLBuffer
@@ -54,7 +56,6 @@ final class LayerRenderer {
     private let layerPipeline: any MTLRenderPipelineState
     private let ring: FrameSlotRing
     private var buffers: Buffers?
-    private var size: (cols: Int, rows: Int)?
 
     init(context: GPUContext, pixelFormat: MTLPixelFormat) throws {
         self.context = context
@@ -140,14 +141,18 @@ final class LayerRenderer {
     // MARK: - Private
 
     private func prepare(cols: Int, rows: Int, cells: any MTLBuffer) throws -> Buffers {
-        if let buffers, let size, size == (cols, rows), sameBuffer(buffers.cells, cells) {
+        let spanCapacity = max(1, cols * rows)
+        // The grid resizes with zoom but the color buffer does not, so a
+        // zoom-in reuses the spans and a zoom-out only grows them; a pinch does
+        // not reallocate every frame.
+        if let buffers, sameBuffer(buffers.cells, cells), buffers.spansCapacity >= spanCapacity {
             return buffers
         }
         let device = context.device
-        let spanCapacity = cols * rows
+        let capacity = max(spanCapacity, buffers?.spansCapacity ?? 0)
         var owned: [any MTLBuffer] = []
         guard let spans = device.makeBuffer(
-                length: max(1, spanCapacity) * MemoryLayout<Span>.stride, options: .storageModeShared
+                length: capacity * MemoryLayout<Span>.stride, options: .storageModeShared
               ),
               let counter = device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared),
               let arguments = device.makeBuffer(
@@ -167,6 +172,7 @@ final class LayerRenderer {
         let buffers = Buffers(
             cells: cells,
             spans: spans,
+            spansCapacity: capacity,
             counter: counter,
             arguments: arguments,
             uniforms: uniforms,
@@ -177,7 +183,6 @@ final class LayerRenderer {
             renderTable: try makeTable(device: device, addresses: [spans, uniforms, palette], count: 3)
         )
         self.buffers = buffers
-        self.size = (cols, rows)
         return buffers
     }
 

@@ -27,6 +27,22 @@ final class ViewportTests: XCTestCase {
         XCTAssertEqual(
             ViewportGeometry.initialOrigin(boardWidth: 321, cols: 800, start: .center, pinRight: false), 0)
     }
+
+    /// A zoom scales the display grid: in shrinks it, out grows it, and neither
+    /// dimension falls below one cell. The level snap keeps a gesture from
+    /// reallocating the span buffer on every frame.
+    func testZoomResizesTheGrid() {
+        XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 1), 800)
+        XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 2), 400)
+        XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 4), 200)
+        XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 0.5), 1600)
+        XCTAssertEqual(ViewportGeometry.zoomedRows(baseRows: 500, zoom: 2), 250)
+        XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 1, zoom: 4), 1)
+        XCTAssertEqual(ViewportGeometry.nearestZoom(1.3), 1.25)
+        XCTAssertEqual(ViewportGeometry.nearestZoom(3.0), 3.2)
+        XCTAssertEqual(ViewportGeometry.nearestZoom(0.1), ViewportGeometry.minimumZoom)
+        XCTAssertEqual(ViewportGeometry.nearestZoom(99), ViewportGeometry.maximumZoom)
+    }
 }
 
 /// The pan anchor is computed from the `BoardStart` (mirroring the GPU

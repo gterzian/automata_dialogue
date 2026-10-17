@@ -20,8 +20,13 @@
   image until Return,
   runs the model, scrolls the chosen automaton until the next Return, and
   cycles the images until the window is closed. While the model runs the
-  window shows `WorkingIndicator` (Metal beating rings) in place of the
-  image, so the wait is visibly "working". A `.rand` entry redraws from a
+  window shows the collapse intro (`CollapseTimeline`): a point grows into a
+  shaded disc, the frame whites out into nested discs and rays, a starburst
+  fills the frame, the frame goes black, and that black field shrinks into the
+  automaton's warm white page with a final ink point that shrinks away. The
+  ten-second sequence holds its last frame until inference finishes, and the
+  automaton is shown after the intro settles, so a fast model does not cut off
+  the ending. A `.rand` entry redraws from a
   fresh row each time. The window's drawable holds one cell per display column
   (`ViewportGeometry`), and the run simulates a board ten windows wide: the
   layer stretches a small cell grid over the whole window while the viewport
@@ -29,8 +34,10 @@
   leaves the first view and each Left/Right arrow moves the viewport ten
   columns. An entry whose pattern drifts sideways (see `DisplayHints.follow`)
   pans the viewport with it, so the pattern goes down and toward that side; a
-  Left/Right pan aborts that follow for the rest of the run. Escape restarts the
-  running automaton from a fresh seed; Up/Down
+  Left/Right pan aborts that follow for the rest of the run. A trackpad pinch
+  zooms the view from 0.5× to 4×, centred on the view, without restarting the
+  run; the View menu's Zoom In/Zoom Out/Actual Size (⌘+, ⌘−, ⌘0) use the same
+  path. Escape restarts the running automaton from a fresh seed; Up/Down
   raise or lower the growth rate (each press ×1.5). The run starts at 20 rows
   per second of wall time (`.timed`) and advances toward the bottom until the
   window fills, then scrolls with the newest row at the bottom and older rows

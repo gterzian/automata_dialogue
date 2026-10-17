@@ -110,10 +110,10 @@ final class MetalHostView: NSView {
 
     /// The drawable's texture size. The layer stretches it over the view, so a
     /// small size (the automaton's cell grid) gives blocky cells and a full-res
-    /// size (the working indicator) stays smooth. AppKit sets `contentsScale`
+    /// size (the collapse intro) stays smooth. AppKit sets `contentsScale`
     /// when the view enters the window, so the size is re-applied after layout
-    /// instead of set once.
-    private let targetDrawableSize: CGSize
+    /// instead of set once. The automaton editor changes it again on zoom.
+    private var targetDrawableSize: CGSize
 
     init(frame frameRect: NSRect, drawableSize: CGSize) {
         self.targetDrawableSize = drawableSize
@@ -138,20 +138,26 @@ final class MetalHostView: NSView {
         applyDrawableSize()
     }
 
+    /// Resizes the drawable, e.g. when the automaton's zoom changes the grid.
+    func setDrawableSize(_ size: CGSize) {
+        targetDrawableSize = size
+        applyDrawableSize()
+    }
+
     private func applyDrawableSize() {
         if let scale = window?.backingScaleFactor { metalLayer.contentsScale = scale }
         metalLayer.drawableSize = targetDrawableSize
     }
 }
 
-/// Presents one image, the working indicator, then one automaton, in a single
+/// Presents one image, the collapse intro, then one automaton, in a single
 /// screen-sized window using `Core/Render`'s on-screen path: a `RenderActor`
 /// owns a `LayerSink`, or an `IndicatorActor` a `WorkingIndicator`, over a
 /// `MetalHostView.metalLayer`. `showInput` holds the image until Return;
-/// `showThinking` shows the Metal rings while the model runs; `present` swaps
-/// the scrolling automaton into the same window and suspends until Return or
-/// close. The key monitor calls `submit()`; `NSApplication.run()` keeps
-/// delivering events while suspended.
+/// `showThinking` runs the collapse intro while the model works;
+/// `present` swaps the scrolling automaton into the same window and suspends
+/// until Return or close. The key monitor calls `submit()`; `NSApplication.run()`
+/// keeps delivering events while suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// Rows per second the growth starts at. The reference visualizer batches
@@ -166,12 +172,18 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     static let panColumns = 10
 
     private var scrollRowsPerSecond = AutomatonWindow.baseRowsPerSecond
+    private var runZoom = 1.0
+    /// Grid at zoom 1, kept so a zoom can resize both the simulation and the
+    /// drawable to match.
+    private var baseCols = 1
+    private var baseRows = 1
     private var window: NSWindow?
     private var host: MetalHostView?
     private var actor: RenderActor?
     private var sink: LayerSink?
     private var indicator: IndicatorActor?
     private var indicatorHost: MetalHostView?
+    private var thinkingStartedAt: CFTimeInterval?
     private var enterContinuation: CheckedContinuation<Void, Never>?
     private(set) var isClosed = false
 
@@ -205,10 +217,16 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         // view and the arrows have room to pan.
         let cols = ViewportGeometry.columns(size: contentSize)
         let rows = ViewportGeometry.rows(size: contentSize, cols: cols)
+        baseCols = cols
+        baseRows = rows
         let host = MetalHostView(
             frame: NSRect(origin: .zero, size: contentSize),
             drawableSize: CGSize(width: cols, height: rows))
         host.metalLayer.magnificationFilter = .nearest
+        // Pinch magnifies the viewport; the simulation re-fits on the render
+        // actor with the same grid, so the run is not disturbed.
+        host.addGestureRecognizer(
+            NSMagnificationGestureRecognizer(target: self, action: #selector(magnify(_:))))
 
         // A `.rand` entry draws a fresh row each time it is shown
         // (inventory §1.4).
@@ -220,6 +238,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             injection: runSpec.board.injection)
         // Each automaton starts at the slow base rate; the arrows tune it.
         scrollRowsPerSecond = Self.baseRowsPerSecond
+        runZoom = 1.0
         let actor = RenderActor()
         var made: LayerSink?
         do {
@@ -265,6 +284,48 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         Task { await actor.restart() }
     }
 
+    /// Magnifies the running automaton, as a pinch gesture reports it. A no-op
+    /// while no automaton is showing.
+    func adjustZoom(by magnification: CGFloat) {
+        setZoom(runZoom * (1 + Double(magnification)))
+    }
+
+    /// Sets the running automaton's zoom factor directly, used by the View
+    /// menu and the pinch. Clamped to `ViewportGeometry`'s bounds and snapped to
+    /// a level; a no-op while no automaton is showing.
+    func setZoom(_ zoom: Double) {
+        guard actor != nil, let host else { return }
+        runZoom = ViewportGeometry.nearestZoom(
+            min(max(zoom, ViewportGeometry.minimumZoom), ViewportGeometry.maximumZoom))
+        // The drawable matches the grid, so the enlarged view stays at native
+        // resolution instead of being subsampled.
+        host.setDrawableSize(CGSize(
+            width: ViewportGeometry.zoomedColumns(baseCols: baseCols, zoom: runZoom),
+            height: ViewportGeometry.zoomedRows(baseRows: baseRows, zoom: runZoom)))
+        Task { await actor?.setZoom(runZoom) }
+    }
+
+    /// Applies a pinch's accumulated magnification and clears it, so the next
+    /// update reports only the new movement.
+    @objc private func magnify(_ recognizer: NSMagnificationGestureRecognizer) {
+        let magnification = recognizer.magnification
+        recognizer.magnification = 0
+        adjustZoom(by: magnification)
+    }
+
+    /// The View menu's zoom commands; they use the same path as the pinch.
+    @objc func menuZoomIn(_ sender: Any?) {
+        setZoom(runZoom * 1.25)
+    }
+
+    @objc func menuZoomOut(_ sender: Any?) {
+        setZoom(runZoom / 1.25)
+    }
+
+    @objc func menuActualSize(_ sender: Any?) {
+        setZoom(1.0)
+    }
+
     /// Speeds the growth up or slows it down by one step; a no-op while no
     /// automaton is showing.
     func adjustSpeed(up: Bool) {
@@ -276,10 +337,12 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         Task { await actor.setPacing(pacing) }
     }
 
-    /// Shows the Metal "working" indicator (expanding rings) in the window
-    /// while the model runs. Replaces the current content; `present` or
-    /// `stopThinking` ends it. The indicator actor and its layer are reused
-    /// across runs, so the shader pipeline is compiled once.
+    /// Shows the collapse intro in the window while the model runs. A point
+    /// grows into a disc, the frame whites out into discs and rays, a starburst
+    /// fills it, and the black end shrinks into the automaton's warm white with
+    /// a final ink point. `present` or `stopThinking` ends it. The indicator
+    /// actor and its layer are reused across runs, so the shader pipeline is
+    /// compiled once.
     func showThinking() async {
         guard !isClosed, GPUContext.isAvailable else { return }
         let window = ensureWindow()
@@ -298,15 +361,34 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         indicator = actor
         do {
             try await actor.start(layer: host.metalLayer)
+            thinkingStartedAt = CACurrentMediaTime()
         } catch {
             print("rate: indicator failed: \(error.localizedDescription)")
         }
     }
 
+    /// Waits for the intro to reach its final white page, so a fast model does
+    /// not cut off the ending. The window stays responsive while it sleeps.
+    func waitForThinkingToSettle() async {
+        guard let started = thinkingStartedAt else { return }
+        let deadline = started + ReviewIntro.duration + 0.15
+        while !isClosed {
+            let remaining = deadline - CACurrentMediaTime()
+            if remaining <= 0 { return }
+            do {
+                try await Task.sleep(for: .seconds(min(remaining, 0.05)))
+            } catch {
+                return
+            }
+        }
+    }
+
     /// Pauses the "working" indicator; the actor is kept for the next run.
     func stopThinking() async {
+        thinkingStartedAt = nil
         await indicator?.stop()
     }
+
 
     /// Stops the running automaton, if any. The indicator actor and its GPU
     /// context stay alive for the next run.
@@ -342,9 +424,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// The indicator's drawable: full device pixels so the rings stay smooth,
-    /// capped so a large display does not run the fragment shader over tens of
-    /// millions of pixels.
+    /// The indicator's drawable: full device pixels so the discs and rays stay
+    /// smooth, capped so a large display does not run the fragment shader over
+    /// tens of millions of pixels.
     private func indicatorDrawableSize(contentSize: CGSize, scale: CGFloat) -> CGSize {
         let pixelWidth = max(1, Int(contentSize.width * scale))
         let pixelHeight = max(1, Int(contentSize.height * scale))
@@ -601,6 +683,7 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             let outcome = await rateOne(
                 engine: engine, path: path, directory: directory,
                 dimension: setup.configuration.imageDimension, verbose: setup.verbose)
+            await presenter.waitForThinkingToSettle()
             await presenter.stopThinking()
             shown += 1
             if let spec = printRateOutcome(outcome) {
@@ -699,10 +782,9 @@ func runClassify(_ setup: RateSetup) async {
 func runRateWindowed(_ setup: RateSetup) async {
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
-    installMainMenu(app)
-    app.finishLaunching()
-
     let presenter = AutomatonWindow()
+    installMainMenu(app, presenter: presenter)
+    app.finishLaunching()
     let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         if event.keyCode == 36 || event.keyCode == 76 {
             MainActor.assumeIsolated { presenter.submit() }
@@ -742,9 +824,10 @@ func runRateWindowed(_ setup: RateSetup) async {
     app.run()
 }
 
-/// The app menu with Quit, so Cmd-Q works while the review window is up.
+/// The app menu: Quit (Cmd-Q) plus View zoom commands, so the zoom is reachable
+/// without a trackpad pinch.
 @MainActor
-func installMainMenu(_ app: NSApplication) {
+func installMainMenu(_ app: NSApplication, presenter: AutomatonWindow) {
     let mainMenu = NSMenu()
     let appMenuItem = NSMenuItem()
     mainMenu.addItem(appMenuItem)
@@ -755,6 +838,24 @@ func installMainMenu(_ app: NSApplication) {
         keyEquivalent: "q"
     )
     appMenuItem.submenu = appMenu
+
+    let viewMenuItem = NSMenuItem()
+    mainMenu.addItem(viewMenuItem)
+    let viewMenu = NSMenu(title: "View")
+    let zoomIn = NSMenuItem(
+        title: "Zoom In", action: #selector(AutomatonWindow.menuZoomIn(_:)), keyEquivalent: "+")
+    zoomIn.target = presenter
+    viewMenu.addItem(zoomIn)
+    let zoomOut = NSMenuItem(
+        title: "Zoom Out", action: #selector(AutomatonWindow.menuZoomOut(_:)), keyEquivalent: "-")
+    zoomOut.target = presenter
+    viewMenu.addItem(zoomOut)
+    let actualSize = NSMenuItem(
+        title: "Actual Size", action: #selector(AutomatonWindow.menuActualSize(_:)),
+        keyEquivalent: "0")
+    actualSize.target = presenter
+    viewMenu.addItem(actualSize)
+    viewMenuItem.submenu = viewMenu
     app.mainMenu = mainMenu
 }
 

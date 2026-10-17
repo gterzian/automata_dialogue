@@ -180,9 +180,10 @@ public enum ShaderSource {
         history[gid] = value;
     }
 
-    // The window shows one board cell per display column at `viewportOrigin`.
+    // The window shows one board cell per display cell at `viewportOrigin`.
     // Rows the run has not reached yet stay background, so a short board grows
-    // from the top before it starts to scroll.
+    // from the top before it starts to scroll. Zoom changes `displayCols` and
+    // `displayRows`, not this mapping.
     kernel void fit(device const uchar* history [[buffer(0)]],
                     device uchar* colorGrid [[buffer(1)]],
                     constant ViewParams& p [[buffer(2)]],
@@ -288,69 +289,194 @@ public enum ShaderSource {
     }
     """
 
-    /// The "working" indicator the review window shows while the model runs:
-    /// expanding rings over the background, time-driven in the fragment shader
-    /// so no per-frame geometry is built on the CPU.
-    public static let indicator = """
+    /// The expanding-and-collapsing intro the review window shows while the
+    /// model runs: a point grows into a shaded disc, whites out, opens into
+    /// nested discs and rays, fills with a starburst, goes black, and shrinks
+    /// that black field into the final white page.
+    ///
+    /// Everything is drawn by one full-screen fragment shader: the mottled
+    /// field, the back discs, the rays, the starburst, the front bullseye, and
+    /// the final black-to-white shrink. No offscreen targets or upsample are
+    /// needed; the shader writes the drawable directly.
+    public static let collapse = """
     #include <metal_stdlib>
     using namespace metal;
 
-    struct IndicatorUniforms {
-        float time;      // seconds since the animation started
-        float aspect;    // drawable width / height
-        float thickness; // gaussian band width in radius units
-        float padding;
-        float4 background;
+    struct CollapseUniforms {
+        float time;
+        float aspect;
+        float screenHeight;
+        float fieldAlpha;
+        float burstAlpha;
+        float burstRotation;
+        float burstWidth;
+        float burstLight;
+        float blackout;
+        float shrinkMix;
+        float shrinkRadius;
+        float dotRadius;
+        float dotOpacity;
+        float noiseScale;
+        float smokeStrength;
+        float discCount;
+        float rayCount;
+        float4 white;
         float4 ink;
     };
 
-    struct IndicatorVertexOut {
+    struct CollapseDisc {
+        float radius;
+        float fillMode;      // 0 white, 1 shaded, 2 ring only, 3 soft glow
+        float rimWidth;
+        float rimDark;
+        float penumbraWidth;
+        float penumbraDark;
+        float opacity;
+        float layer;         // 0 behind the rays, 1 in front
+        float fillDark;
+    };
+
+    struct CollapseRay {
+        float angle;
+        float halfWidth;
+        float length;
+        float darkness;
+    };
+
+    struct FullscreenOut {
         float4 position [[position]];
         float2 uv;
     };
 
-    // A single oversized triangle covers the drawable; the fragment paints the
-    // rings from the interpolated coordinate.
-    vertex IndicatorVertexOut indicator_vertex(uint vid [[vertex_id]]) {
+    vertex FullscreenOut collapse_vertex(uint vid [[vertex_id]]) {
         float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
-        float2 position = positions[vid];
-        IndicatorVertexOut out;
-        out.position = float4(position, 0.0, 1.0);
-        out.uv = position * 0.5 + 0.5;
+        FullscreenOut out;
+        out.position = float4(positions[vid], 0.0, 1.0);
+        out.uv = positions[vid] * 0.5 + 0.5;
         return out;
     }
 
-    fragment float4 indicator_fragment(IndicatorVertexOut in [[stage_in]],
-                                       constant IndicatorUniforms& u [[buffer(0)]]) {
-        // Seconds per full expansion. Long and calm, so the rings read as slow
-        // water rather than a metronome.
-        const float RING_SECONDS = 5.0;
+    static float smokeValue(texture3d<float> noise, float2 p, float t, float scale) {
+        constexpr sampler s(filter::linear, address::repeat);
+        float a = noise.sample(
+            s, float3(p * scale + float2(t * 0.010, t * 0.006), t * 0.020)).r;
+        float b = noise.sample(
+            s, float3(p * scale * 2.1 - float2(t * 0.014, t * 0.004), t * 0.030)).r;
+        return a * 0.65 + b * 0.35;
+    }
 
-        float2 p = (in.uv - 0.5) * float2(u.aspect, 1.0);
-        // 0 at the centre, 1 at the top/bottom edge, so rings stay circular.
-        float radius = length(p) * 2.0;
-        // A slow angular wobble keeps a ring off a perfect circle, the way a
-        // ripple distorts as it crosses moving water.
-        float angle = atan2(p.y, p.x);
-        radius += 0.02 * sin(angle * 5.0 + u.time * 0.6);
-        float alpha = 0.0;
-        for (int i = 0; i < 6; ++i) {
-            // Each ring is offset a sixth of the cycle. It grows out to the edge
-            // and pulls back in, so the whole thing beats like a heart rather
-            // than only expanding.
-            float phase = fract(u.time / RING_SECONDS + float(i) / 6.0);
-            float grow = phase < 0.5 ? phase * 2.0 : (1.0 - phase) * 2.0;
-            float d = radius - grow;
-            // A wide gaussian band instead of a hard edge: soft and diffuse.
-            float band = exp(-(d * d) / (u.thickness * u.thickness));
-            // Brightest at full expansion, dark at the centre, like a pulse.
-            float pulse = sin(phase * 3.14159265);
-            // A faint travelling shimmer, like light across disturbed water.
-            float shimmer = 0.82 + 0.18 * sin(radius * 22.0 - u.time * 1.4);
-            alpha += band * pulse * shimmer;
+    static float3 shadeDisc(float3 color, float d, constant CollapseDisc& disc) {
+        if (disc.fillMode > 2.5) {
+            float glow = 1.0 - smoothstep(0.0, max(disc.radius, 1e-5), d);
+            return mix(color, float3(1.0), glow * disc.opacity);
         }
-        alpha = clamp(alpha, 0.0, 1.0);
-        return mix(u.background, u.ink, alpha);
+        float s = d - disc.radius;
+        float aa = max(fwidth(s), 1e-5);
+        float fill = 1.0 - smoothstep(-aa, aa, s);
+        float rim = 1.0 - smoothstep(disc.rimWidth, disc.rimWidth + aa, abs(s));
+        float pen = disc.penumbraDark * exp(-max(s, 0.0) / max(disc.penumbraWidth, 1e-5));
+        color *= 1.0 - clamp(pen * disc.opacity, 0.0, 1.0);
+        if (disc.fillMode < 1.5) {
+            float3 fillColor;
+            if (disc.fillMode < 0.5) {
+                fillColor = float3(1.0);
+            } else {
+                float radial = clamp(d / max(disc.radius, 1e-5), 0.0, 1.0);
+                fillColor = mix(
+                    float3(0.85, 0.82, 0.89),
+                    float3(disc.fillDark, disc.fillDark * 0.82, disc.fillDark * 0.82),
+                    smoothstep(0.0, 1.0, radial));
+            }
+            color = mix(color, fillColor, fill * disc.opacity);
+        }
+        if (disc.rimWidth > 0.0) {
+            color = mix(color, float3(0.23, 0.17, 0.17), rim * disc.rimDark * disc.opacity);
+        }
+        return color;
+    }
+
+    fragment float4 collapse_fragment(FullscreenOut in [[stage_in]],
+                                      constant CollapseUniforms& u [[buffer(0)]],
+                                      constant CollapseDisc* discs [[buffer(1)]],
+                                      constant CollapseRay* rays [[buffer(2)]],
+                                      texture3d<float> noise [[texture(0)]]) {
+        float2 p = (in.uv - 0.5) * float2(u.aspect, 1.0);
+        float r = length(p);
+        float angle = atan2(p.y, p.x);
+        float smoke = mix(
+            1.0, 0.75 + 0.5 * smokeValue(noise, p, u.time, u.noiseScale), u.smokeStrength);
+
+        float3 color = u.white.rgb;
+
+        // Mottled mauve field, darkest at the corners.
+        float fieldMask = smoothstep(0.25, 1.1, r);
+        float3 field = mix(
+            float3(0.70, 0.65, 0.75), float3(0.20, 0.16, 0.16), fieldMask) * smoke;
+        color = mix(color, field, u.fieldAlpha);
+
+        int discCount = int(u.discCount);
+        int rayCount = int(u.rayCount);
+
+        // Large discs first.
+        for (int i = 0; i < 9; ++i) {
+            if (i >= discCount) { break; }
+            if (discs[i].layer < 0.5) {
+                color = shadeDisc(color, r, discs[i]);
+            }
+        }
+
+        // Rays sit above the large discs and below the center bullseye.
+        for (int i = 0; i < 8; ++i) {
+            if (i >= rayCount) { break; }
+            float fraction = fract((angle - rays[i].angle) / 6.2831853 + 0.5);
+            float delta = abs(fraction - 0.5) * 6.2831853;
+            float across = delta / max(rays[i].halfWidth, 1e-5);
+            float alpha = rays[i].darkness
+                * (1.0 - smoothstep(0.3, 1.0, abs(across)))
+                * (1.0 - smoothstep(rays[i].length * 0.85, rays[i].length, r));
+            color = mix(color, float3(0.20, 0.16, 0.16), clamp(alpha, 0.0, 1.0));
+        }
+
+        // The late starburst alternates dark and light wedges.
+        float sector = fract((angle - u.burstRotation) / (6.2831853 / 48.0));
+        float sectorAA = fwidth((angle - u.burstRotation) / (6.2831853 / 48.0)) * 1.5;
+        float darkWedge = 1.0 - smoothstep(0.35, u.burstWidth + sectorAA, abs(sector - 0.25));
+        float lightWedge = 1.0 - smoothstep(0.35, u.burstWidth + sectorAA, abs(sector - 0.75));
+        color = mix(color, float3(0.23, 0.17, 0.17), darkWedge * u.burstAlpha);
+        color = mix(
+            color, float3(0.85, 0.82, 0.89),
+            lightWedge * u.burstAlpha * u.burstLight);
+
+        // Center discs and rings cover the rays where they converge.
+        for (int i = 0; i < 9; ++i) {
+            if (i >= discCount) { break; }
+            if (discs[i].layer > 0.5) {
+                color = shadeDisc(color, r, discs[i]);
+            }
+        }
+
+        // The starburst goes mostly black. That black field then shrinks into
+        // a white page with a final ink point that shrinks away.
+        float aa = max(0.0025, 0.75 / max(u.screenHeight, 1.0));
+        color = mix(color, float3(0.0), clamp(u.blackout, 0.0, 1.0));
+        float black = 1.0 - smoothstep(u.shrinkRadius - aa, u.shrinkRadius + aa, r);
+        float3 page = mix(u.white.rgb, u.ink.rgb, black);
+        // A small white point stays visible inside the shrinking black field
+        // and disappears with it.
+        float highlightRadius = u.shrinkRadius * 0.32;
+        float highlight = u.shrinkRadius > 0.001
+            ? 1.0 - smoothstep(
+                max(highlightRadius - aa, 0.0), highlightRadius + aa, r)
+            : 0.0;
+        page = mix(page, u.white.rgb, highlight * 0.9);
+        color = mix(color, page, clamp(u.shrinkMix, 0.0, 1.0));
+
+        float dotAA = max(u.dotRadius * 0.4, 0.75 / max(u.screenHeight, 1.0));
+        float dot = u.dotRadius > 0.0
+            ? 1.0 - smoothstep(max(u.dotRadius - dotAA, 0.0), u.dotRadius + dotAA, r)
+            : 0.0;
+        color = mix(color, u.ink.rgb, dot * clamp(u.dotOpacity, 0.0, 1.0));
+        return float4(color, 1.0);
     }
     """
 }

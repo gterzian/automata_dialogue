@@ -42,6 +42,45 @@ final class LayerTests: XCTestCase {
         assertPixel(bytes, width: cols, x: 3, y: 1, bgra: palette[0], message: "bottom is background")
     }
 
+    /// Zoom resizes the grid while the color buffer stays put, so one renderer
+    /// must handle a grid that grows (allocating spans) and then shrinks again
+    /// (reusing them) against the same cells buffer.
+    func testRendererHandlesGridResize() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let renderer = try LayerRenderer(context: context, pixelFormat: .bgra8Unorm)
+        let palette = Palette.standard(stateCount: 2)
+        let maxCols = 16
+        let maxRows = 8
+        let cells = try XCTUnwrap(
+            context.device.makeBuffer(length: maxCols * maxRows, options: .storageModeShared))
+        context.makeResident([cells])
+
+        func render(cols: Int, rows: Int) throws -> [UInt8] {
+            var grid = [UInt8](repeating: 0, count: cols * rows)
+            for col in 0..<cols { grid[col] = 1 }
+            grid.withUnsafeBufferPointer { source in
+                _ = memcpy(cells.contents(), source.baseAddress!, source.count)
+            }
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .bgra8Unorm, width: cols, height: rows, mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .shared
+            let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
+            try renderer.render(
+                gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows),
+                palette: palette, into: texture, wait: true)
+            return readTexture(texture)
+        }
+
+        let small = try render(cols: 4, rows: 2)
+        assertPixel(small, width: 4, x: 0, y: 0, bgra: palette[1], message: "small top ink")
+        let large = try render(cols: 16, rows: 8)
+        assertPixel(large, width: 16, x: 15, y: 0, bgra: palette[1], message: "large top ink")
+        let smallAgain = try render(cols: 4, rows: 2)
+        assertPixel(smallAgain, width: 4, x: 3, y: 1, bgra: palette[0], message: "small again row 1")
+    }
+
     func testLayerSinkBuildsFromLayer() throws {
         guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
         let context = try GPUContext()

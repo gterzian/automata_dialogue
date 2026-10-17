@@ -89,4 +89,39 @@ final class MetalTests: XCTestCase {
         _ = try simulation.renderGPU(chunk: 300)
         XCTAssertGreaterThan(simulation.viewportOrigin, start)
     }
+
+    /// Zoom resizes the display grid (and so the viewport) without reseeding:
+    /// in shrinks it, out grows it, and the grid matches the reported buffer.
+    func testZoomResizesTheGridWithoutRestarting() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        // A centre seed stays visible across a zoom, so the run is provably not
+        // restarting.
+        let board = Board(width: 256, height: 16, start: .center)
+        let simulation = try MetalSimulation(
+            spec: spec, cols: 32, rows: 8, context: context, board: board)
+
+        simulation.setZoom(2)
+        XCTAssertEqual(simulation.zoom, 2)
+        XCTAssertEqual(simulation.cols, 16)
+        XCTAssertEqual(simulation.rows, 4)
+        let zoomedIn = try simulation.renderGPU(chunk: 0)
+        XCTAssertEqual(zoomedIn.cols, 16)
+        XCTAssertEqual(zoomedIn.rows, 4)
+        XCTAssertGreaterThan(nonZero(zoomedIn), 0, "the seed survives the zoom")
+
+        simulation.setZoom(0.5)
+        XCTAssertEqual(simulation.cols, 64)
+        XCTAssertEqual(simulation.rows, 16)
+
+        simulation.setZoom(100)
+        XCTAssertEqual(simulation.zoom, ViewportGeometry.maximumZoom)
+        XCTAssertEqual(simulation.cols, 8)
+        XCTAssertEqual(simulation.rows, 2)
+        simulation.setZoom(0.01)
+        XCTAssertEqual(simulation.zoom, ViewportGeometry.minimumZoom)
+        XCTAssertEqual(simulation.cols, 64)
+        XCTAssertEqual(simulation.rows, 16)
+    }
 }

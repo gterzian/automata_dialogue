@@ -73,6 +73,18 @@ public actor RenderActor {
         }
     }
 
+    /// Sets the viewport's zoom and delivers the re-fitted frame. A no-op when
+    /// nothing is configured; a failed re-fit is recorded in `lastError`.
+    public func setZoom(_ zoom: Double) {
+        guard let simulation else { return }
+        simulation.setZoom(zoom)
+        do {
+            _ = try deliver(simulation, chunk: 0)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     /// Restarts the live run from a fresh seed row and delivers frame 0. A
     /// `.rand` entry draws a different row; the sink and GPU buffers are kept,
     /// so nothing is recompiled or reallocated.
