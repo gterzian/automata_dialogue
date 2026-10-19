@@ -20,25 +20,32 @@ public actor IndicatorActor {
 
     /// Starts the intro on `layer`, creating the GPU context on first use.
     /// Reusing the same layer only restarts the clock, so the pipeline is not
-    /// recompiled for every run.
-    public func start(layer: CAMetalLayer) throws {
+    /// recompiled for every run. `lineHalfThickness` is the automaton horizon
+    /// row's half-height in screen-height units.
+    public func start(layer: CAMetalLayer, lineHalfThickness: Float) throws {
         if context == nil {
             context = try GPUContext()
         }
         guard let context else { throw GPUContext.GPUError.noMetal4Device }
         if let indicator, indicator.layer === layer {
-            indicator.start()
+            indicator.start(lineHalfThickness: lineHalfThickness)
             return
         }
         indicator?.finish()
         let made = try WorkingIndicator(layer: layer, context: context)
-        made.start()
+        made.start(lineHalfThickness: lineHalfThickness)
         indicator = made
     }
 
     /// Pauses the animation; the indicator is kept for the next `start`.
     public func stop() {
         indicator?.stop()
+    }
+
+    /// True once the visible sequence has presented its final page. No
+    /// indicator means nothing is left to wait for.
+    public var isSettled: Bool {
+        indicator?.isSettled ?? true
     }
 
     /// The last render failure, if any.

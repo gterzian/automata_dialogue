@@ -189,8 +189,35 @@ final class RenderActorTests: XCTestCase {
         await actor.shutdown()
     }
 
-    /// `setZoom` refits the run and delivers the new frame, so the View menu and
-    /// the pinch both go through the actor.
+    /// A twin run exposes its step count for the reveal camera and refits both
+    /// branches when the camera zooms out.
+    func testTwinRunExposesStepsAndRefits() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let sink = RecordingSink()
+        let actor = RenderActor()
+        let seed = try await actor.configure(
+            spec: spec, cols: 40, rows: 21,
+            layout: .twin, minimumZoom: 0.25, sink: sink)
+        XCTAssertEqual(seed.gpu.cols, 40)
+        XCTAssertEqual(seed.gpu.rows, 21)
+        let before = await actor.steppedRows
+        _ = try await actor.advance(by: 6)
+        let after = await actor.steppedRows
+        XCTAssertEqual(after, before + 6)
+
+        await actor.setZoom(0.5)
+        XCTAssertEqual(sink.frames.last?.gpu.cols, 80)
+        XCTAssertEqual(sink.frames.last?.gpu.rows, 41)
+        let error = await actor.lastError
+        XCTAssertNil(error)
+        await actor.shutdown()
+    }
+
+    /// `setZoom` refits the run and delivers the new frame, so the reveal
+    /// camera's level changes go through the actor.
     func testSetZoomDeliversARefittedFrame() async throws {
         guard GPUContext.isAvailable else {
             throw XCTSkip("no Metal 4 device")

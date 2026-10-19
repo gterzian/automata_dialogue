@@ -66,7 +66,7 @@ one-sentence description of how it looks.
 ### 1.4 Starting rows
 
 - **Single cell (no suffix):** one black cell (gray for T entries) in the
-  center of a white row, or at the right edge for E110.
+  center of a white row.
 - **Seed number n:** write n in binary (base 3 for T entries), most
   significant digit first, on a white row beginning at the center cell.
 - **Random row (`.rand`):** choose each cell independently. For 2 colors a cell
@@ -185,7 +185,7 @@ one-sentence description of how it looks.
 - **K2R2-30.rand** (randomness): Dense speckle with white triangular outlines at many sizes.
 - **K2R2-42.rand** (randomness): Dense mottled speckle with small white triangles.
 - **K2R2-52.rand** (randomness): Vertical black and gray bars of irregular widths over a white field.
-- **E110** (complexity): From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.
+- **E110** (complexity): From a random full-length row the pattern organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.
 - **E110.rand** (complexity): Within a few steps a random row organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.
 - **E54.rand** (complexity): From a random row, a regular background crossed by moving localized structures that collide and interact.
 - **T1041** (complexity): A mixture of regular vertical stripes and irregular regions.

@@ -89,7 +89,7 @@ final class CatalogTests: XCTestCase {
     }
 
     func testStartConditionsMatchInventory() {
-        XCTAssertEqual(Catalog.spec(id: "E110")?.board.start, .rightmost)
+        XCTAssertEqual(Catalog.spec(id: "E110")?.board.start, .random(seed: 110))
         XCTAssertEqual(Catalog.spec(id: "E54")?.board.start, .center)
         XCTAssertEqual(Catalog.spec(id: "E54.rand")?.board.start, .random(seed: 54))
         XCTAssertEqual(Catalog.spec(id: "E30.block1100")?.board.start, .block([1, 1, 0, 0]))

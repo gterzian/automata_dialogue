@@ -27,6 +27,7 @@ public final class GPUContext {
     public let stepK2R2: any MTLComputePipelineState
     public let bumpHead: any MTLComputePipelineState
     public let fitPipeline: any MTLComputePipelineState
+    public let fitTwinPipeline: any MTLComputePipelineState
     public let seedPipeline: any MTLComputePipelineState
     public let residency: any MTLResidencySet
 
@@ -73,6 +74,9 @@ public final class GPUContext {
         )
         self.fitPipeline = try Self.makePipeline(
             compiler: compiler, library: library, name: "fit"
+        )
+        self.fitTwinPipeline = try Self.makePipeline(
+            compiler: compiler, library: library, name: "fit_twin"
         )
         self.seedPipeline = try Self.makePipeline(
             compiler: compiler, library: library, name: "seed_row"

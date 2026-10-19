@@ -2,6 +2,14 @@ import Darwin
 import Foundation
 import QuartzCore
 
+/// How a run maps its history onto the display. `.single` grows one pattern
+/// downward; `.twin` shares one horizon row between an upper branch growing up
+/// and a lower branch growing down.
+public enum RunLayout: Sendable, Equatable {
+    case single
+    case twin
+}
+
 /// Owns the Metal objects for one app and confines them to a dedicated run
 /// loop. The main thread configures a run, advances it, and receives
 /// `RenderFrame`s through a `FrameSink`; no Metal call or `present` runs on the
@@ -21,6 +29,9 @@ public actor RenderActor {
     /// Sub-row carry for `.timed` pacing, owned by the render actor so the
     /// clock's non-isolated tick can hand the delta to an isolated advance.
     private var paceRemainder = 0.0
+    /// The reveal camera, applied on each tick so the zoom moves with the
+    /// growth instead of in main-actor polling steps.
+    private var reveal: RevealSetup?
 
     public init() {}
 
@@ -39,6 +50,9 @@ public actor RenderActor {
         cols: Int,
         rows: Int,
         board: Board? = nil,
+        layout: RunLayout = .single,
+        minimumZoom: Double = 1.0,
+        reveal: RevealSetup? = nil,
         sink: any FrameSink
     ) throws -> RenderFrame {
         try start()
@@ -47,11 +61,16 @@ public actor RenderActor {
         paceRemainder = 0
         self.sink = sink
         let simulation = try MetalSimulation(
-            spec: spec, cols: cols, rows: rows, context: context, board: board
+            spec: spec, cols: cols, rows: rows, context: context, board: board,
+            minimumZoom: minimumZoom, twin: layout == .twin
         )
         self.simulation = simulation
+        self.reveal = reveal
         return try deliver(simulation, chunk: 0)
     }
+
+    /// Source rows the run has computed.
+    public var steppedRows: Int { simulation?.steppedRows ?? 0 }
 
     /// Advances up to `count` source rows and delivers the resulting frame.
     @discardableResult
@@ -61,8 +80,8 @@ public actor RenderActor {
     }
 
     /// Shifts the window `delta` board columns and delivers the re-fitted
-    /// frame. A no-op when nothing is configured. The display link has no place
-    /// to throw, so a failed re-fit is recorded in `lastError`.
+    /// frame. A no-op when nothing is configured; a failed re-fit is recorded
+    /// in `lastError`.
     public func pan(by delta: Int) {
         guard let simulation else { return }
         simulation.pan(by: delta)
@@ -112,6 +131,7 @@ public actor RenderActor {
         sink?.finish()
         sink = nil
         simulation = nil
+        reveal = nil
     }
 
     /// The last error from a driven run, if any. The clock tick cannot throw,
@@ -140,8 +160,7 @@ public actor RenderActor {
         }
     }
 
-    /// Changes the advance rate of a driven run in flight, so the Up/Down
-    /// arrows can speed the growth up or slow it down. The sub-row carry is
+    /// Changes the advance rate of a driven run in flight. The sub-row carry is
     /// dropped so the old rate's fraction cannot jump the new one.
     public func setPacing(_ pacing: RenderPacing) {
         paceRemainder = 0
@@ -151,6 +170,11 @@ public actor RenderActor {
     private func tick(delta: TimeInterval) throws {
         let steps = pacing.steps(for: delta, remainder: &paceRemainder)
         guard steps > 0 else { return }
+        if let reveal, let simulation {
+            let target = simulation.steppedRows + steps
+            simulation.setZoom(RevealCamera.zoom(
+                steps: target, branchRows: reveal.branchRows, floor: reveal.floor))
+        }
         _ = try advance(by: steps)
     }
 

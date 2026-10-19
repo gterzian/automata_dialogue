@@ -57,8 +57,10 @@ final class FrameSlotRing {
 /// The run is a window over a board much wider than the display: it keeps only
 /// the newest `capacity` source rows in a ring and maps display row `d` to a
 /// source step at or before the newest one, so a short board grows from the top
-/// and then the window follows the newest row without an end. `setZoom` resizes
-/// the display grid and the viewport, reusing the same ring and color buffer.
+/// and then the window follows the newest row without an end. A twin run maps
+/// one history into two mirrored branches around a shared horizon row instead.
+/// `setZoom` resizes the display grid and the viewport, reusing the same ring
+/// and color buffer.
 @available(macOS 26.0, *)
 public final class MetalSimulation {
     private struct StepParams {
@@ -78,6 +80,7 @@ public final class MetalSimulation {
         var viewportStart: UInt32
         var viewportOrigin: UInt32
         var currentStep: UInt32
+        var topRows: UInt32
     }
 
     private struct SeedParams {
@@ -99,13 +102,24 @@ public final class MetalSimulation {
     private let baseRows: Int
     /// First source column the window shows, clamped to `maxViewportOrigin`.
     public private(set) var viewportOrigin: Int
-    /// Display cells per board cell; see `ViewportGeometry.minimumZoom`.
+    /// Display cells per board cell; see `ViewportGeometry.zoomFloor`.
     public private(set) var zoom = 1.0
+    /// The widest zoom-out this run allows, chosen from the display.
+    public let minimumZoom: Double
+    /// The reveal's two-branch mapping: one shared horizon row, with the upper
+    /// branch growing up and the lower growing down from it.
+    public let twin: Bool
+    /// Rows from the shared horizon to each outer edge.
+    public private(set) var twinHalfRows = 0
     /// True once the caller pans by hand; the entry's follow then stops for the
     /// rest of the run.
     private var userPanned = false
     /// Source row currently computed (0 is the seed).
     private var step = 0
+
+    /// Source rows computed so far; the reveal camera reads it to decide when
+    /// to pull back.
+    public var steppedRows: Int { step }
 
     /// The origin a `reseed` returns to (rightmost for a right-pinned entry).
     private var startOrigin: Int
@@ -143,20 +157,29 @@ public final class MetalSimulation {
         cols: Int,
         rows: Int,
         context: GPUContext,
-        board: Board? = nil
+        board: Board? = nil,
+        minimumZoom: Double = 1.0,
+        twin: Bool = false
     ) throws {
         let displayCols = max(1, cols)
-        let displayRows = max(1, rows)
+        // The twin layout needs an odd row count so exactly one row sits on the
+        // horizon and both branches mirror around it.
+        let displayRows = twin
+            ? ViewportGeometry.twinRows(baseRows: max(1, rows), zoom: 1)
+            : max(1, rows)
         let runBoard = board ?? spec.board
         let width = runBoard.width
         let device = context.device
+        let runMinimumZoom = min(max(minimumZoom, ViewportGeometry.minimumZoomLimit), 1.0)
         // Size the ring and the grid for the widest zoom-out, so a zoom later
         // never reallocates the buffers or rebinds the fit table.
         let maxCols = ViewportGeometry.zoomedColumns(
-            baseCols: displayCols, zoom: ViewportGeometry.minimumZoom)
-        let maxRows = ViewportGeometry.zoomedRows(
-            baseRows: displayRows, zoom: ViewportGeometry.minimumZoom)
+            baseCols: displayCols, zoom: runMinimumZoom)
+        let maxRows = twin
+            ? ViewportGeometry.twinRows(baseRows: displayRows, zoom: runMinimumZoom)
+            : ViewportGeometry.zoomedRows(baseRows: displayRows, zoom: runMinimumZoom)
         let capacity = maxRows + 2
+        let halfRows = twin ? ViewportGeometry.twinHalfRows(rows: displayRows) : 0
 
         guard let history = device.makeBuffer(length: max(1, capacity * width), options: .storageModeShared),
               let colorBuffer = device.makeBuffer(length: max(1, maxCols * maxRows), options: .storageModeShared),
@@ -192,6 +215,9 @@ public final class MetalSimulation {
         self.rows = displayRows
         self.baseCols = displayCols
         self.baseRows = displayRows
+        self.minimumZoom = runMinimumZoom
+        self.twin = twin
+        self.twinHalfRows = halfRows
         self.context = context
         self.width = width
         self.board = runBoard
@@ -228,7 +254,8 @@ public final class MetalSimulation {
             capacity: UInt32(capacity),
             viewportStart: 0,
             viewportOrigin: UInt32(startOrigin),
-            currentStep: 0)
+            currentStep: 0,
+            topRows: UInt32(halfRows))
 
         try reseed()
     }
@@ -247,15 +274,18 @@ public final class MetalSimulation {
     }
 
     /// Resizes the display grid for `value`, keeping the board column at the
-    /// viewport's centre fixed. Clamped to `ViewportGeometry`'s bounds; the
-    /// caller re-fits (`renderGPU(chunk: 0)`) to show the new view.
+    /// viewport's centre fixed. Clamped to this run's floor; the caller re-fits
+    /// (`renderGPU(chunk: 0)`) to show the new view.
     public func setZoom(_ value: Double) {
-        let clamped = min(max(value, ViewportGeometry.minimumZoom), ViewportGeometry.maximumZoom)
+        let clamped = min(max(value, minimumZoom), ViewportGeometry.maximumZoom)
         guard clamped != zoom else { return }
         let centre = Double(viewportOrigin) + Double(cols) / 2
         zoom = clamped
         cols = ViewportGeometry.zoomedColumns(baseCols: baseCols, zoom: clamped)
-        rows = ViewportGeometry.zoomedRows(baseRows: baseRows, zoom: clamped)
+        rows = twin
+            ? ViewportGeometry.twinRows(baseRows: baseRows, zoom: clamped)
+            : ViewportGeometry.zoomedRows(baseRows: baseRows, zoom: clamped)
+        twinHalfRows = twin ? ViewportGeometry.twinHalfRows(rows: rows) : 0
         startOrigin = ViewportGeometry.initialOrigin(
             boardWidth: width, cols: cols, start: board.start, pinRight: spec.display.pinRight)
         viewportOrigin = min(
@@ -263,6 +293,7 @@ public final class MetalSimulation {
         viewParams.displayCols = UInt32(cols)
         viewParams.displayRows = UInt32(rows)
         viewParams.viewportOrigin = UInt32(viewportOrigin)
+        viewParams.topRows = UInt32(twinHalfRows)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
     }
 
@@ -326,6 +357,7 @@ public final class MetalSimulation {
         viewParams.displayCols = UInt32(cols)
         viewParams.displayRows = UInt32(rows)
         viewParams.viewportOrigin = UInt32(startOrigin)
+        viewParams.topRows = UInt32(twinHalfRows)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
 
         let (_, slot) = ring.borrow()
@@ -494,11 +526,15 @@ public final class MetalSimulation {
     }
 
     private func encodeFit(target: Int, encoder: any MTL4ComputeCommandEncoder) {
-        viewParams.viewportStart = UInt32(max(0, target - (rows - 1)))
+        // The twin layout pins the newest row to both outer edges around the
+        // shared horizon; the single layout pins it to the grid's bottom.
+        viewParams.viewportStart = UInt32(max(0, target - (twin ? twinHalfRows : rows - 1)))
         viewParams.currentStep = UInt32(clamping: target)
+        viewParams.topRows = UInt32(twinHalfRows)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
         encoder.setArgumentTable(fitTable)
-        encoder.setComputePipelineState(context.fitPipeline)
+        encoder.setComputePipelineState(
+            twin ? context.fitTwinPipeline : context.fitPipeline)
         encoder.dispatchThreads(
             threadsPerGrid: MTLSize(width: cols, height: rows, depth: 1),
             threadsPerThreadgroup: MTLSize(width: min(16, cols), height: min(16, rows), depth: 1)

@@ -140,9 +140,10 @@ change, along with the affected tests, counts, and READMEs.
    of them); there is no drawing surface. See `Core/Import/README.md`.
 2. **One review window.** The CLI's window shows the input, then the working
    indicator, then the chosen automaton, in a single window with no split view.
-   See `CLI/README.md`.
-3. **A new input stops the running automaton immediately** before the next run
-   begins.
+   The automaton is one mirrored pair: two branches grow away from the horizon
+   line the collapse intro ends on, and a camera pulls back at the growth rate
+   to keep the growth in view. See `CLI/README.md`.
+3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
    testable; `Core` holds the prompt-building and answer-parsing logic. There is
    no model-free fallback agent: the CLI always runs the model. See
@@ -196,6 +197,11 @@ sentence did not earn its place.
 - Never assume a test failure is pre-existing. Every failure is a regression
   until proven otherwise; establish the baseline from committed code, not a
   guess.
+- Test invariants, not appearance. Pin counts, parsers, geometry, GPU mapping,
+  determinism, and phase boundaries. Do not assert pixel counts, anti-aliasing,
+  gradients, easing curves, or exact animation frames: the visual result is
+  reviewed by hand, and a test that fails whenever the look is deliberately
+  changed is noise.
 - Document only verified facts, in neutral factual language. Do not speculate
   about causes or fixes; state what was observed, what was tried, and what was
   ruled out.

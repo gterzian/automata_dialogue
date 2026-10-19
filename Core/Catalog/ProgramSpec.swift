@@ -61,8 +61,8 @@ public struct Board: Sendable, Hashable {
 
 /// How the review window tracks a run that drifts sideways. A run that grows
 /// or slides left should pan the viewport left (so the pattern goes down *and*
-/// left); the default keeps the view fixed so it only goes down. Any manual pan
-/// aborts the follow for the rest of the run.
+/// left); the default keeps the view fixed so it only goes down. A `pan(by:)`
+/// call aborts the follow for the rest of the run.
 public struct Follow: Sendable, Hashable {
     /// Signed board columns to pan per source step: negative pans left,
     /// positive pans right, 0 leaves the viewport fixed.

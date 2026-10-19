@@ -29,8 +29,8 @@ final class ViewportTests: XCTestCase {
     }
 
     /// A zoom scales the display grid: in shrinks it, out grows it, and neither
-    /// dimension falls below one cell. The level snap keeps a gesture from
-    /// reallocating the span buffer on every frame.
+    /// dimension falls below one cell. The reveal snaps to levels so it does
+    /// not reallocate the span buffer every frame.
     func testZoomResizesTheGrid() {
         XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 1), 800)
         XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 2), 400)
@@ -38,10 +38,42 @@ final class ViewportTests: XCTestCase {
         XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 0.5), 1600)
         XCTAssertEqual(ViewportGeometry.zoomedRows(baseRows: 500, zoom: 2), 250)
         XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 1, zoom: 4), 1)
-        XCTAssertEqual(ViewportGeometry.nearestZoom(1.3), 1.25)
-        XCTAssertEqual(ViewportGeometry.nearestZoom(3.0), 3.2)
-        XCTAssertEqual(ViewportGeometry.nearestZoom(0.1), ViewportGeometry.minimumZoom)
-        XCTAssertEqual(ViewportGeometry.nearestZoom(99), ViewportGeometry.maximumZoom)
+    }
+
+    /// The reveal's floor is the widest zoom-out the surface can show one cell
+    /// per element, bounded by the grid's cell budget.
+    func testZoomFloorFollowsTheDisplay() {
+        let retina = DisplayLimits(maximumColumns: 2880)
+        XCTAssertEqual(
+            ViewportGeometry.zoomFloor(baseCols: 720, baseRows: 400, limits: retina),
+            0.25, accuracy: 1e-3)
+        let plain = DisplayLimits(maximumColumns: 1440)
+        XCTAssertEqual(
+            ViewportGeometry.zoomFloor(baseCols: 720, baseRows: 400, limits: plain),
+            0.5, accuracy: 1e-3)
+        // A tiny surface cannot zoom out at all.
+        XCTAssertEqual(
+            ViewportGeometry.zoomFloor(baseCols: 720, baseRows: 400,
+                                       limits: DisplayLimits(maximumColumns: 100)),
+            1, accuracy: 1e-9)
+        // The cell budget wins when the surface could show an even wider grid.
+        XCTAssertEqual(
+            ViewportGeometry.zoomFloor(
+                baseCols: 720, baseRows: 400,
+                limits: DisplayLimits(maximumColumns: 100_000, maximumCells: 4_600_000)),
+            0.25, accuracy: 1e-3)
+        XCTAssertEqual(
+            DisplayLimits.pixels(points: 1440, scale: 2).maximumColumns, 2880)
+    }
+
+    /// The twin grid is odd so exactly one row sits on the horizon, and both
+    /// branches measure the same number of rows to their outer edges.
+    func testTwinRowsShareOneHorizon() {
+        XCTAssertEqual(ViewportGeometry.twinRows(baseRows: 400, zoom: 1), 399)
+        XCTAssertEqual(ViewportGeometry.twinRows(baseRows: 401, zoom: 1), 401)
+        XCTAssertEqual(ViewportGeometry.twinRows(baseRows: 401, zoom: 0.5), 801)
+        XCTAssertEqual(ViewportGeometry.twinHalfRows(rows: 399), 199)
+        XCTAssertEqual(ViewportGeometry.twinHalfRows(rows: 401), 200)
     }
 }
 

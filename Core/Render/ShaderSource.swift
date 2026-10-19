@@ -33,9 +33,10 @@ public enum ShaderSource {
         uint displayCols;
         uint displayRows;
         uint capacity;       // history rows, modulo index
-        uint viewportStart;  // newest window's top source step
+        uint viewportStart;  // oldest source step the window still shows
         uint viewportOrigin; // first source column the window shows
         uint currentStep;    // source rows computed so far
+        uint topRows;        // twin layout: rows from the horizon to an outer edge
     };
 
     // The seed row. `mode` selects the `BoardStart` shape: 0 center cell,
@@ -197,6 +198,28 @@ public enum ShaderSource {
         }
         colorGrid[gid.y * p.displayCols + gid.x] = value;
     }
+
+    // The reveal's mirrored pair: one shared horizon row at the centre, with
+    // the upper branch growing up from it and the lower branch growing down
+    // from the same row. `p.topRows` is the distance from the horizon to each
+    // outer edge, so display rows above and below the horizon read the same
+    // source row. The newest source row is pinned to both outer edges; older
+    // rows leave through the horizon. The horizon row is written once.
+    kernel void fit_twin(device const uchar* history [[buffer(0)]],
+                         device uchar* colorGrid [[buffer(1)]],
+                         constant ViewParams& p [[buffer(2)]],
+                         uint2 gid [[thread_position_in_grid]]) {
+        if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
+        uint halfRows = p.topRows;
+        uint local = gid.y <= halfRows ? (halfRows - gid.y) : (gid.y - halfRows);
+        uint target = p.viewportStart + local;
+        uint index = p.viewportOrigin + gid.x;
+        uchar value = 0;
+        if (target <= p.currentStep && index < p.boardWidth) {
+            value = history[(target % p.capacity) * p.boardWidth + index];
+        }
+        colorGrid[gid.y * p.displayCols + gid.x] = value;
+    }
     """
 
     public static let layer = """
@@ -289,15 +312,14 @@ public enum ShaderSource {
     }
     """
 
-    /// The expanding-and-collapsing intro the review window shows while the
-    /// model runs: a point grows into a shaded disc, whites out, opens into
-    /// nested discs and rays, fills with a starburst, goes black, and shrinks
-    /// that black field into the final white page.
+    /// The intro the review window shows while the model runs: a point grows
+    /// into a shaded sphere, the frame whites out, and the ink point returns as
+    /// a small dot that stretches into the horizon line the reveal starts from.
     ///
     /// Everything is drawn by one full-screen fragment shader: the mottled
-    /// field, the back discs, the rays, the starburst, the front bullseye, and
-    /// the final black-to-white shrink. No offscreen targets or upsample are
-    /// needed; the shader writes the drawable directly.
+    /// field, the opening sphere and whiteout, and the ending dot and line. No
+    /// offscreen targets or upsample are needed; the shader writes the drawable
+    /// directly.
     public static let collapse = """
     #include <metal_stdlib>
     using namespace metal;
@@ -307,19 +329,11 @@ public enum ShaderSource {
         float aspect;
         float screenHeight;
         float fieldAlpha;
-        float burstAlpha;
-        float burstRotation;
-        float burstWidth;
-        float burstLight;
-        float blackout;
-        float shrinkMix;
-        float shrinkRadius;
         float dotRadius;
         float dotOpacity;
         float noiseScale;
         float smokeStrength;
         float discCount;
-        float rayCount;
         float centerX;
         float centerY;
         float warp;
@@ -327,8 +341,12 @@ public enum ShaderSource {
         float noiseY;
         float noiseZ;
         float warmth;
-        float burstSectors;
         float grainSeed;
+        float endAlpha;
+        float shrinkReveal;
+        float explode;
+        float thinReveal;
+        float lineHalfThickness;
         float4 white;
         float4 ink;
     };
@@ -341,15 +359,7 @@ public enum ShaderSource {
         float penumbraWidth;
         float penumbraDark;
         float opacity;
-        float layer;         // 0 behind the rays, 1 in front
         float fillDark;
-    };
-
-    struct CollapseRay {
-        float angle;
-        float halfWidth;
-        float length;
-        float darkness;
     };
 
     struct FullscreenOut {
@@ -446,11 +456,9 @@ public enum ShaderSource {
     fragment float4 collapse_fragment(FullscreenOut in [[stage_in]],
                                       constant CollapseUniforms& u [[buffer(0)]],
                                       constant CollapseDisc* discs [[buffer(1)]],
-                                      constant CollapseRay* rays [[buffer(2)]],
                                       texture3d<float> noise [[texture(0)]]) {
         float2 p = (in.uv - 0.5) * float2(u.aspect, 1.0) - float2(u.centerX, u.centerY);
         float r = length(p);
-        float angle = atan2(p.y, p.x);
         float3 origin = float3(u.noiseX, u.noiseY, u.noiseZ);
         float smoke = mix(
             1.0, 0.75 + 0.5 * smokeValue(noise, p, u.time, u.noiseScale, origin),
@@ -473,76 +481,11 @@ public enum ShaderSource {
         color = mix(color, field, u.fieldAlpha);
 
         int discCount = int(u.discCount);
-        int rayCount = int(u.rayCount);
 
-        // Large discs first.
         for (int i = 0; i < 9; ++i) {
             if (i >= discCount) { break; }
-            if (discs[i].layer < 0.5) {
-                color = shadeDisc(color, p, d, smoke, u.warmth, discs[i]);
-            }
+            color = shadeDisc(color, p, d, smoke, u.warmth, discs[i]);
         }
-
-        // Rays sit above the large discs and below the center bullseye. The
-        // field's texture thins them along their length.
-        for (int i = 0; i < 8; ++i) {
-            if (i >= rayCount) { break; }
-            float fraction = fract((angle - rays[i].angle) / 6.2831853 + 0.5);
-            float delta = abs(fraction - 0.5) * 6.2831853;
-            float across = delta / max(rays[i].halfWidth, 1e-5);
-            float alpha = rays[i].darkness
-                * (1.0 - smoothstep(0.0, 1.0, abs(across)))
-                * (1.0 - smoothstep(rays[i].length * 0.85, rays[i].length, d))
-                * (1.0 + 0.6 * (smoke - 1.0));
-            float3 rayColor = mix(
-                float3(0.20, 0.16, 0.19), float3(0.22, 0.15, 0.15), u.warmth);
-            color = mix(color, rayColor, clamp(alpha, 0.0, 1.0));
-        }
-
-        // The late starburst alternates dark and light wedges. The field's
-        // texture roughens the wedge edges, so the fan looks scratched rather
-        // than cut.
-        float sectorSize = 6.2831853 / max(u.burstSectors, 1.0);
-        float sectorCoord = (angle - u.burstRotation) / sectorSize + (smoke - 1.0) * 0.45;
-        float sector = fract(sectorCoord);
-        float sectorAA = fwidth(sectorCoord) * 1.5;
-        float darkWedge = 1.0 - smoothstep(0.30, u.burstWidth + sectorAA, abs(sector - 0.25));
-        float lightWedge = 1.0 - smoothstep(0.30, u.burstWidth + sectorAA, abs(sector - 0.75));
-        float3 burstDark = mix(
-            float3(0.21, 0.16, 0.20), float3(0.25, 0.16, 0.16), u.warmth);
-        float3 burstLight = mix(
-            float3(0.84, 0.80, 0.88), float3(0.88, 0.80, 0.81), u.warmth);
-        color = mix(color, burstDark, clamp(darkWedge * u.burstAlpha, 0.0, 1.0));
-        color = mix(
-            color, burstLight, clamp(lightWedge * u.burstAlpha * u.burstLight, 0.0, 1.0));
-
-        // Center discs and rings cover the rays where they converge.
-        for (int i = 0; i < 9; ++i) {
-            if (i >= discCount) { break; }
-            if (discs[i].layer > 0.5) {
-                color = shadeDisc(color, p, d, smoke, u.warmth, discs[i]);
-            }
-        }
-
-        // The starburst goes mostly black. That black field then shrinks into
-        // a white page with a final ink point that shrinks away; the field
-        // fades out as its radius reaches zero, so the page ends clean.
-        float aa = max(0.0025, 0.75 / max(u.screenHeight, 1.0));
-        color = mix(color, float3(0.0), clamp(u.blackout, 0.0, 1.0));
-        float shrinkSoft = max(u.shrinkRadius * 0.10, aa * 1.5);
-        float shrinkMask = smoothstep(0.0, shrinkSoft * 4.0, u.shrinkRadius);
-        float black = (1.0 - smoothstep(u.shrinkRadius - shrinkSoft,
-                                        u.shrinkRadius + shrinkSoft, d)) * shrinkMask;
-        float3 page = mix(u.white.rgb, u.ink.rgb, clamp(black, 0.0, 1.0));
-        // A small white point stays visible inside the shrinking black field
-        // and disappears with it.
-        float highlightRadius = u.shrinkRadius * 0.32;
-        float highlight = u.shrinkRadius > 0.001
-            ? (1.0 - smoothstep(
-                max(highlightRadius - aa, 0.0), highlightRadius + aa, d)) * shrinkMask
-            : 0.0;
-        page = mix(page, u.white.rgb, highlight * 0.9);
-        color = mix(color, page, clamp(u.shrinkMix, 0.0, 1.0));
 
         // The opening point is a small dense mound, not a flat coin: an uneven
         // feathered edge, a wide faint penumbra, and a middle that lightens
@@ -563,10 +506,32 @@ public enum ShaderSource {
         color = mix(color, dotColor,
                     max(dot * dotOpacity, halo * 0.35 * dotOpacity));
 
+        // The ending page is the automaton's own background: flatten the
+        // whiteout's texture before the horizon line draws, so the handoff does
+        // not shift colour. The grain fades out with it below.
+        float ending = smoothstep(4.5, 4.95, u.time);
+        color = mix(color, u.white.rgb, ending);
+
+        // The ending: the screen goes black, that field collapses to a dot,
+        // and the dot explodes into the straight horizon row the two automaton
+        // branches share.
+        float2 hp = (in.uv - 0.5) * float2(u.aspect, 1.0);
+        float startRadius = length(float2(u.aspect, 1.0)) * 0.5 + 0.1;
+        float dotRadius = u.lineHalfThickness * 5.0;
+        float radius = mix(startRadius, dotRadius, u.shrinkReveal);
+        radius = mix(radius, u.lineHalfThickness, u.explode);
+        radius *= mix(1.0, 0.18, u.thinReveal);
+        float halfWidth = u.explode * (u.aspect * 0.5 + 0.05);
+        float2 q = float2(max(abs(hp.x) - halfWidth, 0.0), hp.y);
+        float distance = length(q);
+        float soft = max(radius * 0.5, 1.5 / max(u.screenHeight, 1.0));
+        float body = 1.0 - smoothstep(-soft, soft, distance - radius);
+        color = mix(color, u.ink.rgb, body * clamp(u.endAlpha, 0.0, 1.0));
+
         // A film grain over the whole frame, drawn fresh every frame.
         float2 pixel = in.uv * float2(u.aspect, 1.0) * u.screenHeight;
         float grain = grainAt(pixel, u.grainSeed + u.time * 60.0) - 0.5;
-        color += grain * 0.035;
+        color += grain * 0.035 * (1.0 - ending);
         return float4(color, 1.0);
     }
     """

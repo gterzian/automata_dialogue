@@ -17,15 +17,17 @@ What must be covered:
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle.
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
   frames, and advances on clock ticks; the pacing math; (Metal 4 only) the GPU
-  seed shapes, a growing run, the window follow, a zoom refit, and zoom's grid
-  resize.
+  seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
+  resize, and the twin run's mirrored branches and step count.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
-  the centred or rightmost start origin, and the visible span under zoom.
+  the centred or rightmost start origin, the visible span under zoom, the twin
+  grid's shared horizon row, and the display-dependent zoom floor.
+- **Reveal camera** — `RevealCamera` starts at 1×, never zooms in, matches the
+  branches' growth one for one, keeps the newest row visible above the floor,
+  and holds the floor once the growth fits.
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.
-- **Collapse intro** — the ten-second timeline freezes on its final frame; a
-  seed always reproduces one run's look and two seeds disagree; (Metal 4 only)
-  the discs and rays draw, different times paint different frames, the opening
-  point's edge ramps over several pixels, the ending goes mostly black, and the
-  black field then shrinks into a bare white page.
+- **Collapse intro** — the timeline's phase boundaries and that every phase
+  reaches the renderer; a seed reproduces one run's look and two seeds
+  disagree. Appearance is reviewed by hand.

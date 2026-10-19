@@ -100,7 +100,8 @@ final class MetalTests: XCTestCase {
         // restarting.
         let board = Board(width: 256, height: 16, start: .center)
         let simulation = try MetalSimulation(
-            spec: spec, cols: 32, rows: 8, context: context, board: board)
+            spec: spec, cols: 32, rows: 8, context: context, board: board,
+            minimumZoom: 0.5)
 
         simulation.setZoom(2)
         XCTAssertEqual(simulation.zoom, 2)
@@ -120,8 +121,101 @@ final class MetalTests: XCTestCase {
         XCTAssertEqual(simulation.cols, 8)
         XCTAssertEqual(simulation.rows, 2)
         simulation.setZoom(0.01)
-        XCTAssertEqual(simulation.zoom, ViewportGeometry.minimumZoom)
+        XCTAssertEqual(simulation.zoom, 0.5)
         XCTAssertEqual(simulation.cols, 64)
         XCTAssertEqual(simulation.rows, 16)
+    }
+
+    /// The twin layout shares one horizon row and grows away from it in both
+    /// directions. Each branch pins its newest row to its outer edge, and the
+    /// pair is an exact vertical mirror around the horizon.
+    func testTwinGrowsOutwardFromTheHorizon() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 80
+        let rows = 39
+        let half = ViewportGeometry.twinHalfRows(rows: rows)
+        let board = Board(width: 160, height: 16, start: .center)
+        let simulation = try MetalSimulation(
+            spec: spec, cols: cols, rows: rows, context: context, board: board,
+            twin: true)
+        XCTAssertEqual(simulation.twinHalfRows, half)
+
+        let seed = values(try simulation.renderGPU(chunk: 0))
+        for row in 0..<rows {
+            let count = rowCount(seed, row: row, cols: cols)
+            if row == half {
+                XCTAssertEqual(count, 1, "the seed sits on the horizon row")
+            } else {
+                XCTAssertEqual(count, 0, "row \(row) stays background before growth")
+            }
+        }
+
+        let grown = values(try simulation.renderGPU(chunk: 3))
+        for distance in 0...half {
+            for col in 0..<cols {
+                XCTAssertEqual(
+                    grown[(half - distance) * cols + col],
+                    grown[(half + distance) * cols + col],
+                    "row \(half - distance) mirrors row \(half + distance)")
+            }
+        }
+        XCTAssertGreaterThan(
+            rowCount(grown, row: half - 3, cols: cols), 1,
+            "the newest row has grown past the seed")
+        XCTAssertEqual(
+            rowCount(grown, row: half - 4, cols: cols), 0,
+            "rows the run has not reached stay background")
+        XCTAssertEqual(rowCount(grown, row: 0, cols: cols), 0)
+        XCTAssertEqual(
+            rowCount(grown, row: half, cols: cols), 1,
+            "the horizon still shows the seed row")
+    }
+
+    /// A zoom-out refits both branches of the twin layout: the horizon stays in
+    /// the centre, the branches keep mirroring, and no row keeps stale cells.
+    func testTwinRefitsOnZoom() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 40
+        let rows = 21
+        let board = Board(width: 160, height: 16, start: .center)
+        let simulation = try MetalSimulation(
+            spec: spec, cols: cols, rows: rows, context: context, board: board,
+            minimumZoom: 0.25, twin: true)
+        _ = try simulation.renderGPU(chunk: 4)
+
+        simulation.setZoom(0.5)
+        let zoomed = values(try simulation.renderGPU(chunk: 0))
+        let zoomedRows = simulation.rows
+        let half = ViewportGeometry.twinHalfRows(rows: zoomedRows)
+        XCTAssertEqual(zoomedRows, rows * 2 - 1)
+        XCTAssertEqual(half, rows - 1)
+        for distance in 0...half {
+            for col in 0..<simulation.cols {
+                XCTAssertEqual(
+                    zoomed[(half - distance) * simulation.cols + col],
+                    zoomed[(half + distance) * simulation.cols + col],
+                    "row \(half - distance) mirrors after the zoom")
+            }
+        }
+        XCTAssertEqual(
+            rowCount(zoomed, row: half, cols: simulation.cols), 1,
+            "the horizon row the growth started from survives the zoom")
+        XCTAssertGreaterThan(
+            rowCount(zoomed, row: half - 4, cols: simulation.cols), 1,
+            "the latest row stays in view")
+    }
+
+    private func values(_ grid: GPUColorGrid) -> [UInt8] {
+        let cells = grid.buffer.contents().bindMemory(
+            to: UInt8.self, capacity: grid.cols * grid.rows)
+        return Array(UnsafeBufferPointer(start: cells, count: grid.cols * grid.rows))
+    }
+
+    private func rowCount(_ cells: [UInt8], row: Int, cols: Int) -> Int {
+        (0..<cols).reduce(0) { $0 + (cells[row * cols + $1] == 0 ? 0 : 1) }
     }
 }

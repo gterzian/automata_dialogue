@@ -142,14 +142,14 @@ final class LayerRenderer {
 
     private func prepare(cols: Int, rows: Int, cells: any MTLBuffer) throws -> Buffers {
         let spanCapacity = max(1, cols * rows)
-        // The grid resizes with zoom but the color buffer does not, so a
-        // zoom-in reuses the spans and a zoom-out only grows them; a pinch does
-        // not reallocate every frame.
+        // The reveal zooms continuously, so the grid grows a little each frame.
+        // Grow geometrically when it outgrows the buffer, so a run reallocates
+        // a handful of times instead of every frame.
         if let buffers, sameBuffer(buffers.cells, cells), buffers.spansCapacity >= spanCapacity {
             return buffers
         }
         let device = context.device
-        let capacity = max(spanCapacity, buffers?.spansCapacity ?? 0)
+        let capacity = max(spanCapacity, (buffers?.spansCapacity ?? 0) * 3 / 2)
         var owned: [any MTLBuffer] = []
         guard let spans = device.makeBuffer(
                 length: capacity * MemoryLayout<Span>.stride, options: .storageModeShared

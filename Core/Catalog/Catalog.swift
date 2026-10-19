@@ -646,8 +646,8 @@ public enum Catalog {
             // MARK: Complex localized structures (14)
             eca(
                 "E110", 110, title: "Rule 110", behavior: .complexity,
-                look: "From a single cell the pattern grows to one side: a regular background of small triangles with localized structures of many sizes traveling through it and colliding.",
-                width: 1201, height: 400, start: .rightmost, pinRight: true
+                look: "From a random full-length row the pattern organizes into a regular background of small triangles crossed by localized structures that move at different speeds and collide.",
+                width: 1201, height: 400, start: .random(seed: 110, density: 0.5)
             ),
             eca(
                 "E110.rand", 110, title: "Rule 110, random row", behavior: .complexity,
