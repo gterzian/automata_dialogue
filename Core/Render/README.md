@@ -62,17 +62,36 @@ argument buffer already carries.
 runs. It is a fixed ten-second timeline that freezes on its final frame, so the
 window rests on the white page if the model is still working.
 
+`CollapseVariation.seeded` turns one 64-bit draw into the run's look — phase
+skew, form offset, contour wander, colour warmth, ray layout, starburst
+sectors, noise slice, and grain seed — and `WorkingIndicator.start()` draws a
+fresh one for every run. New variation belongs there, not in the shader as a
+new constant: everything visible has to differ between runs, or the exchange
+reads as a fixed video.
+
 One full-resolution render pass (`collapse_fragment`) composites the whole
 sequence in draw order:
 
-1. A mottled mauve field, darkest at the corners.
+1. A mottled field, darkest at the corners, rose-to-violet by the run's warmth.
 2. Large discs from a nine-entry list, drawn back to front. Each disc is white,
    a shaded gradient, a ring, or a soft glow, with a dark rim and an optional
    penumbra.
 3. Up to eight soft rays with their apexes at the center.
-4. The late starburst, 48 alternating dark and light wedges.
+4. The late starburst, alternating dark and light wedges.
 5. The center discs and rings, which cover the rays where they converge.
 6. The final blackout, the shrinking black field, and the ink point.
+
+The scene is drawn to look painted rather than computed: one noise-driven
+wander displaces every circle's radius, each disc's edge feathers over a
+fraction of its own radius, shaded fills carry an off-centre highlight and the
+field's texture, the starburst's wedge edges are roughened by that texture, and
+a per-frame grain covers the frame. Discs and rays whose edges only differ by
+`fwidth` read as vector shapes, so keep the proportional feather when adding
+one.
+
+The shrinking black field fades out as its radius reaches zero, so the frozen
+final frame is the bare white page: a field that ends on `smoothstep` around a
+zero radius leaves a gray pixel at the centre.
 
 The CPU recomputes the disc/ray lists and the timeline uniforms each frame. The
 scene shader writes the drawable directly; there are no offscreen targets,
@@ -102,8 +121,9 @@ shared uniform, disc, and ray buffers.
   `LayerRenderer` turns a `GPUColorGrid` into a draw. The window refits every
   display row each frame, so every frame recompacts the whole grid.
 - **Collapse intro** (`ShaderSource.collapse`, `CollapseRenderer`,
-  `CollapseTimeline`, `WorkingIndicator`, `IndicatorActor`) — the discs, rays,
-  starburst, and final shrink the review window shows while the model runs.
+  `CollapseTimeline`, `CollapseVariation`, `WorkingIndicator`,
+  `IndicatorActor`) — the discs, rays, starburst, and final shrink the review
+  window shows while the model runs.
   `IndicatorActor` owns the `GPUContext`, renderer, and `DisplayLinkClock` on
   its own `RenderExecutor`, the way `RenderActor` does for a run, and reuses the
   indicator and layer across runs so the pipeline compiles once.

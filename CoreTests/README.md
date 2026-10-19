@@ -24,7 +24,8 @@ What must be covered:
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.
-- **Collapse intro** — the ten-second timeline freezes on its final frame;
-  (Metal 4 only) the discs and rays draw, different times paint different
-  frames, the ending goes mostly black, and the black field then shrinks into a
-  bare white page.
+- **Collapse intro** — the ten-second timeline freezes on its final frame; a
+  seed always reproduces one run's look and two seeds disagree; (Metal 4 only)
+  the discs and rays draw, different times paint different frames, the opening
+  point's edge ramps over several pixels, the ending goes mostly black, and the
+  black field then shrinks into a bare white page.

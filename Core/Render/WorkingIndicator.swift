@@ -19,6 +19,7 @@ public final class WorkingIndicator: @unchecked Sendable {
     private let ink: PaletteColor
     private let lock = NSLock()
     private var startedAt: CFTimeInterval = 0
+    private var variation = CollapseVariation.standard
     private var finished = false
     private var error: String?
 
@@ -42,12 +43,13 @@ public final class WorkingIndicator: @unchecked Sendable {
         }
     }
 
-    /// Starts (or restarts) the sequence from its opening point. Safe to call
-    /// after `stop()`.
+    /// Starts (or restarts) the sequence from its opening point, drawing a
+    /// fresh look for this run. Safe to call after `stop()`.
     public func start() {
         lock.lock()
         startedAt = 0
         finished = false
+        variation = .seeded(UInt64.random(in: .min ... .max))
         lock.unlock()
         clock.start { _ in }
     }
@@ -78,10 +80,11 @@ public final class WorkingIndicator: @unchecked Sendable {
         let done = finished
         if startedAt == 0 { startedAt = timestamp }
         let elapsed = timestamp - startedAt
+        let variation = variation
         lock.unlock()
         guard !done else { return }
 
-        let frame = CollapseTimeline.frame(time: Float(elapsed))
+        let frame = CollapseTimeline.frame(time: Float(elapsed), variation: variation)
         do {
             try renderer.render(
                 into: drawable.texture, frame: frame, white: white, ink: ink)

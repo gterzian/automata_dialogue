@@ -33,6 +33,47 @@ final class CollapseTests: XCTestCase {
         XCTAssertEqual(frozen.shrinkRadius, 0, accuracy: 0.001)
     }
 
+    /// One seed always reproduces one run's look, and two seeds disagree in the
+    /// geometry a viewer can tell apart.
+    func testVariationIsReproducibleAndDiffers() {
+        let first = CollapseVariation.seeded(11)
+        let again = CollapseVariation.seeded(11)
+        XCTAssertEqual(first.rayAngles, again.rayAngles)
+        XCTAssertEqual(first.rayWidths, again.rayWidths)
+        XCTAssertEqual(first.warp, again.warp)
+
+        let other = CollapseVariation.seeded(12)
+        XCTAssertNotEqual(first.rayAngles, other.rayAngles)
+        XCTAssertNotEqual(first.centerX, other.centerX)
+        XCTAssertNotEqual(first.grainSeed, other.grainSeed)
+    }
+
+    /// Every seed stays inside the buffers and the bounds the renderer assumes,
+    /// and still ends on the bare white page.
+    func testEverySeedStaysInBoundsAndEndsOnWhite() {
+        for seed in UInt64(0)..<32 {
+            let variation = CollapseVariation.seeded(seed)
+            XCTAssertTrue((4...8).contains(variation.rayAngles.count))
+            XCTAssertEqual(variation.rayAngles.count, variation.rayWidths.count)
+            XCTAssertEqual(variation.rayAngles.count, variation.rayDarknesses.count)
+            XCTAssertGreaterThan(variation.warp, 0)
+            XCTAssertLessThan(variation.warp, 0.1)
+            XCTAssertLessThanOrEqual(abs(variation.centerX), 0.03)
+            XCTAssertLessThanOrEqual(abs(variation.centerY), 0.03)
+
+            let middle = CollapseTimeline.frame(time: 7.5, variation: variation)
+            XCTAssertLessThanOrEqual(middle.discs.count, CollapseTimeline.maxDiscs)
+            XCTAssertLessThanOrEqual(middle.rays.count, CollapseTimeline.maxRays)
+            XCTAssertGreaterThan(middle.dotRadius, 0)
+
+            let end = CollapseTimeline.frame(
+                time: CollapseTimeline.duration, variation: variation)
+            XCTAssertEqual(end.shrinkRadius, 0, accuracy: 0.001)
+            XCTAssertEqual(end.blackout, 1, accuracy: 0.001)
+            XCTAssertEqual(end.dotOpacity, 0, accuracy: 0.001)
+        }
+    }
+
     /// The sequence draws dark discs and rays over the white page, and different
     /// times paint different frames.
     func testSequenceDrawsAndAdvances() throws {
@@ -91,6 +132,57 @@ final class CollapseTests: XCTestCase {
             end[centre + 2], 200, "the centre of the final frame is warm white")
     }
 
+    /// The opening point is a soft, uneven mound rather than a hard disc: its
+    /// edge ramps over several pixels, and two seeds draw it differently.
+    func testOpeningPointIsSoftAndUneven() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let renderer = try CollapseRenderer(context: context, pixelFormat: .bgra8Unorm)
+        let size = 512
+        let texture = try makeTexture(context, size: size)
+        let palette = Palette.standard(stateCount: 2)
+        let variation = CollapseVariation.seeded(5)
+
+        let pixels = try renderPixels(
+            renderer, into: texture, time: 0.5, size: size, variation: variation,
+            white: palette[0], ink: palette[1])
+        let background = Int(palette[0].b * 255)
+        var darkest = (value: 255, index: 0)
+        for index in stride(from: 0, to: pixels.count, by: 4) where Int(pixels[index]) < darkest.value {
+            darkest = (Int(pixels[index]), index)
+        }
+        XCTAssertLessThan(darkest.value, 60, "the point must be drawn in ink")
+        // Across the point's widest row, a hard anti-aliased edge jumps most of
+        // the contrast between two pixels; a feathered mound spreads it out.
+        var row = 0
+        var width = 0
+        for candidate in 0..<size {
+            let count = (0..<size).reduce(0) { total, column in
+                Int(pixels[(candidate * size + column) * 4]) < background - 40
+                    ? total + 1 : total
+            }
+            if count > width {
+                width = count
+                row = candidate
+            }
+        }
+        XCTAssertGreaterThan(width, 2, "the point must be big enough to measure")
+        var largestStep = 0
+        for column in 1..<size {
+            let left = Int(pixels[(row * size + column - 1) * 4])
+            let right = Int(pixels[(row * size + column) * 4])
+            largestStep = max(largestStep, abs(right - left))
+        }
+        XCTAssertLessThan(
+            largestStep, (background - darkest.value) * 2 / 3,
+            "the point's edge must ramp, not step")
+
+        let other = try renderPixels(
+            renderer, into: texture, time: 0.5, size: size,
+            variation: CollapseVariation.seeded(6), white: palette[0], ink: palette[1])
+        XCTAssertNotEqual(pixels, other, "each seed must draw its own point")
+    }
+
     private func darkPixels(_ pixels: [UInt8]) -> Int {
         var count = 0
         for index in stride(from: 0, to: pixels.count, by: 4) {
@@ -115,10 +207,11 @@ final class CollapseTests: XCTestCase {
         into texture: MTLTexture,
         time: Float,
         size: Int,
+        variation: CollapseVariation = .standard,
         white: PaletteColor,
         ink: PaletteColor
     ) throws -> [UInt8] {
-        let frame = CollapseTimeline.frame(time: time)
+        let frame = CollapseTimeline.frame(time: time, variation: variation)
         try renderer.render(into: texture, frame: frame, white: white, ink: ink)
         var bytes = [UInt8](repeating: 0, count: size * size * 4)
         bytes.withUnsafeMutableBytes { buffer in

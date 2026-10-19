@@ -33,6 +33,110 @@ struct CollapseRay {
     var darkness: Float
 }
 
+/// One run's look for the intro: where the form sits, how its contour wanders,
+/// which way the rays lie, how the starburst is cut, and which colour and
+/// texture it takes. `WorkingIndicator.start()` draws a fresh seed per run, so
+/// two runs never paint the same sequence, and one seed always reproduces one
+/// run's sequence.
+struct CollapseVariation {
+    /// Seconds the opening phases lead or lag; the ending stays anchored.
+    var timeSkew: Float
+    /// Where the form sits, in screen-height units from the frame's centre.
+    var centerX: Float
+    var centerY: Float
+    /// 0 keeps the field violet, 1 makes it the reference film's rose.
+    var warmth: Float
+    /// How far the contour wanders from a circle, as a fraction of the radius.
+    var warp: Float
+    /// Slice of the noise volume the field and the contour read.
+    var noiseOrigin: SIMD3<Float>
+    var smokeScale: Float
+    var smokeStrength: Float
+    var rayAngles: [Float]
+    var rayWidths: [Float]
+    var rayDarknesses: [Float]
+    /// Signed radians per second the ray fan turns.
+    var raySpin: Float
+    var burstSectors: Float
+    var burstRotation: Float
+    var burstWidth: Float
+    var burstLight: Float
+    var dotScale: Float
+    /// Scale of the small center structure and of its ring.
+    var centerScale: Float
+    var innerRatio: Float
+    var ringScale: Float
+    var grainSeed: Float
+
+    /// The look the reference sequence uses; tests pin one drawing with it.
+    static let standard = CollapseVariation.seeded(0)
+
+    static func seeded(_ seed: UInt64) -> CollapseVariation {
+        var draw = SplitMix64(seed: seed)
+        let rayCount = 4 + Int(draw.unit() * 5)
+        let spacing = 2 * Float.pi / Float(rayCount)
+        let phase = draw.float(0...(2 * Float.pi))
+        var angles: [Float] = []
+        var widths: [Float] = []
+        var darknesses: [Float] = []
+        for index in 0..<rayCount {
+            angles.append(
+                phase + Float(index) * spacing + draw.float(-0.3...0.3) * spacing)
+            widths.append(draw.float(0.7...1.35))
+            darknesses.append(draw.float(0.85...1.1))
+        }
+        return CollapseVariation(
+            timeSkew: draw.float(-0.1...0.1),
+            centerX: draw.float(-0.03...0.03),
+            centerY: draw.float(-0.02...0.02),
+            warmth: draw.float(0.35...1.0),
+            warp: draw.float(0.03...0.075),
+            noiseOrigin: SIMD3(draw.unit(), draw.unit(), draw.unit()),
+            smokeScale: draw.float(0.16...0.26),
+            smokeStrength: draw.float(0.75...1.0),
+            rayAngles: angles,
+            rayWidths: widths,
+            rayDarknesses: darknesses,
+            raySpin: draw.float(0.3...0.9) * (draw.unit() < 0.5 ? -1 : 1),
+            burstSectors: Float(2 * (17 + Int(draw.unit() * 11))),
+            burstRotation: draw.float(0...(2 * Float.pi)),
+            burstWidth: draw.float(0.42...0.58),
+            burstLight: draw.float(0.5...0.7),
+            dotScale: draw.float(0.8...1.2),
+            centerScale: draw.float(0.88...1.12),
+            innerRatio: draw.float(0.7...0.8),
+            ringScale: draw.float(0.85...1.15),
+            grainSeed: draw.float(0...256))
+    }
+}
+
+/// The draw sequence behind `CollapseVariation.seeded`, so a run is
+/// reproducible from its seed.
+private struct SplitMix64 {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    private mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+
+    /// Uniform in 0..<1, from the high 24 bits so the float is exact.
+    mutating func unit() -> Float {
+        Float(next() >> 40) * (1.0 / 16_777_216.0)
+    }
+
+    mutating func float(_ range: ClosedRange<Float>) -> Float {
+        range.lowerBound + (range.upperBound - range.lowerBound) * unit()
+    }
+}
+
 /// The expanding-and-collapsing intro the review window shows while the model
 /// runs. A point grows into a shaded disc, the frame whites out, nested discs
 /// and a ring open up, rays cross them, a starburst fills the frame, the frame
@@ -41,7 +145,8 @@ struct CollapseRay {
 ///
 /// One wall-clock time drives every layer, so the sequence stays in step with
 /// the display link even when a frame is dropped. The timeline is 10 seconds
-/// and freezes on its final frame.
+/// and freezes on its final frame. A `CollapseVariation` decides how this run's
+/// sequence is drawn and paced, so two runs differ.
 enum CollapseTimeline {
     static let duration = Float(ReviewIntro.duration)
 
@@ -55,6 +160,7 @@ enum CollapseTimeline {
         var burstRotation: Float
         var burstWidth: Float
         var burstLight: Float
+        var burstSectors: Float
         var blackout: Float
         var shrinkMix: Float
         var shrinkRadius: Float
@@ -63,50 +169,69 @@ enum CollapseTimeline {
         var dotRadius: Float
         var noiseScale: Float
         var smokeStrength: Float
+        /// Centre of the whole form, in screen-height units from the frame's.
+        var centerX: Float
+        var centerY: Float
+        /// Noise slice the field and the contour read, and the contour's wander.
+        var noiseX: Float
+        var noiseY: Float
+        var noiseZ: Float
+        var warp: Float
+        var warmth: Float
+        var grainSeed: Float
         var discs: [CollapseDisc]
         var rays: [CollapseRay]
     }
 
-    static func frame(time rawTime: Float) -> Frame {
+    static func frame(
+        time rawTime: Float,
+        variation: CollapseVariation = .standard
+    ) -> Frame {
         let time = min(max(rawTime, 0), duration)
+        // The opening phases lead or lag by a fraction of a second per run; the
+        // ending stays on `time` so the freeze and the cut to the automaton do
+        // not move.
+        let t = max(time + variation.timeSkew, 0)
 
-        let sphereGrow = smoothstep(1.8, 3.8, time)
+        let sphereGrow = smoothstep(1.8, 3.8, t)
         let sphereRadius = 0.02 + 1.5 * pow(sphereGrow, 2.5)
-        let sphereOpacity = smoothstep(1.6, 2.4, time) * (1 - smoothstep(5.0, 5.4, time))
+        let sphereOpacity = smoothstep(1.6, 2.4, t) * (1 - smoothstep(5.0, 5.4, t))
 
-        let glowRadius = 0.02 + 0.12 * smoothstep(2.0, 4.0, time)
-        let glowOpacity = smoothstep(1.8, 2.6, time) * (1 - smoothstep(4.0, 4.6, time))
-        let whiteoutGrow = pow(smoothstep(4.0, 5.0, time), 3)
-        let coreRadius = 0.02 + 0.09 * smoothstep(4.0, 4.6, time) + 1.5 * whiteoutGrow
-        let coreOpacity = smoothstep(4.0, 4.5, time)
+        let glowRadius = 0.02 + 0.12 * smoothstep(2.0, 4.0, t)
+        let glowOpacity = smoothstep(1.8, 2.6, t) * (1 - smoothstep(4.0, 4.6, t))
+        let whiteoutGrow = pow(smoothstep(4.0, 5.0, t), 3)
+        let coreRadius = 0.02 + 0.09 * smoothstep(4.0, 4.6, t) + 1.5 * whiteoutGrow
+        let coreOpacity = smoothstep(4.0, 4.5, t)
 
-        let fieldAlpha = smoothstep(2.4, 3.8, time) * (1 - smoothstep(4.8, 5.4, time))
+        let fieldAlpha = smoothstep(2.4, 3.8, t) * (1 - smoothstep(4.8, 5.4, t))
 
-        let pageRadius = 0.40 + 0.80 * smoothstep(5.5, 8.5, time)
-        let pageOpacity = smoothstep(5.2, 5.8, time)
-        let largeShadeRadius = 0.45 * smoothstep(6.2, 7.4, time)
-        let largeShadeOpacity = smoothstep(6.2, 7.0, time)
-            * (1 - smoothstep(7.8, 8.3, time))
+        let pageRadius = 0.40 + 0.80 * smoothstep(5.5, 8.5, t)
+        let pageOpacity = smoothstep(5.2, 5.8, t)
+        let largeShadeRadius = 0.45 * smoothstep(6.2, 7.4, t)
+        let largeShadeOpacity = smoothstep(6.2, 7.0, t)
+            * (1 - smoothstep(7.8, 8.3, t))
 
-        let innerGrow = smoothstep(5.2, 5.8, time)
-        let innerShrink = smoothstep(5.8, 8.2, time)
-        let shadeRadius = (0.16 - 0.125 * innerShrink) * innerGrow
-        let innerWhiteRadius = max(shadeRadius * 0.75, 0.008)
-        let ringRadius = max((0.08 - 0.06 * innerShrink) * innerGrow, 0.0)
+        let innerGrow = smoothstep(5.2, 5.8, t)
+        let innerShrink = smoothstep(5.8, 8.2, t)
+        let shadeRadius = (0.16 * variation.centerScale - 0.125 * innerShrink) * innerGrow
+        let innerWhiteRadius = max(shadeRadius * variation.innerRatio, 0.008)
+        let ringRadius = max(
+            (0.08 * variation.ringScale - 0.06 * innerShrink) * innerGrow, 0.0)
         let centerRadius = max(shadeRadius * 0.35, 0.006)
 
-        let rayProgress = smoothstep(7.5, 9.3, time)
-        let rayGrow = smoothstep(6.0, 9.2, time)
-        let rayCount = time < 6.0 ? 0 : 1 + Int(7 * pow(rayProgress, 3))
-        let rayRotation = 0.8 * (time - 6.2)
-        let rayAngles: [Float] = [0, .pi / 2, .pi / 4, 3 * .pi / 4, 0.12 * .pi, 0.62 * .pi, 0.37 * .pi, 0.87 * .pi]
+        let rayProgress = smoothstep(7.5, 9.3, t)
+        let rayGrow = smoothstep(6.0, 9.2, t)
+        let rayCount = t < 6.0
+            ? 0
+            : 1 + Int(Float(variation.rayAngles.count - 1) * pow(rayProgress, 3))
+        let raySpin = variation.raySpin * max(t - 6.2, 0)
         var rays: [CollapseRay] = []
         for index in 0..<min(rayCount, maxRays) {
             rays.append(CollapseRay(
-                angle: rayAngles[index] + rayRotation,
-                halfWidth: mix(0.012, 0.045, rayGrow),
+                angle: variation.rayAngles[index] + raySpin,
+                halfWidth: variation.rayWidths[index] * mix(0.012, 0.045, rayGrow),
                 length: 2,
-                darkness: 0.55 + 0.35 * rayGrow
+                darkness: variation.rayDarknesses[index] * (0.55 + 0.35 * rayGrow)
             ))
         }
 
@@ -117,8 +242,8 @@ enum CollapseTimeline {
         let shrinkRadius = 1.3 * pow(1 - shrinkProgress, 3)
         let dotShrink = smoothstep(8.9, 9.2, time)
 
-        let earlyDot = mix(0.004, 0.018, smoothstep(0, 2.0, time))
-        let dotRadius = mix(earlyDot, 0.006, smoothstep(2.0, 4.0, time))
+        let earlyDot = mix(0.013, 0.024, smoothstep(0, 2.0, t)) * variation.dotScale
+        let dotRadius = mix(earlyDot, 0.006 * variation.dotScale, smoothstep(2.0, 4.0, t))
 
         var discs: [CollapseDisc] = []
         // The first shaded sphere.
@@ -180,8 +305,8 @@ enum CollapseTimeline {
         discs.append(CollapseDisc(
             radius: shadeRadius,
             fillMode: 1,
-            rimWidth: 0.008 + 0.03 * shadeRadius,
-            rimDark: 0.9,
+            rimWidth: 0.006 + 0.025 * shadeRadius,
+            rimDark: 0.8,
             penumbraWidth: 0.02 + 0.10 * shadeRadius,
             penumbraDark: 0.4,
             opacity: innerGrow,
@@ -200,8 +325,8 @@ enum CollapseTimeline {
         discs.append(CollapseDisc(
             radius: ringRadius,
             fillMode: 2,
-            rimWidth: 0.004 + 0.006 * innerGrow,
-            rimDark: 0.9,
+            rimWidth: 0.003 + 0.005 * innerGrow,
+            rimDark: 0.75,
             penumbraWidth: 0,
             penumbraDark: 0,
             opacity: smoothstep(7.0, 7.8, time) * (1 - blackout),
@@ -222,16 +347,25 @@ enum CollapseTimeline {
             time: time,
             fieldAlpha: fieldAlpha,
             burstAlpha: burstAlpha,
-            burstRotation: 0.6 * time,
-            burstWidth: 0.5,
-            burstLight: 0.6,
+            burstRotation: variation.burstRotation + 0.6 * t,
+            burstWidth: variation.burstWidth,
+            burstLight: variation.burstLight,
+            burstSectors: variation.burstSectors,
             blackout: blackout,
             shrinkMix: shrinkMix,
             shrinkRadius: shrinkRadius,
             dotOpacity: 1 - dotShrink,
             dotRadius: dotRadius,
-            noiseScale: 0.28,
-            smokeStrength: 0.9,
+            noiseScale: variation.smokeScale,
+            smokeStrength: variation.smokeStrength,
+            centerX: variation.centerX,
+            centerY: variation.centerY,
+            noiseX: variation.noiseOrigin.x,
+            noiseY: variation.noiseOrigin.y,
+            noiseZ: variation.noiseOrigin.z,
+            warp: variation.warp,
+            warmth: variation.warmth,
+            grainSeed: variation.grainSeed,
             discs: discs,
             rays: rays
         )
@@ -276,6 +410,15 @@ final class CollapseRenderer {
         var smokeStrength: Float
         var discCount: Float
         var rayCount: Float
+        var centerX: Float
+        var centerY: Float
+        var warp: Float
+        var noiseX: Float
+        var noiseY: Float
+        var noiseZ: Float
+        var warmth: Float
+        var burstSectors: Float
+        var grainSeed: Float
         var white: SIMD4<Float>
         var ink: SIMD4<Float>
     }
@@ -411,6 +554,15 @@ final class CollapseRenderer {
             smokeStrength: frame.smokeStrength,
             discCount: Float(frame.discs.count),
             rayCount: Float(frame.rays.count),
+            centerX: frame.centerX,
+            centerY: frame.centerY,
+            warp: frame.warp,
+            noiseX: frame.noiseX,
+            noiseY: frame.noiseY,
+            noiseZ: frame.noiseZ,
+            warmth: frame.warmth,
+            burstSectors: frame.burstSectors,
+            grainSeed: frame.grainSeed,
             white: white.simd,
             ink: ink.simd
         )
@@ -445,6 +597,14 @@ final class CollapseRenderer {
         }
         var values = [Float](repeating: 0, count: size * size * size)
         for index in values.indices { values[index] = Float.random(in: 0...1) }
+        // The shader samples this volume with linear filtering, so a white-noise
+        // volume creases the field and the contours at every texel boundary.
+        // Smoothing it first costs one startup pass and keeps both readings soft.
+        for _ in 0..<2 { values = smoothed(values, size: size) }
+        let low = values.min() ?? 0
+        let high = values.max() ?? 1
+        let span = max(high - low, 1e-5)
+        for index in values.indices { values[index] = (values[index] - low) / span }
         values.withUnsafeBytes { bytes in
             guard let base = bytes.baseAddress else { return }
             texture.replace(
@@ -456,6 +616,33 @@ final class CollapseRenderer {
                 bytesPerImage: size * size * MemoryLayout<Float>.size)
         }
         return texture
+    }
+
+    /// One wrapped box blur along each axis, so the cube's opposite faces join
+    /// without a seam under the sampler's `repeat` address mode.
+    private static func smoothed(_ values: [Float], size: Int) -> [Float] {
+        let radius = 1
+        let taps = Float(2 * radius + 1)
+        var source = values
+        var target = values
+        for axis in 0..<3 {
+            for z in 0..<size {
+                for y in 0..<size {
+                    for x in 0..<size {
+                        var sum: Float = 0
+                        for offset in -radius...radius {
+                            let sx = axis == 0 ? (x + offset + size) % size : x
+                            let sy = axis == 1 ? (y + offset + size) % size : y
+                            let sz = axis == 2 ? (z + offset + size) % size : z
+                            sum += source[(sz * size + sy) * size + sx]
+                        }
+                        target[(z * size + y) * size + x] = sum / taps
+                    }
+                }
+            }
+            swap(&source, &target)
+        }
+        return source
     }
 
     private static func makePipeline(

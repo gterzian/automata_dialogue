@@ -23,10 +23,11 @@
   window shows the collapse intro (`CollapseTimeline`): a point grows into a
   shaded disc, the frame whites out into nested discs and rays, a starburst
   fills the frame, the frame goes black, and that black field shrinks into the
-  automaton's warm white page with a final ink point that shrinks away. The
-  ten-second sequence holds its last frame until inference finishes, and the
-  automaton is shown after the intro settles, so a fast model does not cut off
-  the ending. A `.rand` entry redraws from a
+  automaton's warm white page with a final ink point that shrinks away. Every
+  run redraws the intro with its own timings, geometry, colour, and grain, so
+  the wait never repeats itself. The ten-second sequence holds its last frame
+  until inference finishes, and the automaton is shown after the intro settles,
+  so a fast model does not cut off the ending. A `.rand` entry redraws from a
   fresh row each time. The window's drawable holds one cell per display column
   (`ViewportGeometry`), and the run simulates a board ten windows wide: the
   layer stretches a small cell grid over the whole window while the viewport
