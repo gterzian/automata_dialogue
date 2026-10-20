@@ -18,17 +18,15 @@
   on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`; see
   `Core/Render/README.md`). It shows the submitted
   image until Return,
-  plays the collapse intro, runs the model, shows the chosen automaton until the
-  next Return, and cycles the images until the window is closed. The intro
-  (`CollapseTimeline`) is one three-second cycle: a one-cell ink dot ignites,
-  bursts to cover the window, holds and flickers, and collapses into the
-  horizontal line the automaton grows from. Every run paints it with its own
-  timings, geometry, colour, and grain, so the wait never repeats itself. The
-  window freezes on that line while inference runs, so the wait shows the line
-  rather than a blank page. Once the chosen entry is known, an entry that
-  seeds from a single centred cell retracts the line onto that cell, so the
-  automaton appears to start from the intro's last image; every other entry
-  keeps the line. A `.rand` entry redraws from a fresh row each time. The reveal
+  plays the collapse intro while the model runs, shows the chosen automaton
+  until the next Return, and cycles the images until the window is closed. The
+  intro (`CollapseTimeline`) runs alongside inference; if the model outlasts it,
+  the window freezes on its rest frame rather than a blank page. Every run draws
+  a fresh variation, so the wait never repeats itself. Once the chosen entry is
+  known, an entry that seeds from a single centred cell retracts the rest frame
+  onto that cell, so the automaton appears to start from the intro's last image;
+  every other entry keeps the line. A `.rand` entry redraws from a fresh row
+  each time. The reveal
   then grows the chosen entry as two mirrored branches from that line: one
   branch grows upward and the other downward from the same horizon row. Both
   branches advance together, and the camera zooms out continuously at the

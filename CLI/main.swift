@@ -264,11 +264,10 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         await stopRun()
     }
 
-    /// Shows the collapse intro in the window while the model's turn is
-    /// prepared. A one-cell dot ignites, bursts to cover the window, and
-    /// collapses into the horizon line the reveal starts from. The intro settles
-    /// and stops drawing before inference begins; `present` or `stopThinking`
-    /// ends it.
+    /// The intro the review window shows while the model's turn is prepared.
+    /// The intro and the model run together; if the model outlasts the intro,
+    /// the window holds the rest frame until the choice lands. `present` or
+    /// `stopThinking` ends it.
     func showThinking() async {
         guard !isClosed, GPUContext.isAvailable else { return }
         let window = ensureWindow()
@@ -285,8 +284,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
 
         let actor = indicator ?? IndicatorActor()
         indicator = actor
-        // The intro's ending line is measured in horizon-row heights, so it
-        // thins to the same 3% hairline the reveal grows back from.
+        // The intro's ending line is measured in horizon-row heights so the
+        // retraction lands on one cell; the shader draws the line as a hairline
+        // and thickens it only for that retraction.
         let cols = ViewportGeometry.columns(size: contentSize)
         let rows = ViewportGeometry.twinRows(
             baseRows: ViewportGeometry.rows(size: contentSize, cols: cols), zoom: 1)
@@ -302,9 +302,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
 
     /// Waits for the intro to rest on the frame the reveal continues from, and
     /// for its clock to stop. The window stays responsive while it sleeps. The
-    /// wait is bounded because the intro now gates inference: a display link
-    /// that stopped delivering updates must not hold the turn up, and the
-    /// caller stops the intro either way.
+    /// wait is bounded: a display link that stopped delivering updates must not
+    /// hold the turn up, and the caller stops the intro either way.
     func waitForThinkingToSettle() async {
         var waited: TimeInterval = 0
         while !isClosed, waited < ReviewIntro.duration + ReviewIntro.finaleDuration + 2 {
@@ -370,13 +369,14 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// The indicator's drawable: full device pixels so the sphere and the
-    /// ending line stay smooth, capped so a large display does not run the
-    /// fragment shader over tens of millions of pixels.
+    /// The indicator's drawable: device pixels capped well below the reveal's
+    /// floor. The model runs while the intro animates, so a smaller drawable
+    /// keeps the indicator from competing with inference for GPU time; the
+    /// layer's linear magnification keeps the soft shapes smooth.
     private func indicatorDrawableSize(contentSize: CGSize, scale: CGFloat) -> CGSize {
         let pixelWidth = max(1, Int(contentSize.width * scale))
         let pixelHeight = max(1, Int(contentSize.height * scale))
-        let maxPixels = 4_000_000
+        let maxPixels = 1_500_000
         var width = pixelWidth
         var height = pixelHeight
         if width * height > maxPixels {
@@ -626,14 +626,18 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             await presenter.waitForEnter()
             if presenter.isClosed { break }
             await presenter.showThinking()
-            // The intro rests before the turn is prepared, so nothing is drawing
-            // while the model works (see `AGENTS.md`); the line stays up until
-            // the choice lands.
+            // The intro and the turn run together, so the line is already up
+            // when the choice lands. If the model outlasts the intro, the
+            // window holds the line; if the intro outlasts the model, the
+            // reveal waits for it to rest so the handoff has no jump.
+            let turn = Task.detached(priority: .userInitiated) {
+                await rateOne(
+                    engine: engine, path: path, directory: directory,
+                    dimension: setup.configuration.imageDimension, verbose: setup.verbose)
+            }
             await presenter.waitForThinkingToSettle()
+            let outcome = await turn.value
             await presenter.stopThinking()
-            let outcome = await rateOne(
-                engine: engine, path: path, directory: directory,
-                dimension: setup.configuration.imageDimension, verbose: setup.verbose)
             shown += 1
             if let spec = printRateOutcome(outcome) {
                 chosen += 1

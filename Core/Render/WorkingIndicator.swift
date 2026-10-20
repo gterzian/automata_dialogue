@@ -4,9 +4,10 @@ import QuartzCore
 
 /// Presents the intro the review window shows while the model's turn is
 /// prepared on a `CAMetalLayer`, driven by a `DisplayLinkClock`. The sequence
-/// is one short cycle that ends on the horizon line the reveal's two branches
-/// grow from; the clock freezes there, so the window draws nothing while
-/// inference runs (see the window sequence in `AGENTS.md`).
+/// is one cycle that ends on the horizon line the reveal's two branches grow
+/// from; the clock freezes there if the model outlasts the intro, so the window
+/// keeps the last presented frame instead of drawing on. The indicator runs at
+/// 30 fps on a reduced drawable because it shares the GPU with inference.
 /// Like `LayerSink`, it is confined to a render actor's thread and shared with
 /// the clock's non-isolated draw callback, so it is `@unchecked Sendable` and
 /// lock-guards the state the callback reads.
@@ -44,6 +45,9 @@ public final class WorkingIndicator: @unchecked Sendable {
         self.ink = ink
         self.clock = DisplayLinkClock(layer: layer)
         self.renderer = try CollapseRenderer(context: context, pixelFormat: layer.pixelFormat)
+        // The model runs while this animates, so 30 fps with the slow radial
+        // motion leaves most of the GPU to inference.
+        clock.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
         // The layer owns the residency of its drawables; the queue must know
         // about it.
         context.queue.addResidencySet(layer.residencySet)
@@ -54,9 +58,9 @@ public final class WorkingIndicator: @unchecked Sendable {
 
     /// Starts (or restarts) the sequence from its opening dot, drawing a fresh
     /// look for this run. `lineHalfThickness` is the automaton's horizon row
-    /// half-height in screen-height units, which is both the line the cycle
-    /// collapses into and the size of the dot it starts from. Safe to call
-    /// after `stop()`.
+    /// half-height in screen-height units: the shader scales the opening dot
+    /// and the resting hairline from it, and the finale lands on one cell of
+    /// that row. Safe to call after `stop()`.
     public func start(lineHalfThickness: Float) {
         lock.lock()
         startedAt = 0
@@ -106,8 +110,9 @@ public final class WorkingIndicator: @unchecked Sendable {
     }
 
     /// True once the sequence rests on the frame the reveal continues from and
-    /// the clock has stopped, so the window is drawing nothing. The window
-    /// waits on this before starting inference, and again after the retraction.
+    /// the clock has stopped, so the window is drawing nothing. The reveal
+    /// waits on this so its handoff has no jump, and the finale waits on it
+    /// again after the retraction.
     public var isSettled: Bool {
         lock.lock()
         defer { lock.unlock() }

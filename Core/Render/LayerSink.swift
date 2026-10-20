@@ -38,6 +38,13 @@ public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDel
         set { link.preferredFrameLatency = newValue }
     }
 
+    /// The display-link rate. A sink that shares the GPU with other work can
+    /// lower it without changing the animation's wall-clock timing.
+    public var preferredFrameRateRange: CAFrameRateRange {
+        get { link.preferredFrameRateRange }
+        set { link.preferredFrameRateRange = newValue }
+    }
+
     public func start(_ tick: @escaping @Sendable (TimeInterval) -> Void) {
         self.tick = tick
         lastTimestamp = 0

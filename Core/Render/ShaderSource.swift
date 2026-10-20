@@ -310,15 +310,11 @@ public enum ShaderSource {
     }
     """
 
-    /// The intro the review window shows while the model's turn is prepared: a
-    /// one-cell ink dot ignites, bursts to cover the frame, holds and flickers,
-    /// then collapses into the horizon line the reveal's two branches share.
-    /// The resting line can then retract onto the single centred cell an entry
-    /// seeds from, so the reveal grows out of the intro's last image.
-    ///
-    /// Everything is drawn by one full-screen fragment shader: the dot, the
-    /// bursting mass, the line, and the grain. No offscreen targets or upsample
-    /// are needed; the shader writes the drawable directly.
+    /// The intro the review window shows while the model's turn is prepared;
+    /// `CollapseTimeline` owns its timing and `CollapseVariation` its look.
+    /// Everything is drawn by one full-screen fragment shader: the layers, the
+    /// dot and line, and the grain. No offscreen targets or upsample are needed;
+    /// the shader writes the drawable directly.
     public static let collapse = """
     #include <metal_stdlib>
     using namespace metal;
@@ -329,8 +325,6 @@ public enum ShaderSource {
         float screenHeight;
         float noiseScale;
         float smokeStrength;
-        float centerX;
-        float centerY;
         float noiseX;
         float noiseY;
         float noiseZ;
@@ -338,12 +332,12 @@ public enum ShaderSource {
         float grainSeed;
         float dotScale;
         float endAlpha;
-        float bloom;
-        float collapse;
+        float wobble;
+        float haloScale;
+        float stretch;
         float lineHalfThickness;
-        float frontEnergy;
-        float lineSpring;
         float settle;
+        float4 grow;
         float4 white;
         float4 ink;
     };
@@ -373,13 +367,14 @@ public enum ShaderSource {
         return a * 0.65 + b * 0.35;
     }
 
-    // The silhouette's angular lobes, read from the volume by direction from
-    // the centre so ink spreads unevenly instead of like a perfect circle.
-    static float lobeNoise(texture3d<float> noise, float2 dir, float t, float3 origin) {
+    // Smooth noise read at the pixel position. Its low frequency bends the whole
+    // distance field gently, so each circle's edge undulates like ink in water.
+    static float edgeNoise(texture3d<float> noise, float2 p, float t, float scale,
+                           float3 origin) {
         constexpr sampler s(filter::linear, address::repeat);
-        float a = noise.sample(s, float3(dir * 0.35 + origin.xy, origin.z + t * 0.05)).r;
-        float b = noise.sample(s, float3(dir * 0.90 + origin.yx, origin.z + 0.30 + t * 0.09)).r;
-        return (a - 0.5) * 0.75 + (b - 0.5) * 0.25;
+        return noise.sample(
+            s, float3(p * scale + origin.xy + float2(t * 0.02, -t * 0.015),
+                      origin.z + t * 0.03)).r - 0.5;
     }
 
     // Per-pixel white noise for the film grain; the seed moves each frame.
@@ -394,76 +389,99 @@ public enum ShaderSource {
                                       texture3d<float> noise [[texture(0)]]) {
         float2 hp = (in.uv - 0.5) * float2(u.aspect, 1.0);
         float3 origin = float3(u.noiseX, u.noiseY, u.noiseZ);
+        float px = 1.0 / max(u.screenHeight, 1.0);
+        float live = 1.0 - u.stretch;
 
-        // The dot, the bursting mass, and the line are one shape. `bloom` grows
-        // the radius from the one-cell seed at a constant log rate, so the front
-        // accelerates; `collapse` then narrows the mass into the horizon row.
-        float coverRadius = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
-        float seedRadius =
-            max(u.lineHalfThickness, 1.0 / max(u.screenHeight, 1.0)) * u.dotScale;
-        float bloomRadius = seedRadius * pow(coverRadius / seedRadius, u.bloom);
-        float radius = mix(bloomRadius, u.lineHalfThickness, u.collapse) * u.lineSpring;
-        float halfWidth = u.collapse * (u.aspect * 0.5 + 0.05);
-        float held = 1.0 - u.collapse;
+        float cover = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
+        // The resting line is a hairline so it barely shows; the retraction
+        // thickens it back to the seed cell it lands on.
+        float startR = max(u.lineHalfThickness * 3.0, 2.5 * px) * u.dotScale;
+        float lineR = mix(u.lineHalfThickness * 0.35, u.lineHalfThickness, u.settle);
+        float dotR = mix(startR, lineR, u.stretch);
 
-        // The mass drifts to this run's own place; the line it collapses into
-        // has to sit exactly on the horizon row the reveal grows from.
-        float2 p = hp - float2(u.centerX, u.centerY) * held;
+        // Every layer is centred on the frame, so the dot never moves between
+        // runs and the resting line stays on the reveal's horizon row.
+        float2 p = hp;
 
-        // The mass carries the field's mottled texture and an uneven silhouette;
-        // the line is flat ink, so nothing is sampled once it has collapsed.
-        float smoke = 1.0;
-        float lobes = 0.0;
-        if (held > 0.0) {
-            smoke = mix(
-                1.0, 0.75 + 0.5 * smokeValue(noise, p, u.time, u.noiseScale, origin),
-                u.smokeStrength);
-            float2 dir = p / max(length(p), 1e-4);
-            lobes = lobeNoise(noise, dir, u.time, origin);
+        // One warped distance serves every circle, so the layers undulate together.
+        float breathing = 1.0 + 0.012 * sin(u.time * 2.1 + u.grainSeed);
+        float warp = (1.0 + 2.0 * u.wobble
+                      * edgeNoise(noise, p, u.time, u.noiseScale * 1.5, origin)) * breathing;
+        float d = length(p) / mix(1.0, warp, live);
+
+        float3 fieldLight = mix(float3(0.78, 0.72, 0.80), float3(0.82, 0.70, 0.68), u.warmth);
+        float3 fieldDark = mix(float3(0.30, 0.25, 0.28), float3(0.34, 0.24, 0.23), u.warmth);
+        float smoke = mix(
+            1.0, 0.75 + 0.5 * smokeValue(noise, p, u.time, u.noiseScale, origin),
+            u.smokeStrength);
+        constexpr sampler pulseSampler(filter::linear, address::repeat);
+        float pulse = noise.sample(
+            pulseSampler, float3(origin.xy, origin.z + u.time * 0.35)).r - 0.5;
+        float flicker = clamp(1.0 + 1.2 * pulse, 0.7, 1.3);
+
+        float peaks[3] = { cover, cover, cover * u.haloScale };
+        float softness[3] = { 0.06, 0.10, 0.24 };
+
+        float3 color = u.white.rgb;
+        for (int k = 0; k < 3; ++k) {
+            float g = u.grow[k];
+            if (g <= 0.0) { continue; }
+            // The sphere and the white hole grow geometrically from the dot;
+            // the rings carry a radius fraction so their size eases evenly
+            // instead of popping out near the end of the rise.
+            float R = k < 2 ? dotR * pow(peaks[k] / dotR, g)
+                            : mix(dotR, peaks[k], g);
+            float soft = max(R * softness[k], 1.5 * px);
+            float body = 1.0 - smoothstep(-soft, soft, d - R);
+            float presence = smoothstep(0.0, 0.03, g);
+            if (k == 0) { presence *= clamp(u.endAlpha, 0.0, 1.0); }
+
+            float3 tone = u.white.rgb;           // odd layers: white
+            if (k % 2 == 0) {                    // even layers: sphere
+                float r = clamp(d / max(R, 1e-4), 0.0, 1.0);
+                float3 shade = mix(fieldLight, fieldDark, pow(r, 1.4));
+                if (k == 0) { shade *= smoke * flicker; }
+                // A small sphere is ink; the gradient appears as it grows.
+                tone = mix(u.ink.rgb, shade, smoothstep(0.01, 0.12, R / cover));
+            }
+            color = mix(color, tone, body * presence);
         }
-        float settle = 1.0 - smoothstep(0.55, 1.0, u.collapse);
-        float breathing = 1.0 + 0.012 * sin(u.time * 2.1 + u.grainSeed) * held;
-        float effRadius = radius * (1.0 + 1.2 * lobes * settle) * breathing;
 
-        // The collapsing pill starts slightly tilted and rights itself.
-        float tilt = sin(u.grainSeed) * 0.12 * held;
-        float2 hr = float2(p.x * cos(tilt) - p.y * sin(tilt),
-                           p.x * sin(tilt) + p.y * cos(tilt));
-        float2 q = float2(max(abs(hr.x) - halfWidth, 0.0), hr.y);
+        // The dot sits over the mass and becomes the horizon line. The white
+        // ring is painted after it, so the line reads through the dark halo
+        // and stops at the ring, as it does in the reference.
+        float2 q = float2(max(abs(p.x) - u.stretch * (u.aspect * 0.5 + 0.05), 0.0), p.y);
         // The finale retracts the line onto the reveal's seed: one cell, half a
         // cell right of the frame's centre, as tall as the horizon row.
-        float2 cell = hr - float2(u.lineHalfThickness, 0.0);
-        float distance = mix(length(q), max(abs(cell.x), abs(cell.y)), u.settle);
+        float2 cell = p - float2(u.lineHalfThickness, 0.0);
+        float dist = mix(length(q), max(abs(cell.x), abs(cell.y)), u.settle);
+        float dotSoft = max(dotR * 0.5, mix(1.5 * px, 0.5 * px, u.stretch));
+        float dotBody = 1.0 - smoothstep(-dotSoft, dotSoft, dist - dotR);
+        color = mix(color, u.ink.rgb, dotBody * clamp(u.endAlpha, 0.0, 1.0));
 
-        // Fast fronts carry a wider, softer edge; the settled line is crisp.
-        float soft = max(effRadius * 0.5 * (1.0 + 0.9 * u.frontEnergy),
-                         1.5 / max(u.screenHeight, 1.0));
-        float body = 1.0 - smoothstep(-soft, soft, distance - effRadius);
-
-        // The held mass flickers between near-black and a warm dark brown, with a
-        // slightly lighter heart; both fade to the pure ink colour of the line.
-        float3 fieldLight = mix(
-            float3(0.71, 0.66, 0.76), float3(0.74, 0.64, 0.65), u.warmth);
-        float3 fieldDark = mix(
-            float3(0.21, 0.17, 0.19), float3(0.25, 0.16, 0.16), u.warmth);
-        float3 massColor = u.ink.rgb;
-        if (held > 0.0) {
-            constexpr sampler pulseSampler(filter::linear, address::repeat);
-            float pulse = noise.sample(
-                pulseSampler, float3(origin.xy, origin.z + u.time * 0.35)).r - 0.5;
-            float flicker = clamp(1.0 + 3.0 * pulse, 0.3, 1.8);
-            massColor = mix(u.ink.rgb, fieldDark * smoke, 0.35 * flicker * held);
-            float inner = 1.0 - smoothstep(0.0, max(effRadius, 1e-4), length(p));
-            massColor = mix(massColor, fieldLight * 0.5, 0.2 * flicker * inner * held);
+        // The white ring and the inner sphere sit on top, so the dot the cycle
+        // started from becomes the nested sphere at the centre of the rings.
+        if (u.grow.w > 0.0) {
+            float R = mix(dotR, cover * u.haloScale * 0.5, u.grow.w);
+            float soft = max(R * 0.05, 1.5 * px);
+            float body = 1.0 - smoothstep(-soft, soft, d - R);
+            float presence = smoothstep(0.0, 0.03, u.grow.w);
+            color = mix(color, u.white.rgb, body * presence);
+        }
+        if (u.grow.z > 0.0) {
+            float R = mix(dotR, cover * u.haloScale * 0.17, u.grow.z);
+            float soft = max(R * 0.08, 1.5 * px);
+            float body = 1.0 - smoothstep(-soft, soft, d - R);
+            float presence = smoothstep(0.0, 0.03, u.grow.z);
+            float r = clamp(d / max(R, 1e-4), 0.0, 1.0);
+            float3 shade = mix(fieldLight, fieldDark, pow(r, 1.4));
+            color = mix(color, shade, body * presence);
         }
 
-        float alpha = body * clamp(u.endAlpha, 0.0, 1.0);
-        float3 color = mix(u.white.rgb, massColor, alpha);
-
-        // A film grain over the frame, drawn fresh every frame. It rides on the
-        // blackness while the mass lives and leaves with the collapse.
+        // Film grain rides on the dark areas and leaves as the dot stretches.
+        float darkness = clamp(1.0 - dot(color, float3(1.0 / 3.0)), 0.0, 1.0);
         float grain = grainAt(hp * u.screenHeight, u.grainSeed + u.time * 60.0) - 0.5;
-        color += grain * 0.03 * alpha * held;
+        color += grain * 0.04 * darkness * darkness * live;
         return float4(color, 1.0);
     }
     """

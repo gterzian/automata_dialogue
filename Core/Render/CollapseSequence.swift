@@ -3,10 +3,9 @@ import Metal
 
 /// Public timing for the review window's intro.
 public enum ReviewIntro {
-    /// Seconds the intro animates before it rests on its final frame: the dot
-    /// ignites, bursts to cover the frame, holds, and collapses into the
-    /// horizon line.
-    public static let duration: TimeInterval = 3
+    /// Seconds the intro animates before it rests on the frame the reveal
+    /// continues from.
+    public static let duration: TimeInterval = 6.8
 
     /// Seconds the settled line takes to retract onto the single centred cell
     /// an entry that starts there seeds from. The window plays this once the
@@ -22,43 +21,43 @@ struct CollapseVariation {
     /// Seconds the cycle leads or lags. The skew tapers to zero before the rest
     /// frame, so every run rests on the same last image.
     var timeSkew: Float
-    /// Where the form sits, in screen-height units from the frame's centre.
-    var centerX: Float
-    var centerY: Float
     /// 0 keeps the field violet, 1 makes it the reference film's rose.
     var warmth: Float
-    /// Slice of the noise volume the mass and the silhouette read.
+    /// Slice of the noise volume the mass and the edges read.
     var noiseOrigin: SIMD3<Float>
     var smokeScale: Float
     var smokeStrength: Float
     var dotScale: Float
     var grainSeed: Float
+    /// Edge undulation as a fraction of the radius.
+    var wobble: Float
+    /// Peak radius of the halo layer as a fraction of the covering radius.
+    var haloScale: Float
 
-    /// The unskewed look tests pin, so the timeline's phase boundaries are
-    /// exactly the constants `frame(time:)` states.
+    /// The unskewed baseline.
     static let standard = CollapseVariation(
         timeSkew: 0,
-        centerX: 0,
-        centerY: 0,
         warmth: 0.7,
         noiseOrigin: SIMD3(0.25, 0.5, 0.75),
         smokeScale: 0.2,
         smokeStrength: 0.9,
         dotScale: 1,
-        grainSeed: 0)
+        grainSeed: 0,
+        wobble: 0.03,
+        haloScale: 0.9)
 
     static func seeded(_ seed: UInt64) -> CollapseVariation {
         var draw = SplitMix64(seed: seed)
         return CollapseVariation(
             timeSkew: draw.float(-0.1...0.1),
-            centerX: draw.float(-0.03...0.03),
-            centerY: draw.float(-0.02...0.02),
             warmth: draw.float(0.35...1.0),
             noiseOrigin: SIMD3(draw.unit(), draw.unit(), draw.unit()),
             smokeScale: draw.float(0.16...0.26),
             smokeStrength: draw.float(0.75...1.0),
             dotScale: draw.float(0.8...1.2),
-            grainSeed: draw.float(0...256))
+            grainSeed: draw.float(0...256),
+            wobble: draw.float(0.015...0.04),
+            haloScale: draw.float(0.82...1.0))
     }
 }
 
@@ -89,16 +88,11 @@ private struct SplitMix64 {
     }
 }
 
-/// The intro the review window shows before inference starts. A one-cell ink
-/// dot ignites, bursts to cover the frame, flickers, and collapses into the
-/// straight horizon row the two automaton branches share; the last beat
-/// retracts that row onto the single cell an entry seeds from.
-///
-/// One wall-clock time drives the cycle, so it stays in step with the display
-/// link even when a frame is dropped. The cycle lasts `ReviewIntro.duration`
-/// and rests on its final frame, where the window stops drawing. A
-/// `CollapseVariation` decides how this run's cycle is drawn and paced, so two
-/// runs differ.
+/// The intro the review window shows while the model's turn is prepared. One
+/// wall-clock time drives the cycle, so it stays in step with the display link
+/// even when a frame is dropped. The cycle lasts `ReviewIntro.duration` and
+/// rests on its final frame, where the window stops drawing. A
+/// `CollapseVariation` decides how this run is drawn and paced.
 enum CollapseTimeline {
     static let duration = Float(ReviewIntro.duration)
 
@@ -107,70 +101,58 @@ enum CollapseTimeline {
         var time: Float
         var noiseScale: Float
         var smokeStrength: Float
-        /// Centre of the whole form, in screen-height units from the frame's.
-        var centerX: Float
-        var centerY: Float
-        /// Noise slice the mass, the silhouette, and the flicker read.
+        /// Noise slice the mass, the edges, and the flicker read.
         var noiseX: Float
         var noiseY: Float
         var noiseZ: Float
         var warmth: Float
         var grainSeed: Float
-        /// Multiplier on the one-cell dot the burst starts from.
+        /// Multiplier on the one-cell dot the cycle starts from.
         var dotScale: Float
-        /// 0 until the dot has faded in; the dot, burst, and line all draw at
-        /// this opacity.
+        /// 0 until the dot has faded in; the dot, the circles, and the line all
+        /// draw at this opacity.
         var endAlpha: Float
-        /// Exponent of the radius growth: a slow ignition, an inhale, then the
-        /// burst that covers the frame.
-        var bloom: Float
-        /// 0...1 progress from the covering mass into the horizon line.
-        var collapse: Float
-        /// 0...1 speed proxy of the moving front; widens the feather.
-        var frontEnergy: Float
-        /// Multiplier on the line's thickness; a damped rebound after the
-        /// collapse.
-        var lineSpring: Float
+        /// Edge undulation as a fraction of the radius.
+        var wobble: Float
+        /// Peak radius of the halo layer as a fraction of the covering radius.
+        var haloScale: Float
+        /// 0 keeps the dot; 1 has stretched it into the horizon line.
+        var stretch: Float
+        /// Growth of the four circle layers. For L0 and the white hole this is
+        /// an exponent; for the rings it is a radius fraction.
+        var grow: SIMD4<Float>
         /// 0 keeps the horizon line; 1 retracts it onto the single centred cell
         /// an entry that starts there seeds from.
         var settle: Float
     }
 
-    /// The intro's one cycle: a one-cell dot ignites, an inhale tightens it, the
-    /// burst covers the frame, holds and flickers, then collapses into the
-    /// horizon line the reveal's two branches share.
+    /// The intro's one cycle. It rests on the horizon line the reveal's two
+    /// branches share.
     static func frame(time rawTime: Float, variation: CollapseVariation = .standard) -> Frame {
         let time = min(max(rawTime, 0), duration)
         // The cycle leads or lags per run, but the skew is gone before the rest
         // frame, so every run stops on the same last image.
-        let skew = variation.timeSkew * (1 - smoothstep(2.2, duration, time))
+        let skew = variation.timeSkew * (1 - smoothstep(3.0, duration, time))
         let t = min(max(time + skew, 0), duration)
 
         let endAlpha = smoothstep(0, 0.2, t)
 
-        // Slow growth, a tiny pause where both smoothsteps have zero slope, an
-        // inhale, then the burst. `bloom` is the exponent of the radius growth.
-        let bloom = 0.44 * smoothstep(0.15, 0.75, t)
-                  + 0.56 * smoothstep(0.75, 1.05, t)
-                  - 0.03 * bump(0.55, 0.72, t)
+        // L0: slow growth, a tiny pause, an inhale, then the burst.
+        let bloom = 0.44 * smoothstep(0.3, 1.6, t)
+                  + 0.56 * smoothstep(1.6, 2.5, t)
+                  - 0.03 * bump(1.2, 1.5, t)
+        let grow = SIMD4<Float>(
+            bloom * fall(t, 4.2, 4.6),
+            smoothstep(3.2, 4.8, t) * fall(t, 5.9, 6.8),
+            smoothstep(5.0, 6.1, t) * fallSmooth(t, 6.1, 6.8),
+            smoothstep(5.1, 6.15, t) * fallSmooth(t, 6.1, 6.75))
 
-        // The collapse accelerates into the line; the spring absorbs the
-        // arrival and is damped to nothing before the rest frame, so the clock
-        // can stop on a frame that is exactly the final line.
-        let c = min(max((t - 1.45) / 0.55, 0), 1)
-        let collapse = pow(c, 1.8)
-        let since = max(t - 2.0, 0)
-        let lineSpring = 1 + 0.8 * exp(-6 * since) * sin(16 * since)
-                  * (1 - smoothstep(2.2, duration, t))
-
-        let frontEnergy = max(bump(0.75, 1.05, t), bump(1.45, 2.0, t))
+        let stretch = smoothstep(5.9, 6.6, t)
 
         return Frame(
             time: time,
             noiseScale: variation.smokeScale,
             smokeStrength: variation.smokeStrength,
-            centerX: variation.centerX,
-            centerY: variation.centerY,
             noiseX: variation.noiseOrigin.x,
             noiseY: variation.noiseOrigin.y,
             noiseZ: variation.noiseOrigin.z,
@@ -178,12 +160,11 @@ enum CollapseTimeline {
             grainSeed: variation.grainSeed,
             dotScale: variation.dotScale,
             endAlpha: endAlpha,
-            bloom: bloom,
-            collapse: collapse,
-            frontEnergy: frontEnergy,
-            lineSpring: lineSpring,
-            settle: 0
-        )
+            wobble: variation.wobble,
+            haloScale: variation.haloScale,
+            stretch: stretch,
+            grow: grow,
+            settle: 0)
     }
 
     /// The frame the sequence rests on, with `settle` retracting the horizon
@@ -193,6 +174,19 @@ enum CollapseTimeline {
         var frame = frame(time: duration, variation: variation)
         frame.settle = min(max(settle, 0), 1)
         return frame
+    }
+
+    /// 1 until `start`, then accelerating down to exactly 0 at `end`.
+    private static func fall(_ t: Float, _ start: Float, _ end: Float) -> Float {
+        let c = min(max((t - start) / (end - start), 0), 1)
+        return 1 - pow(c, 1.8)
+    }
+
+    /// 1 until `start`, then a smoothstep down to exactly 0 at `end`. The ring
+    /// layers carry a radius fraction, so this eases their size rather than
+    /// their exponent.
+    private static func fallSmooth(_ t: Float, _ start: Float, _ end: Float) -> Float {
+        1 - smoothstep(start, end, t)
     }
 
     private static func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {
@@ -223,8 +217,6 @@ final class CollapseRenderer {
         var screenHeight: Float
         var noiseScale: Float
         var smokeStrength: Float
-        var centerX: Float
-        var centerY: Float
         var noiseX: Float
         var noiseY: Float
         var noiseZ: Float
@@ -232,12 +224,12 @@ final class CollapseRenderer {
         var grainSeed: Float
         var dotScale: Float
         var endAlpha: Float
-        var bloom: Float
-        var collapse: Float
+        var wobble: Float
+        var haloScale: Float
+        var stretch: Float
         var lineHalfThickness: Float
-        var frontEnergy: Float
-        var lineSpring: Float
         var settle: Float
+        var grow: SIMD4<Float>
         var white: SIMD4<Float>
         var ink: SIMD4<Float>
     }
@@ -287,8 +279,8 @@ final class CollapseRenderer {
     /// Renders one frame and blocks until the GPU finishes, so the drawable is
     /// complete (tests read the same texture back) and the next frame can
     /// safely rewrite the shared buffer. `lineHalfThickness` is the horizon
-    /// row's half-height in screen-height units, which is both the line the
-    /// cycle collapses into and the seed dot's radius.
+    /// row's half-height in screen-height units: the line the cycle ends on and
+    /// the dot's radius at that rest frame.
     func render(
         into texture: MTLTexture,
         frame: CollapseTimeline.Frame,
@@ -349,8 +341,6 @@ final class CollapseRenderer {
             screenHeight: Float(texture.height),
             noiseScale: frame.noiseScale,
             smokeStrength: frame.smokeStrength,
-            centerX: frame.centerX,
-            centerY: frame.centerY,
             noiseX: frame.noiseX,
             noiseY: frame.noiseY,
             noiseZ: frame.noiseZ,
@@ -358,12 +348,12 @@ final class CollapseRenderer {
             grainSeed: frame.grainSeed,
             dotScale: frame.dotScale,
             endAlpha: frame.endAlpha,
-            bloom: frame.bloom,
-            collapse: frame.collapse,
+            wobble: frame.wobble,
+            haloScale: frame.haloScale,
+            stretch: frame.stretch,
             lineHalfThickness: lineHalfThickness,
-            frontEnergy: frame.frontEnergy,
-            lineSpring: frame.lineSpring,
             settle: frame.settle,
+            grow: frame.grow,
             white: white.simd,
             ink: ink.simd
         )
@@ -388,7 +378,7 @@ final class CollapseRenderer {
         var values = [Float](repeating: 0, count: size * size * size)
         for index in values.indices { values[index] = Float.random(in: 0...1) }
         // The shader samples this volume with linear filtering, so a white-noise
-        // volume creases the mass and its silhouette at every texel boundary.
+        // volume creases the mass and its edges at every texel boundary.
         // Smoothing it first costs one startup pass and keeps both readings soft.
         for _ in 0..<2 { values = smoothed(values, size: size) }
         let low = values.min() ?? 0

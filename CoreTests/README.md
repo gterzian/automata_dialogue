@@ -30,7 +30,6 @@ What must be covered:
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.
-- **Collapse intro** — the timeline's phase boundaries, the rest frame the
-  clock freezes on, the seed-cell retraction, that a seed reproduces one run's
-  look and two seeds disagree, and that every phase reaches the renderer.
-  Appearance is reviewed by hand.
+- **Collapse intro** — the rest frame the reveal continues from, the seed-cell
+  retraction, that a seed reproduces one run, and that the cycle and the
+  retraction reach the renderer. Appearance is accepted by visual inspection.

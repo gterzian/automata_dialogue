@@ -148,9 +148,10 @@ change, along with the affected tests, counts, and READMEs.
    indicator, then the chosen automaton, in a single window with no split view.
    The automaton is one mirrored pair: two branches grow away from the horizon
    line the collapse intro ends on, and a camera pulls back at the growth rate
-   to keep the growth in view. The intro rests on that line before inference
-   starts, so the model never shares the GPU with a running animation; the
-   window holds the line until the choice is known. See `CLI/README.md`.
+   to keep the growth in view. The intro runs while the model works and ends on
+   that line; if the model outlasts it, the window holds the line until the
+   choice is known. The indicator runs at 30 fps on a reduced drawable so it
+   does not compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
    testable; `Core` holds the prompt-building and answer-parsing logic. There is
@@ -205,11 +206,12 @@ sentence did not earn its place.
 - Never assume a test failure is pre-existing. Every failure is a regression
   until proven otherwise; establish the baseline from committed code, not a
   guess.
-- Test invariants, not appearance. Pin counts, parsers, geometry, GPU mapping,
-  determinism, and phase boundaries. Do not assert pixel counts, anti-aliasing,
-  gradients, easing curves, or exact animation frames: the visual result is
-  reviewed by hand, and a test that fails whenever the look is deliberately
-  changed is noise.
+- Test and document workflows, not appearance. Pin counts, parsers, GPU
+  mapping, determinism, and the contracts other code consumes (the frame the
+  reveal takes over from, the retraction reaching the renderer). Do not test or
+  document colors, shapes, gradients, edge softness, timing curves, animation
+  phases, or exact frames: the user accepts the visual result by inspection,
+  and tests or prose that pin the look only go stale.
 - Document only verified facts, in neutral factual language. Do not speculate
   about causes or fixes; state what was observed, what was tried, and what was
   ruled out.
@@ -258,7 +260,8 @@ sentence did not earn its place.
    removed or renamed; confirm every call site, test, and doc is updated;
    re-read `git diff HEAD` for stray debug code and for wording that refers to
    an earlier design or a state that never existed; and confirm each claimed
-   behavior has a call site and a test. State what you verified.
+   workflow has a call site and a test. Visual changes are accepted by
+   inspection. State what you verified.
 3. Apply the README deletion test to every subtree touched.
 4. Record general lessons. When the session surfaced a general rule (a
    pitfall, a convention, a repeated mistake), add it to the README that owns
