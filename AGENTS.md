@@ -121,7 +121,13 @@ change, along with the affected tests, counts, and READMEs.
 - The `Agent` target links `mlx-swift-lm` and a large C++/Metal build, so every
   SwiftPM command builds it. It needs Xcode's Metal toolchain component
   (`xcodebuild -downloadComponent MetalToolchain`); without it the `metal`
-  shim has no compiler and `Cmlx` fails. If the link instead fails with
+  shim has no compiler and `Cmlx` fails. The component is mounted under a
+  path that names the mount, and SwiftPM caches that path in
+  `.build/out/Intermediates.noindex/XCBuildData`, so after a boot the build can
+  fail with `unable to spawn process …/Metal.xctoolchain/usr/bin/metal (No such
+  file or directory)` while `xcrun --find metal` resolves. Delete
+  `.build/out/Intermediates.noindex/XCBuildData` and rebuild to pick up the new
+  mount. If the link instead fails with
   undefined `_mlx_*` symbols, the `mlx-swift` checkout's `mlx-c` submodule is
   empty; populate it once with `git -C .build/checkouts/mlx-swift submodule
   update --init Source/Cmlx/mlx-c`.
@@ -142,7 +148,9 @@ change, along with the affected tests, counts, and READMEs.
    indicator, then the chosen automaton, in a single window with no split view.
    The automaton is one mirrored pair: two branches grow away from the horizon
    line the collapse intro ends on, and a camera pulls back at the growth rate
-   to keep the growth in view. See `CLI/README.md`.
+   to keep the growth in view. The intro rests on that line before inference
+   starts, so the model never shares the GPU with a running animation; the
+   window holds the line until the choice is known. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
    testable; `Core` holds the prompt-building and answer-parsing logic. There is

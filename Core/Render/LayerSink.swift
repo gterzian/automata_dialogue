@@ -19,6 +19,7 @@ public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDel
     private let link: CAMetalDisplayLink
     private var tick: (@Sendable (TimeInterval) -> Void)?
     private var lastTimestamp: CFTimeInterval = 0
+    private var registered = false
 
     /// Called on each update with the drawable to render into. Set by the sink
     /// that owns this clock.
@@ -40,14 +41,28 @@ public final class DisplayLinkClock: NSObject, FrameClock, CAMetalDisplayLinkDel
     public func start(_ tick: @escaping @Sendable (TimeInterval) -> Void) {
         self.tick = tick
         lastTimestamp = 0
-        link.add(to: .current, forMode: .common)
+        if !registered {
+            link.add(to: .current, forMode: .common)
+            registered = true
+        }
         link.isPaused = false
     }
 
     public func stop() {
         link.isPaused = true
-        link.remove(from: .current, forMode: .common)
+        if registered {
+            link.remove(from: .current, forMode: .common)
+            registered = false
+        }
         tick = nil
+    }
+
+    /// Stops delivering updates without leaving the run loop, so the layer
+    /// keeps the last presented frame and the GPU is left to other work. A
+    /// later `start` resumes. Unlike `stop` it is safe to call from the draw
+    /// callback.
+    public func freeze() {
+        link.isPaused = true
     }
 
     public func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
@@ -69,7 +84,6 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
     private let renderer: LayerRenderer
     private let lock = NSLock()
     private var latest: RenderFrame?
-    private var startedAt: CFTimeInterval?
     private var finished = false
     private var lastError: String?
 
@@ -81,8 +95,8 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         // The layer owns the residency of its drawables; the queue must know
         // about it.
         context.queue.addResidencySet(layer.residencySet)
-        clock.onDrawable = { [weak self] drawable, timestamp in
-            self?.render(drawable, timestamp: timestamp)
+        clock.onDrawable = { [weak self] drawable, _ in
+            self?.render(drawable)
         }
     }
 
@@ -107,18 +121,14 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         return lastError
     }
 
-    private func render(_ drawable: any CAMetalDrawable, timestamp: CFTimeInterval) {
+    private func render(_ drawable: any CAMetalDrawable) {
         lock.lock()
         let frame = latest
         let done = finished
-        if startedAt == nil, frame != nil { startedAt = timestamp }
-        let elapsed = startedAt.map { timestamp - $0 } ?? 0
         lock.unlock()
         guard !done, let frame else { return }
         do {
-            try render(
-                frame: frame, into: drawable.texture,
-                horizonReveal: HorizonHandoff.reveal(elapsed: elapsed))
+            try render(frame: frame, into: drawable.texture)
         } catch {
             lock.lock()
             lastError = error.localizedDescription
@@ -134,14 +144,9 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
     /// uniform, and palette buffers, so a frame that is still reading them must
     /// complete before the next frame writes them. Offscreen tests drive this
     /// directly; `render(_:)` adds the drawable and `present`.
-    func render(
-        frame: RenderFrame,
-        into texture: MTLTexture,
-        horizonReveal: Float = 1
-    ) throws {
+    func render(frame: RenderFrame, into texture: MTLTexture) throws {
         guard let spec = Catalog.spec(id: frame.specID) else { return }
         try renderer.render(
-            gpu: frame.gpu, palette: spec.display.palette, into: texture,
-            horizonRow: frame.horizonRow, horizonReveal: horizonReveal, wait: true)
+            gpu: frame.gpu, palette: spec.display.palette, into: texture, wait: true)
     }
 }

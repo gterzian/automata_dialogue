@@ -57,6 +57,16 @@ final class CatalogTests: XCTestCase {
         }
     }
 
+    /// Only a centred single cell is the dot the intro's line retracts onto; a
+    /// `.seed` number starts on that cell but fills more of the row.
+    func testOnlyTheCentredStartIsASingleCell() {
+        XCTAssertTrue(BoardStart.center.startsFromSingleCentreCell)
+        XCTAssertFalse(BoardStart.rightmost.startsFromSingleCentreCell)
+        XCTAssertFalse(BoardStart.random(seed: 1).startsFromSingleCentreCell)
+        XCTAssertFalse(BoardStart.block([1, 0]).startsFromSingleCentreCell)
+        XCTAssertFalse(BoardStart.seed(number: 195, colors: 2).startsFromSingleCentreCell)
+    }
+
     /// The inventory artifact and the catalog table are two views of one list;
     /// nothing generates one from the other, so this fails when they drift
     /// (see `AGENTS.md`). It checks order, class and look, not just the id.

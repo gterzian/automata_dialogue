@@ -42,8 +42,16 @@ public actor IndicatorActor {
         indicator?.stop()
     }
 
-    /// True once the visible sequence has presented its final page. No
-    /// indicator means nothing is left to wait for.
+    /// Plays the intro's last beat: the settled horizon line retracts onto the
+    /// single centred cell an entry that starts there seeds from, drawn in the
+    /// colour of that cell. A window with no indicator has nothing to retract.
+    public func collapseOntoSeedCell(seedInk: PaletteColor) {
+        indicator?.collapseOntoSeedCell(seedInk: seedInk)
+    }
+
+    /// True once the visible sequence rests on the frame the reveal continues
+    /// from and has stopped drawing. No indicator means nothing is left to wait
+    /// for.
     public var isSettled: Bool {
         indicator?.isSettled ?? true
     }

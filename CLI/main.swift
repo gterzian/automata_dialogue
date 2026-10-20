@@ -191,6 +191,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             print("rate: no Metal 4 device; skipped \(spec.id)")
             return
         }
+        await collapseIntro(onto: spec)
         await stopThinking()
         let window = ensureWindow()
         let contentSize = window.contentLayoutRect.size
@@ -263,11 +264,11 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         await stopRun()
     }
 
-    /// Shows the collapse intro in the window while the model runs. A point
-    /// grows into a sphere, the frame whites out, and the ink point returns as
-    /// a tiny dot that stretches into the horizon line the reveal starts from.
-    /// `present` or `stopThinking` ends it. The indicator actor and its layer
-    /// are reused across runs, so the shader pipeline is compiled once.
+    /// Shows the collapse intro in the window while the model's turn is
+    /// prepared. A one-cell dot ignites, bursts to cover the window, and
+    /// collapses into the horizon line the reveal starts from. The intro settles
+    /// and stops drawing before inference begins; `present` or `stopThinking`
+    /// ends it.
     func showThinking() async {
         guard !isClosed, GPUContext.isAvailable else { return }
         let window = ensureWindow()
@@ -299,10 +300,14 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Waits for the intro to present its final horizon line, so a fast model
-    /// does not cut off the ending. The window stays responsive while it sleeps.
+    /// Waits for the intro to rest on the frame the reveal continues from, and
+    /// for its clock to stop. The window stays responsive while it sleeps. The
+    /// wait is bounded because the intro now gates inference: a display link
+    /// that stopped delivering updates must not hold the turn up, and the
+    /// caller stops the intro either way.
     func waitForThinkingToSettle() async {
-        while !isClosed {
+        var waited: TimeInterval = 0
+        while !isClosed, waited < ReviewIntro.duration + ReviewIntro.finaleDuration + 2 {
             guard let indicator else { return }
             if await indicator.isSettled { return }
             do {
@@ -310,7 +315,20 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             } catch {
                 return
             }
+            waited += 0.05
         }
+    }
+
+    /// One last beat of the intro before the reveal replaces it: an entry that
+    /// seeds from a single centred cell retracts the settled horizon line onto
+    /// that cell, so the automaton appears to start from the intro's last image.
+    /// Every other entry keeps the line, which is its first row.
+    private func collapseIntro(onto spec: ProgramSpec) async {
+        guard spec.board.start.startsFromSingleCentreCell else { return }
+        // The seed row's one cell holds palette index 1, so the dot the line
+        // retracts into is drawn in that cell's colour.
+        await indicator?.collapseOntoSeedCell(seedInk: spec.display.palette[1])
+        await waitForThinkingToSettle()
     }
 
     /// Pauses the "working" indicator; the actor is kept for the next run.
@@ -608,11 +626,14 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             await presenter.waitForEnter()
             if presenter.isClosed { break }
             await presenter.showThinking()
+            // The intro rests before the turn is prepared, so nothing is drawing
+            // while the model works (see `AGENTS.md`); the line stays up until
+            // the choice lands.
+            await presenter.waitForThinkingToSettle()
+            await presenter.stopThinking()
             let outcome = await rateOne(
                 engine: engine, path: path, directory: directory,
                 dimension: setup.configuration.imageDimension, verbose: setup.verbose)
-            await presenter.waitForThinkingToSettle()
-            await presenter.stopThinking()
             shown += 1
             if let spec = printRateOutcome(outcome) {
                 chosen += 1

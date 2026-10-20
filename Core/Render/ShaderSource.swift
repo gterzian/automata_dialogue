@@ -238,8 +238,6 @@ public enum ShaderSource {
     struct LayerUniforms {
         uint cols;
         uint rows;
-        uint horizonRow;   // 0xFFFFFFFF when the layout has no shared horizon
-        float horizonReveal;
     };
 
     // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
@@ -288,12 +286,9 @@ public enum ShaderSource {
     struct LayerVertexOut {
         float4 position [[position]];
         float4 color;
-        float alpha;
     };
 
     // One instance per span; six vertices form the quad. Row 0 is the top edge.
-    // The horizon row starts at the intro's hairline and grows to its full
-    // height over the first half second, so the cut reads as one line.
     vertex LayerVertexOut layer_vertex(uint vid [[vertex_id]],
                                        uint iid [[instance_id]],
                                        const device Span* spans [[buffer(0)]],
@@ -303,38 +298,27 @@ public enum ShaderSource {
         float2 corner = float2((vid == 1 || vid == 4 || vid == 5) ? 1.0 : 0.0,
                                (vid == 2 || vid == 3 || vid == 5) ? 1.0 : 0.0);
         float x = (float(s.start) + corner.x * float(s.length)) / float(u.cols);
-        float y0 = float(s.row) / float(u.rows);
-        float y1 = float(s.row + 1) / float(u.rows);
-        float reveal = 1.0;
-        if (s.row == u.horizonRow) {
-            reveal = clamp(u.horizonReveal, 0.0, 1.0);
-            float center = (y0 + y1) * 0.5;
-            float halfHeight = 0.5 / float(u.rows) * mix(0.03, 1.0, reveal);
-            y0 = center - halfHeight;
-            y1 = center + halfHeight;
-        }
-        float y = mix(y0, y1, corner.y);
+        float y = (float(s.row) + corner.y) / float(u.rows);
         LayerVertexOut out;
         out.position = float4(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
         out.color = palette[s.color];
-        out.alpha = mix(0.15, 1.0, reveal);
         return out;
     }
 
     fragment float4 layer_fragment(LayerVertexOut in [[stage_in]]) {
-        return float4(in.color.rgb, in.alpha);
+        return in.color;
     }
     """
 
-    /// The intro the review window shows while the model runs: a point grows
-    /// into a shaded sphere, the frame whites out, and an ink point blooms to
-    /// cover the screen before it collapses into the horizon line the reveal
-    /// starts from.
+    /// The intro the review window shows while the model's turn is prepared: a
+    /// one-cell ink dot ignites, bursts to cover the frame, holds and flickers,
+    /// then collapses into the horizon line the reveal's two branches share.
+    /// The resting line can then retract onto the single centred cell an entry
+    /// seeds from, so the reveal grows out of the intro's last image.
     ///
-    /// Everything is drawn by one full-screen fragment shader: the mottled
-    /// field, the opening sphere and whiteout, and the ending dot and line. No
-    /// offscreen targets or upsample are needed; the shader writes the drawable
-    /// directly.
+    /// Everything is drawn by one full-screen fragment shader: the dot, the
+    /// bursting mass, the line, and the grain. No offscreen targets or upsample
+    /// are needed; the shader writes the drawable directly.
     public static let collapse = """
     #include <metal_stdlib>
     using namespace metal;
@@ -343,40 +327,25 @@ public enum ShaderSource {
         float time;
         float aspect;
         float screenHeight;
-        float fieldAlpha;
-        float dotRadius;
-        float dotOpacity;
         float noiseScale;
         float smokeStrength;
-        float discCount;
         float centerX;
         float centerY;
-        float warp;
         float noiseX;
         float noiseY;
         float noiseZ;
         float warmth;
         float grainSeed;
+        float dotScale;
         float endAlpha;
         float bloom;
         float collapse;
-        float thinReveal;
         float lineHalfThickness;
         float frontEnergy;
         float lineSpring;
+        float settle;
         float4 white;
         float4 ink;
-    };
-
-    struct CollapseDisc {
-        float radius;
-        float fillMode;      // 0 white, 1 shaded, 2 ring only, 3 soft glow
-        float rimWidth;
-        float rimDark;
-        float penumbraWidth;
-        float penumbraDark;
-        float opacity;
-        float fillDark;
     };
 
     struct FullscreenOut {
@@ -404,17 +373,6 @@ public enum ShaderSource {
         return a * 0.65 + b * 0.35;
     }
 
-    // The contour's wander. The volume is smooth at this scale, so a disc's
-    // edge drifts in and out; sampling the unsmoothed volume would scallop
-    // every edge at the texel boundary instead.
-    static float contourWander(texture3d<float> noise, float2 p, float t,
-                               float3 origin) {
-        constexpr sampler s(filter::linear, address::repeat);
-        float a = noise.sample(s, float3(p * 0.09 + origin.xy, origin.z + t * 0.015)).r;
-        float b = noise.sample(s, float3(p * 0.22 + origin.yx, origin.z + 0.57 + t * 0.025)).r;
-        return (a - 0.5) * 0.8 + (b - 0.5) * 0.2;
-    }
-
     // The silhouette's angular lobes, read from the volume by direction from
     // the centre so ink spreads unevenly instead of like a perfect circle.
     static float lobeNoise(texture3d<float> noise, float2 dir, float t, float3 origin) {
@@ -431,165 +389,81 @@ public enum ShaderSource {
         return fract((p3.x + p3.y) * p3.z);
     }
 
-    // `d` is the wandering radius, `smoke` the field's texture at this pixel.
-    // Every edge is feathered over a fraction of its own radius, so the discs
-    // read as painted light rather than as vector circles.
-    static float3 shadeDisc(float3 color, float2 p, float d, float smoke, float warmth,
-                            constant CollapseDisc& disc) {
-        float aa = max(fwidth(d), 1e-5);
-        float soft = max(aa, disc.radius * 0.05 + 0.0012);
-        if (disc.fillMode > 2.5) {
-            float glow = 1.0 - smoothstep(0.0, max(disc.radius, 1e-5), d);
-            glow *= glow;
-            float strength = clamp(glow * disc.opacity * (1.0 + 0.3 * (smoke - 1.0)), 0.0, 1.0);
-            return mix(color, float3(1.0), strength);
-        }
-        float s = d - disc.radius;
-        float fill = 1.0 - smoothstep(-soft, soft, s);
-        float rim = 1.0 - smoothstep(disc.rimWidth, disc.rimWidth + soft * 1.6, abs(s));
-        float pen = disc.penumbraDark * exp(-max(s, 0.0) / max(disc.penumbraWidth, 1e-5));
-        color *= 1.0 - clamp(pen * disc.opacity * (1.0 + 0.5 * (smoke - 1.0)), 0.0, 1.0);
-        if (disc.fillMode < 1.5) {
-            float3 fillColor;
-            if (disc.fillMode < 0.5) {
-                fillColor = float3(0.97) + 0.06 * (smoke - 0.5);
-            } else {
-                float radial = clamp(d / max(disc.radius, 1e-5), 0.0, 1.0);
-                float3 lit = mix(
-                    float3(0.80, 0.76, 0.85), float3(0.82, 0.75, 0.74), warmth);
-                // A soft highlight sits off-centre, so the fill turns like a
-                // lit object instead of a concentric gradient.
-                float2 offset = p / max(disc.radius, 1e-5) - float2(0.16, 0.20);
-                float highlight = exp(-dot(offset, offset) * 1.6);
-                fillColor = mix(
-                    lit,
-                    float3(disc.fillDark, disc.fillDark * 0.86, disc.fillDark * 0.85),
-                    smoothstep(0.0, 1.05, radial));
-                fillColor = mix(fillColor, lit * 1.06, highlight * 0.4);
-                fillColor *= 1.0 + 0.35 * (smoke - 1.0);
-            }
-            color = mix(color, fillColor, clamp(fill * disc.opacity, 0.0, 1.0));
-        }
-        if (disc.rimWidth > 0.0) {
-            float3 rimColor = mix(
-                float3(0.21, 0.16, 0.19), float3(0.25, 0.16, 0.16), warmth);
-            color = mix(color, rimColor * (1.0 + 0.24 * (smoke - 1.0)),
-                        clamp(rim * disc.rimDark * disc.opacity, 0.0, 1.0));
-        }
-        return color;
-    }
-
     fragment float4 collapse_fragment(FullscreenOut in [[stage_in]],
                                       constant CollapseUniforms& u [[buffer(0)]],
-                                      constant CollapseDisc* discs [[buffer(1)]],
                                       texture3d<float> noise [[texture(0)]]) {
-        float2 p = (in.uv - 0.5) * float2(u.aspect, 1.0) - float2(u.centerX, u.centerY);
-        float r = length(p);
-        float3 origin = float3(u.noiseX, u.noiseY, u.noiseZ);
-        float smoke = mix(
-            1.0, 0.75 + 0.5 * smokeValue(noise, p, u.time, u.noiseScale, origin),
-            u.smokeStrength);
-        // Every circle is measured against this one wandering radius. The small
-        // constant term keeps the wander visible at the opening point's scale,
-        // where a purely proportional wobble would round away.
-        float wander = contourWander(noise, p, u.time, origin)
-            + 0.6 * lobeNoise(noise, p / max(r, 1e-4), u.time, origin);
-        float d = r * (1.0 + u.warp * 2.0 * wander) + u.warp * 0.35 * wander;
-
-        float3 color = u.white.rgb;
-
-        // Mottled rose field, darkest at the corners.
-        float3 fieldLight = mix(
-            float3(0.71, 0.66, 0.76), float3(0.74, 0.64, 0.65), u.warmth);
-        float3 fieldDark = mix(
-            float3(0.21, 0.17, 0.19), float3(0.25, 0.16, 0.16), u.warmth);
-        float fieldMask = smoothstep(0.25, 1.1, d);
-        float3 field = mix(fieldLight, fieldDark, fieldMask) * smoke;
-        color = mix(color, field, u.fieldAlpha);
-
-        int discCount = int(u.discCount);
-
-        for (int i = 0; i < 9; ++i) {
-            if (i >= discCount) { break; }
-            color = shadeDisc(color, p, d, smoke, u.warmth, discs[i]);
-        }
-
-        // The opening point is a small dense mound, not a flat coin: an uneven
-        // feathered edge, a wide faint penumbra, and a middle that lightens
-        // toward the field's colour.
-        float dotSoft = max(u.dotRadius * 0.35, 1.5 / max(u.screenHeight, 1.0));
-        float dot = u.dotRadius > 0.0
-            ? 1.0 - smoothstep(max(u.dotRadius - dotSoft, 0.0), u.dotRadius + dotSoft, d)
-            : 0.0;
-        float halo = u.dotRadius > 0.0
-            ? 1.0 - smoothstep(u.dotRadius, u.dotRadius + dotSoft * 5.0, d)
-            : 0.0;
-        float core = 1.0 - smoothstep(0.0, max(u.dotRadius, 1e-5), d);
-        float3 dotColor = mix(
-            u.ink.rgb,
-            mix(float3(0.30, 0.26, 0.30), float3(0.34, 0.26, 0.27), u.warmth),
-            smoothstep(0.1, 0.85, core));
-        float dotOpacity = clamp(u.dotOpacity, 0.0, 1.0);
-        color = mix(color, dotColor,
-                    max(dot * dotOpacity, halo * 0.35 * dotOpacity));
-
-        // The ending page is the automaton's own background: flatten the
-        // whiteout's texture before the horizon line draws, so the handoff does
-        // not shift colour. The grain fades out with it below.
-        float ending = smoothstep(4.5, 4.95, u.time);
-        color = mix(color, u.white.rgb, ending);
-
-        // The ending: a new black point appears on the white page, grows slowly,
-        // inhales, bursts to cover the screen, holds and flickers, collapses into
-        // the horizontal row the automaton branches share, rebounds, and thins.
         float2 hp = (in.uv - 0.5) * float2(u.aspect, 1.0);
-        float coverRadius = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
-        float seedRadius = 0.0005;
+        float3 origin = float3(u.noiseX, u.noiseY, u.noiseZ);
 
-        // Geometric growth: constant log-rate, so the front accelerates as it grows.
+        // The dot, the bursting mass, and the line are one shape. `bloom` grows
+        // the radius from the one-cell seed at a constant log rate, so the front
+        // accelerates; `collapse` then narrows the mass into the horizon row.
+        float coverRadius = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
+        float seedRadius =
+            max(u.lineHalfThickness, 1.0 / max(u.screenHeight, 1.0)) * u.dotScale;
         float bloomRadius = seedRadius * pow(coverRadius / seedRadius, u.bloom);
         float radius = mix(bloomRadius, u.lineHalfThickness, u.collapse) * u.lineSpring;
-        radius *= mix(1.0, 0.03, u.thinReveal);
         float halfWidth = u.collapse * (u.aspect * 0.5 + 0.05);
         float held = 1.0 - u.collapse;
 
-        // Organic silhouette: lobes by angle plus a slow breath, both fading out
-        // as the shape becomes the straight line.
-        float2 dir = hp / max(length(hp), 1e-4);
-        float lobes = lobeNoise(noise, dir, u.time, origin);
+        // The mass drifts to this run's own place; the line it collapses into
+        // has to sit exactly on the horizon row the reveal grows from.
+        float2 p = hp - float2(u.centerX, u.centerY) * held;
+
+        // The mass carries the field's mottled texture and an uneven silhouette;
+        // the line is flat ink, so nothing is sampled once it has collapsed.
+        float smoke = 1.0;
+        float lobes = 0.0;
+        if (held > 0.0) {
+            smoke = mix(
+                1.0, 0.75 + 0.5 * smokeValue(noise, p, u.time, u.noiseScale, origin),
+                u.smokeStrength);
+            float2 dir = p / max(length(p), 1e-4);
+            lobes = lobeNoise(noise, dir, u.time, origin);
+        }
         float settle = 1.0 - smoothstep(0.55, 1.0, u.collapse);
         float breathing = 1.0 + 0.012 * sin(u.time * 2.1 + u.grainSeed) * held;
         float effRadius = radius * (1.0 + 1.2 * lobes * settle) * breathing;
 
         // The collapsing pill starts slightly tilted and rights itself.
         float tilt = sin(u.grainSeed) * 0.12 * held;
-        float2 hr = float2(hp.x * cos(tilt) - hp.y * sin(tilt),
-                           hp.x * sin(tilt) + hp.y * cos(tilt));
+        float2 hr = float2(p.x * cos(tilt) - p.y * sin(tilt),
+                           p.x * sin(tilt) + p.y * cos(tilt));
         float2 q = float2(max(abs(hr.x) - halfWidth, 0.0), hr.y);
-        float distance = length(q);
+        // The finale retracts the line onto the reveal's seed: one cell, half a
+        // cell right of the frame's centre, as tall as the horizon row.
+        float2 cell = hr - float2(u.lineHalfThickness, 0.0);
+        float distance = mix(length(q), max(abs(cell.x), abs(cell.y)), u.settle);
 
         // Fast fronts carry a wider, softer edge; the settled line is crisp.
         float soft = max(effRadius * 0.5 * (1.0 + 0.9 * u.frontEnergy),
                          1.5 / max(u.screenHeight, 1.0));
         float body = 1.0 - smoothstep(-soft, soft, distance - effRadius);
 
-        // The held black flickers between near-black and a warm dark brown, with a
+        // The held mass flickers between near-black and a warm dark brown, with a
         // slightly lighter heart; both fade to the pure ink colour of the line.
-        constexpr sampler pulseSampler(filter::linear, address::repeat);
-        float pulse = noise.sample(pulseSampler, float3(origin.xy, origin.z + u.time * 0.35)).r - 0.5;
-        float flicker = clamp(1.0 + 3.0 * pulse, 0.3, 1.8);
-        float3 bloomColor = mix(u.ink.rgb, fieldDark * smoke, 0.35 * flicker * held);
-        float inner = 1.0 - smoothstep(0.0, max(effRadius, 1e-4), length(hp));
-        bloomColor = mix(bloomColor, fieldLight * 0.5, 0.2 * flicker * inner * held);
+        float3 fieldLight = mix(
+            float3(0.71, 0.66, 0.76), float3(0.74, 0.64, 0.65), u.warmth);
+        float3 fieldDark = mix(
+            float3(0.21, 0.17, 0.19), float3(0.25, 0.16, 0.16), u.warmth);
+        float3 massColor = u.ink.rgb;
+        if (held > 0.0) {
+            constexpr sampler pulseSampler(filter::linear, address::repeat);
+            float pulse = noise.sample(
+                pulseSampler, float3(origin.xy, origin.z + u.time * 0.35)).r - 0.5;
+            float flicker = clamp(1.0 + 3.0 * pulse, 0.3, 1.8);
+            massColor = mix(u.ink.rgb, fieldDark * smoke, 0.35 * flicker * held);
+            float inner = 1.0 - smoothstep(0.0, max(effRadius, 1e-4), length(p));
+            massColor = mix(massColor, fieldLight * 0.5, 0.2 * flicker * inner * held);
+        }
 
-        float alpha = body * clamp(u.endAlpha, 0.0, 1.0) * (1.0 - 0.85 * u.thinReveal);
-        color = mix(color, bloomColor, alpha);
+        float alpha = body * clamp(u.endAlpha, 0.0, 1.0);
+        float3 color = mix(u.white.rgb, massColor, alpha);
 
         // A film grain over the frame, drawn fresh every frame. It rides on the
-        // blackness while the bloom lives and leaves with the collapse.
-        float2 pixel = in.uv * float2(u.aspect, 1.0) * u.screenHeight;
-        float grain = grainAt(pixel, u.grainSeed + u.time * 60.0) - 0.5;
-        color += grain * (0.035 * (1.0 - ending) + 0.03 * alpha * held);
+        // blackness while the mass lives and leaves with the collapse.
+        float grain = grainAt(hp * u.screenHeight, u.grainSeed + u.time * 60.0) - 0.5;
+        color += grain * 0.03 * alpha * held;
         return float4(color, 1.0);
     }
     """

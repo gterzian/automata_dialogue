@@ -74,53 +74,51 @@ argument buffer already carries.
 
 ## Collapse intro
 
-`CollapseTimeline` drives the intro the review window shows while the model
-runs. It is a fixed twelve-second timeline that freezes on its final frame, so
-the window rests on the horizon line if the model is still working. A sub-pixel
-point fades in and grows into the sphere; the field, sphere, glow, and whiteout
-take the first five seconds. A new ink point then appears on the white page,
-blooms geometrically, holds and flickers, collapses into the horizon line, and
-thins to a hairline before the automata start. The bloom's two growth terms meet
-where their slopes are zero, so the burst has a held breath; an inhale tightens
-the point just before it, and the collapse accelerates while a damped spring
-rebounds the line's thickness.
+`CollapseTimeline` drives the intro the review window shows before inference
+starts. It is one three-second cycle: a one-cell ink dot ignites, bursts to
+cover the frame, holds and flickers, then collapses into the horizon line the
+reveal's two branches share. The cycle freezes there, and `WorkingIndicator`
+freezes its display link with it, so the window keeps the last presented frame
+and draws nothing while the model works (see the window sequence in
+`AGENTS.md`).
 
-`CollapseVariation.seeded` turns one 64-bit draw into the run's look — opening
-and ending phase skew, form offset, contour wander, colour warmth, noise slice,
-and grain seed — and `WorkingIndicator.start()` draws a fresh one for every run.
-New variation belongs there, not in the shader as a new constant: everything
-visible has to differ between runs, or the exchange reads as a fixed video.
+The dot, the bursting mass, and the line are one shape measured from one
+radius: `bloom` grows that radius geometrically from the seed, and `collapse`
+narrows it into the line. Keep them one shape — an element with its own radius
+would need its own timeline, and the burst and the collapse would stop reading
+as the same object. The seed radius is the horizon row's half-height, so the
+dot the cycle starts from is one display cell and the line it ends on is exactly
+the row the reveal draws; that is why the reveal needs no handoff and
+`LayerRenderer` draws opaque spans. A run's phase skew is tapered to zero by the
+rest frame, so every run freezes on the same last image.
 
-One full-resolution render pass (`collapse_fragment`) composites the whole
-sequence in draw order:
+`CollapseVariation.seeded` turns one 64-bit draw into the run's look — phase
+skew, form offset, colour warmth, noise slice, texture, and grain seed — and
+`WorkingIndicator.start()` draws a fresh one for every run. New variation
+belongs there, not in the shader as a new constant: everything visible has to
+differ between runs, or the exchange reads as a fixed video.
 
-1. A mottled field, darkest at the corners, rose-to-violet by the run's warmth.
-2. The opening shaded sphere, the soft glow inside it, and the white core that
-   expands into the whiteout.
-3. The new ink point blooms geometrically, holds as a flickering black field,
-   collapses into a tilted pill that rights itself into a straight horizontal
-   line, rebounds, and thins to a hairline.
+The resting line becomes the reveal's first frame for an entry whose seed row
+is a single centred cell. `AutomatonWindow` plays one more beat for those
+entries: `settle` retracts the line onto that cell, half a cell right of the
+frame's centre because the viewport's centre column starts at the centre line,
+and in the palette colour that cell holds. The retraction's last frame is the
+rest frame with `settle` at 1, so the reveal starts from the dot the automaton
+actually begins with. Every other entry keeps the line, which is already its
+first row.
 
-The scene is drawn to look painted rather than computed: one noise-driven
-wander displaces every circle's radius, each disc's edge feathers over a
-fraction of its own radius, shaded fills carry an off-centre highlight and the
-field's texture, and a per-frame grain covers the frame. Discs whose edges only
-differ by `fwidth` read as vector shapes, so keep the proportional feather when
-adding one. The same wander gains angular lobes during the ending's bloom, so
-the silhouette spreads unevenly instead of staying circular.
+The scene is drawn to look painted rather than computed: the mass carries the
+field's mottled texture, a noise-driven lobe gain spreads its silhouette
+unevenly instead of keeping it circular, every edge feathers over a fraction of
+the radius, and a per-frame grain covers the frame. Edges whose softness only
+followed `fwidth` would read as vector shapes, so keep the proportional feather
+when adding one. The shader samples the noise volume only while the mass is
+held, because the line is flat ink.
 
-The ending page is the automaton's own palette background, with the grain
-flattened away, so the handoff does not shift colour. The line ends at 3% of the
-horizon row's height and 15% opacity; `HorizonHandoff` grows the row from those
-values to full height and opacity over the first half second of the reveal, so
-the cut reads as one line. `WorkingIndicator.isSettled` becomes true after that
-final line has been presented, and the window polls it before configuring the
-automaton, so a fast model never cuts off the ending.
-
-The CPU recomputes the disc list and the timeline uniforms each frame. The
-scene shader writes the drawable directly; there are no offscreen targets,
-upscale, or bloom passes. The renderer waits for the GPU before rewriting the
-shared uniform and disc buffers.
+The CPU recomputes the timeline uniforms each frame. The scene shader writes the
+drawable directly; there are no offscreen targets, upscale, or bloom passes. The
+renderer waits for the GPU before rewriting the shared uniform buffer, so a
+frame must finish before the next one is written.
 
 ## What exists
 
@@ -147,11 +145,12 @@ shared uniform and disc buffers.
   display row each frame, so every frame recompacts the whole grid.
 - **Collapse intro** (`ShaderSource.collapse`, `CollapseRenderer`,
   `CollapseTimeline`, `CollapseVariation`, `WorkingIndicator`,
-  `IndicatorActor`) — the opening sphere and whiteout, then the ink dot that
-  stretches into the horizon line the review window shows while the model runs.
-  `IndicatorActor` owns the `GPUContext`, renderer, and `DisplayLinkClock` on
-  its own `RenderExecutor`, the way `RenderActor` does for a run, and reuses the
-  indicator and layer across runs so the pipeline compiles once.
+  `IndicatorActor`) — the one-cycle dot burst that rests on the horizon line the
+  review window shows before inference starts, and the retraction that joins it
+  to a single-cell seed. `IndicatorActor` owns the `GPUContext`, renderer, and
+  `DisplayLinkClock` on its own `RenderExecutor`, the way `RenderActor` does for
+  a run, and reuses the indicator and layer across runs so the pipeline
+  compiles once.
 - **Viewport geometry** (`ViewportGeometry`, `DisplayLimits`) — the cell size,
   `cols`/`rows` for a window, the ten-window board width, the centred or
   right-pinned start origin, the twin grid's shared horizon row, and the zoom
@@ -208,10 +207,10 @@ shared uniform and disc buffers.
   case is 16 B per cell (~74 MB). Re-measure on the target display; if 60 Hz
   does not hold there, lower `ViewportGeometry.maximumGridCells` or raise the
   floor rather than guessing.
-- **The collapse intro has a fixed timeline.** It does not track the model's
-  actual progress; Metal exposes no per-frame utilization figure. The
-  twelve-second build carries the wait on its own, then holds its final horizon
-  line.
+- **The collapse intro has a fixed length.** It does not track the model's
+  actual progress; Metal exposes no per-frame utilization figure. Running it to
+  its rest frame before inference begins costs its three seconds on every
+  exchange, which is the price of not slowing the model down.
 - **The on-screen pipeline serializes every frame.** `MetalSimulation.commit`,
   `LayerSink`'s layer commit, and `CollapseRenderer.render` all wait for the
   GPU, because their buffers are shared across frames and the frame slots only
@@ -234,6 +233,7 @@ for one, never hides the newest row above the floor, and holds the floor.
 display floor, and the twin grid's rows. `LayerTests` reads the rendered
 texture back to check spans are filled with palette colours, that a renderer
 handles a grid resize, and that the sink serializes frames sharing buffers.
-`CollapseTests` checks the timeline's phase boundaries and that every phase
-reaches the renderer. The display-link presentation itself needs a screen and
+`CollapseTests` checks the timeline's phase boundaries, the rest frame the
+clock freezes on, and that every phase including the seed retraction reaches
+the renderer. The display-link presentation itself needs a screen and
 is not tested here; the intro's look is reviewed by hand.

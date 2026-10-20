@@ -111,8 +111,6 @@ public final class MetalSimulation {
     public let twin: Bool
     /// Rows from the shared horizon to each outer edge.
     public private(set) var twinHalfRows = 0
-    /// The twin layout's shared row, or nil for a single layout.
-    public var horizonRow: Int? { twin ? twinHalfRows : nil }
     /// True once the caller pans by hand; the entry's follow then stops for the
     /// rest of the run.
     private var userPanned = false

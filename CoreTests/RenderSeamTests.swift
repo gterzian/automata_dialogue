@@ -137,7 +137,6 @@ final class RenderActorTests: XCTestCase {
         XCTAssertEqual(seed.specID, "E90")
         XCTAssertEqual(seed.gpu.cols, 40)
         XCTAssertEqual(seed.gpu.rows, 20)
-        XCTAssertNil(seed.horizonRow)
         XCTAssertEqual(sink.frames.count, 1)
 
         _ = try await actor.advance(by: 5)
@@ -204,7 +203,6 @@ final class RenderActorTests: XCTestCase {
             layout: .twin, minimumZoom: 0.25, sink: sink)
         XCTAssertEqual(seed.gpu.cols, 40)
         XCTAssertEqual(seed.gpu.rows, 21)
-        XCTAssertEqual(seed.horizonRow, 10)
         let before = await actor.steppedRows
         _ = try await actor.advance(by: 6)
         let after = await actor.steppedRows
@@ -213,7 +211,6 @@ final class RenderActorTests: XCTestCase {
         await actor.setZoom(0.5)
         XCTAssertEqual(sink.frames.last?.gpu.cols, 80)
         XCTAssertEqual(sink.frames.last?.gpu.rows, 41)
-        XCTAssertEqual(sink.frames.last?.horizonRow, 20)
         let error = await actor.lastError
         XCTAssertNil(error)
         await actor.shutdown()

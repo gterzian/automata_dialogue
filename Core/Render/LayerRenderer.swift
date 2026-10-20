@@ -23,10 +23,6 @@ final class LayerRenderer {
     private struct LayerUniforms {
         var cols: UInt32
         var rows: UInt32
-        /// 0xFFFFFFFF when the layout has no shared horizon row.
-        var horizonRow: UInt32
-        /// 0 starts at the intro's hairline; 1 is a full row at full opacity.
-        var horizonReveal: Float
     }
 
     private struct DrawArguments {
@@ -92,15 +88,11 @@ final class LayerRenderer {
         gpu: GPUColorGrid,
         palette: Palette,
         into texture: MTLTexture,
-        horizonRow: Int? = nil,
-        horizonReveal: Float = 1,
         wait: Bool = false
     ) throws {
         let buffers = try prepare(cols: gpu.cols, rows: gpu.rows, cells: gpu.buffer)
         writePalette(palette, into: buffers)
-        writeUniforms(
-            cols: gpu.cols, rows: gpu.rows, horizonRow: horizonRow,
-            horizonReveal: horizonReveal, into: buffers)
+        writeUniforms(cols: gpu.cols, rows: gpu.rows, into: buffers)
 
         let (_, slot) = ring.borrow()
         slot.command.beginCommandBuffer(allocator: slot.allocator)
@@ -207,18 +199,8 @@ final class LayerRenderer {
         }
     }
 
-    private func writeUniforms(
-        cols: Int,
-        rows: Int,
-        horizonRow: Int?,
-        horizonReveal: Float,
-        into buffers: Buffers
-    ) {
-        var uniforms = LayerUniforms(
-            cols: UInt32(cols),
-            rows: UInt32(rows),
-            horizonRow: horizonRow.map(UInt32.init) ?? UInt32.max,
-            horizonReveal: min(max(horizonReveal, 0), 1))
+    private func writeUniforms(cols: Int, rows: Int, into buffers: Buffers) {
+        var uniforms = LayerUniforms(cols: UInt32(cols), rows: UInt32(rows))
         memcpy(buffers.uniforms.contents(), &uniforms, MemoryLayout<LayerUniforms>.stride)
     }
 
@@ -304,12 +286,6 @@ final class LayerRenderer {
             throw GPUContext.GPUError.resource("layer pipeline color attachment")
         }
         attachment.pixelFormat = pixelFormat
-        // The horizon row fades in from the intro's line, so spans need alpha.
-        attachment.blendingState = .enabled
-        attachment.sourceRGBBlendFactor = .sourceAlpha
-        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-        attachment.sourceAlphaBlendFactor = .one
-        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         do {
             return try compiler.makeRenderPipelineState(descriptor: descriptor)
         } catch {

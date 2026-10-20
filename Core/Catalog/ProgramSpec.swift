@@ -25,6 +25,15 @@ public enum BoardStart: Sendable, Hashable {
     /// `number` written in base `colors`, most significant digit first, from
     /// the center cell (inventory §1.4).
     case seed(number: Int, colors: Int)
+
+    /// True when the seed row is one cell at the board's centre, so the reveal's
+    /// first frame is that one cell and the intro's horizon line can retract
+    /// onto it. A `.seed` number starts on that cell too, but its remaining
+    /// digits make the row longer than one cell.
+    public var startsFromSingleCentreCell: Bool {
+        if case .center = self { return true }
+        return false
+    }
 }
 
 /// The atlas's "continuously injected randomness": after every step, one cell

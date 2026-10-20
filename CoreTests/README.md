@@ -8,7 +8,8 @@ What must be covered:
 
 - **Catalog** — 111 unique ids in inventory order; behavior counts
   (repetition 29, nesting 28, randomness 40, complexity 14); the listing and the
-  catalog ids agree; per-entry follow rates.
+  catalog ids agree; per-entry follow rates, and which seed rows are a single
+  centred cell.
 - **Prompt** — `SystemPrompt.build` embeds every catalog id with its class,
   describes all four classes, states the answer format, and stays within the
   ~4k budget.
@@ -29,6 +30,7 @@ What must be covered:
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.
-- **Collapse intro** — the timeline's phase boundaries, the horizon handoff
-  ramp, and that every phase reaches the renderer; a seed reproduces one run's
-  look and two seeds disagree. Appearance is reviewed by hand.
+- **Collapse intro** — the timeline's phase boundaries, the rest frame the
+  clock freezes on, the seed-cell retraction, that a seed reproduces one run's
+  look and two seeds disagree, and that every phase reaches the renderer.
+  Appearance is reviewed by hand.

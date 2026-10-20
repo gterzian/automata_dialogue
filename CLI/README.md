@@ -18,26 +18,24 @@
   on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`; see
   `Core/Render/README.md`). It shows the submitted
   image until Return,
-  runs the model, shows the chosen automaton until the next Return, and
-  cycles the images until the window is closed. While the model runs the
-  window shows the collapse intro (`CollapseTimeline`): a sub-pixel point fades
-  in and grows into a shaded sphere, the frame whites out, a new ink point
-  blooms to cover the screen, collapses into a straight horizontal line, and
-  thins to a hairline. Every run redraws the intro with its own timings,
-  geometry, colour, and grain, so the wait never repeats itself. The
-  twelve-second sequence ends on the horizon line: the opening sphere and
-  whiteout take the first five seconds, then the bloom, flicker, collapse,
-  rebound, and thinning fill the rest. The sequence holds that final line until
-  inference finishes, and the automaton is shown only after it has been
-  presented, so a fast model does not cut off the ending. The reveal grows the
-  horizon row in from that hairline over its first half second.
-  A `.rand` entry redraws from a fresh row each time. The reveal then grows the
-  chosen entry as two mirrored branches from that line: one branch grows upward
-  and the other downward from the same horizon row. Both branches advance
-  together, and the camera zooms out continuously at the branches' growth rate
-  so the whole growth stays in view, down to the widest zoom-out the display can
-  show one cell per element. Once the floor is reached the zoom holds while the
-  branches keep growing, and older rows leave through the horizon until Return.
+  plays the collapse intro, runs the model, shows the chosen automaton until the
+  next Return, and cycles the images until the window is closed. The intro
+  (`CollapseTimeline`) is one three-second cycle: a one-cell ink dot ignites,
+  bursts to cover the window, holds and flickers, and collapses into the
+  horizontal line the automaton grows from. Every run paints it with its own
+  timings, geometry, colour, and grain, so the wait never repeats itself. The
+  window freezes on that line while inference runs, so the wait shows the line
+  rather than a blank page. Once the chosen entry is known, an entry that
+  seeds from a single centred cell retracts the line onto that cell, so the
+  automaton appears to start from the intro's last image; every other entry
+  keeps the line. A `.rand` entry redraws from a fresh row each time. The reveal
+  then grows the chosen entry as two mirrored branches from that line: one
+  branch grows upward and the other downward from the same horizon row. Both
+  branches advance together, and the camera zooms out continuously at the
+  branches' growth rate so the whole growth stays in view, down to the widest
+  zoom-out the display can show one cell per element. Once the floor is reached
+  the zoom holds while the branches keep growing, and older rows leave through
+  the horizon until Return.
   The run starts at 40 source rows per second (`.timed`); each branch fills half
   the window, so the visible growth speed matches a single run at 20. The
   window's drawable is allocated at the floor's grid size, and the run simulates
