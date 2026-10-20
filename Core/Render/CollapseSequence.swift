@@ -4,9 +4,10 @@ import Metal
 /// Public timing for the review window's intro.
 public enum ReviewIntro {
     /// Seconds the intro runs before it holds its final frame. The opening
-    /// sphere and whiteout take the first five seconds; the screen then
-    /// collapses to a dot that explodes into the horizon line.
-    public static let duration: TimeInterval = 10
+    /// sphere and whiteout take the first five seconds; a black bloom then
+    /// bursts to cover the frame, collapses into the horizon line, and thins
+    /// to the hairline the reveal replaces.
+    public static let duration: TimeInterval = 12
 }
 
 /// One disc in the intro's world. The fragment shader composites these large to
@@ -30,8 +31,10 @@ struct CollapseDisc {
 /// draws a fresh seed per run, so two runs never paint the same sequence, and
 /// one seed always reproduces one run's sequence.
 struct CollapseVariation {
-    /// Seconds the opening phases lead or lag; the ending stays anchored.
+    /// Seconds the opening phases lead or lag; the ending has its own skew.
     var timeSkew: Float
+    /// Seconds the bloom and collapse lead or lag; the thinning stays anchored.
+    var endSkew: Float
     /// Where the form sits, in screen-height units from the frame's centre.
     var centerX: Float
     var centerY: Float
@@ -53,6 +56,7 @@ struct CollapseVariation {
         var draw = SplitMix64(seed: seed)
         return CollapseVariation(
             timeSkew: draw.float(-0.1...0.1),
+            endSkew: draw.float(-0.15...0.15),
             centerX: draw.float(-0.03...0.03),
             centerY: draw.float(-0.02...0.02),
             warmth: draw.float(0.35...1.0),
@@ -92,13 +96,14 @@ private struct SplitMix64 {
     }
 }
 
-/// The intro the review window shows while the model runs. A point grows into
-/// a shaded sphere, the frame whites out, the screen collapses to a black dot,
-/// and the dot explodes into the straight horizon row the two automaton
-/// branches share.
+/// The intro the review window shows while the model runs. A sub-pixel point
+/// fades in and grows into a shaded sphere, the frame whites out, and a new
+/// ink point blooms to cover the screen, flickers, collapses into the straight
+/// horizon row the two automaton branches share, rebounds, and thins to a
+/// hairline.
 ///
 /// One wall-clock time drives every layer, so the sequence stays in step with
-/// the display link even when a frame is dropped. The timeline is ten
+/// the display link even when a frame is dropped. The timeline is twelve
 /// seconds and freezes on its final frame. A `CollapseVariation` decides how
 /// this run's sequence is drawn and paced, so two runs differ.
 enum CollapseTimeline {
@@ -124,12 +129,20 @@ enum CollapseTimeline {
         var warp: Float
         var warmth: Float
         var grainSeed: Float
-        /// The screen goes black, that field collapses to a dot, the dot
-        /// explodes into the horizon line, and the line thins to a hairline.
+        /// The black bloom covers the screen, holds, collapses into the
+        /// horizon line, and the line thins to a hairline.
         var endAlpha: Float
-        var shrinkReveal: Float
-        var explode: Float
+        /// Exponent of the radius growth: a slow ignition, an inhale, then the
+        /// burst that covers the frame.
+        var bloom: Float
+        /// 0...1 progress from the bloom into the horizon line.
+        var collapse: Float
         var thinReveal: Float
+        /// 0...1 speed proxy of the moving front; widens the feather.
+        var frontEnergy: Float
+        /// Multiplier on the line's thickness; a damped rebound after the
+        /// collapse.
+        var lineSpring: Float
         var discs: [CollapseDisc]
     }
 
@@ -140,8 +153,8 @@ enum CollapseTimeline {
     ) -> Frame {
         let time = min(max(rawTime, 0), duration)
         // The opening phases lead or lag by a fraction of a second per run; the
-        // ending stays on `time` so the freeze and the cut to the automaton do
-        // not move.
+        // ending has its own skew, and the thinning stays on `time` so the
+        // freeze and the cut to the automaton do not move.
         let t = max(time + variation.timeSkew, 0)
 
         let sphereGrow = smoothstep(1.8, 3.8, t)
@@ -156,22 +169,37 @@ enum CollapseTimeline {
 
         let fieldAlpha = smoothstep(2.4, 3.8, t) * (1 - smoothstep(4.8, 5.4, t))
 
-        // The ending stays after the whiteout: the screen goes black, that
-        // field implodes to a dot, and the dot explodes into the horizon row
-        // the two automaton branches share. The collapse accelerates into the
-        // dot and the explosion starts at full speed, so there is no pause
-        // between them; the line then thins to a hairline.
-        let endAlpha = smoothstep(4.95, 5.0, time)
-        let shrinkReveal = min(max((time - 5.0) / 0.95, 0), 1)
-        let burst = min(max((time - 5.95) / 0.5, 0), 1)
-        let explode = 1 - (1 - burst) * (1 - burst)
-        let thinReveal = smoothstep(6.1, 9.6, time)
+        // Opening dot: sub-pixel at first, growing geometrically, fading in so
+        // the first frames are empty.
+        let dotMin: Float = 0.0004
+        let dotTarget = startRadius * 3 * variation.dotScale
+        let dotGrow = smoothstep(0, 2.6, t)
+        let dotRadius = dotMin * pow(dotTarget / dotMin, dotGrow)
+        let dotOpacity = smoothstep(0, 0.9, time) * (1 - smoothstep(4.0, 4.7, time))
 
-        // The opening point starts at the same size as the ending dot, then
-        // grows into the shaded sphere.
-        let dotRadius = mix(
-            startRadius, startRadius * 3 * variation.dotScale, smoothstep(0, 2.0, t))
-        let dotOpacity = 1 - smoothstep(4.0, 4.7, time)
+        // Ending. `e` carries the per-run lead or lag; the thinning follows
+        // `time`, which keeps the final frame fixed.
+        let e = time + variation.endSkew
+        let endAlpha = smoothstep(5.3, 5.7, e)
+
+        // Slow growth, a tiny pause where both smoothsteps have zero slope, an
+        // inhale, then the burst. `bloom` is the exponent of the radius growth.
+        let bloom = 0.44 * smoothstep(5.4, 6.4, e)
+                  + 0.56 * smoothstep(6.4, 6.9, e)
+                  - 0.03 * bump(6.15, 6.45, e)
+
+        // The collapse accelerates into the line; the spring absorbs the
+        // arrival.
+        let c = min(max((e - 7.6) / 1.1, 0), 1)
+        let collapse = pow(c, 1.8)
+        let since = max(e - 8.7, 0)
+        let lineSpring = 1 + 0.8 * exp(-5 * since) * sin(14 * since)
+
+        let frontEnergy = max(bump(6.4, 6.9, e), bump(7.6, 8.7, e))
+
+        let thinStart: Float = 8.8
+        let x = min(max((time - thinStart) / (duration - thinStart), 0), 1)
+        let thinReveal = (1 - exp(-3.5 * x)) / (1 - exp(-3.5))
 
         var discs: [CollapseDisc] = []
         // The shaded sphere that the opening point grows into.
@@ -221,9 +249,11 @@ enum CollapseTimeline {
             warmth: variation.warmth,
             grainSeed: variation.grainSeed,
             endAlpha: endAlpha,
-            shrinkReveal: shrinkReveal,
-            explode: explode,
+            bloom: bloom,
+            collapse: collapse,
             thinReveal: thinReveal,
+            frontEnergy: frontEnergy,
+            lineSpring: lineSpring,
             discs: discs
         )
     }
@@ -233,8 +263,10 @@ enum CollapseTimeline {
         return t * t * (3 - 2 * t)
     }
 
-    private static func mix(_ a: Float, _ b: Float, _ t: Float) -> Float {
-        a + (b - a) * t
+    /// 0 at both ends of [a, b], 1 in the middle.
+    private static func bump(_ a: Float, _ b: Float, _ x: Float) -> Float {
+        let s = min(max((x - a) / (b - a), 0), 1)
+        return 4 * s * (1 - s)
     }
 }
 
@@ -267,10 +299,12 @@ final class CollapseRenderer {
         var warmth: Float
         var grainSeed: Float
         var endAlpha: Float
-        var shrinkReveal: Float
-        var explode: Float
+        var bloom: Float
+        var collapse: Float
         var thinReveal: Float
         var lineHalfThickness: Float
+        var frontEnergy: Float
+        var lineSpring: Float
         var white: SIMD4<Float>
         var ink: SIMD4<Float>
     }
@@ -329,8 +363,8 @@ final class CollapseRenderer {
     /// Renders one frame and blocks until the GPU finishes, so the drawable is
     /// complete (tests read the same texture back) and the next frame can
     /// safely rewrite the shared buffers. `lineHalfThickness` is the horizon
-    /// row's half-height in screen-height units, so the ending line is exactly
-    /// as thick as the automaton's shared row.
+    /// row's half-height in screen-height units, which sets the full line from
+    /// which the ending thins.
     func render(
         into texture: MTLTexture,
         frame: CollapseTimeline.Frame,
@@ -404,10 +438,12 @@ final class CollapseRenderer {
             warmth: frame.warmth,
             grainSeed: frame.grainSeed,
             endAlpha: frame.endAlpha,
-            shrinkReveal: frame.shrinkReveal,
-            explode: frame.explode,
+            bloom: frame.bloom,
+            collapse: frame.collapse,
             thinReveal: frame.thinReveal,
             lineHalfThickness: lineHalfThickness,
+            frontEnergy: frame.frontEnergy,
+            lineSpring: frame.lineSpring,
             white: white.simd,
             ink: ink.simd
         )

@@ -206,7 +206,8 @@ public actor RenderActor {
 
     private func deliver(_ simulation: MetalSimulation, chunk: Int) throws -> RenderFrame {
         let gpu = try simulation.renderGPU(chunk: chunk)
-        let frame = RenderFrame(specID: simulation.spec.id, gpu: gpu)
+        let frame = RenderFrame(
+            specID: simulation.spec.id, gpu: gpu, horizonRow: simulation.horizonRow)
         sink?.deliver(frame)
         return frame
     }

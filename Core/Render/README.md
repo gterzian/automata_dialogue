@@ -75,17 +75,21 @@ argument buffer already carries.
 ## Collapse intro
 
 `CollapseTimeline` drives the intro the review window shows while the model
-runs. It is a fixed ten-second timeline that freezes on its final frame, so the
-window rests on the horizon line if the model is still working. The opening
-sphere and whiteout take the first five seconds; the screen then goes black,
-that field implodes to a dot, the dot explodes into the horizon line, and the
-line then thins to a hairline before the automata start.
+runs. It is a fixed twelve-second timeline that freezes on its final frame, so
+the window rests on the horizon line if the model is still working. A sub-pixel
+point fades in and grows into the sphere; the field, sphere, glow, and whiteout
+take the first five seconds. A new ink point then appears on the white page,
+blooms geometrically, holds and flickers, collapses into the horizon line, and
+thins to a hairline before the automata start. The bloom's two growth terms meet
+where their slopes are zero, so the burst has a held breath; an inhale tightens
+the point just before it, and the collapse accelerates while a damped spring
+rebounds the line's thickness.
 
-`CollapseVariation.seeded` turns one 64-bit draw into the run's look — phase
-skew, form offset, contour wander, colour warmth, noise slice, and grain seed —
-and `WorkingIndicator.start()` draws a fresh one for every run. New variation
-belongs there, not in the shader as a new constant: everything visible has to
-differ between runs, or the exchange reads as a fixed video.
+`CollapseVariation.seeded` turns one 64-bit draw into the run's look — opening
+and ending phase skew, form offset, contour wander, colour warmth, noise slice,
+and grain seed — and `WorkingIndicator.start()` draws a fresh one for every run.
+New variation belongs there, not in the shader as a new constant: everything
+visible has to differ between runs, or the exchange reads as a fixed video.
 
 One full-resolution render pass (`collapse_fragment`) composites the whole
 sequence in draw order:
@@ -93,21 +97,24 @@ sequence in draw order:
 1. A mottled field, darkest at the corners, rose-to-violet by the run's warmth.
 2. The opening shaded sphere, the soft glow inside it, and the white core that
    expands into the whiteout.
-3. The screen goes black, that black field implodes to a dot, the dot explodes
-   into a straight horizontal line, and the line thins to a hairline.
+3. The new ink point blooms geometrically, holds as a flickering black field,
+   collapses into a tilted pill that rights itself into a straight horizontal
+   line, rebounds, and thins to a hairline.
 
 The scene is drawn to look painted rather than computed: one noise-driven
 wander displaces every circle's radius, each disc's edge feathers over a
 fraction of its own radius, shaded fills carry an off-centre highlight and the
 field's texture, and a per-frame grain covers the frame. Discs whose edges only
 differ by `fwidth` read as vector shapes, so keep the proportional feather when
-adding one.
+adding one. The same wander gains angular lobes during the ending's bloom, so
+the silhouette spreads unevenly instead of staying circular.
 
 The ending page is the automaton's own palette background, with the grain
-flattened away, so the handoff does not shift colour. The ending line is exactly
-one automaton row thick: the window passes half the twin grid's row height to
-the indicator, so the first reveal frame replaces the line without a pop. `WorkingIndicator.isSettled` becomes true after that final
-line has been presented, and the window polls it before configuring the
+flattened away, so the handoff does not shift colour. The line ends at 3% of the
+horizon row's height and 15% opacity; `HorizonHandoff` grows the row from those
+values to full height and opacity over the first half second of the reveal, so
+the cut reads as one line. `WorkingIndicator.isSettled` becomes true after that
+final line has been presented, and the window polls it before configuring the
 automaton, so a fast model never cuts off the ending.
 
 The CPU recomputes the disc list and the timeline uniforms each frame. The
@@ -203,7 +210,7 @@ shared uniform and disc buffers.
   floor rather than guessing.
 - **The collapse intro has a fixed timeline.** It does not track the model's
   actual progress; Metal exposes no per-frame utilization figure. The
-  ten-second build carries the wait on its own, then holds its final horizon
+  twelve-second build carries the wait on its own, then holds its final horizon
   line.
 - **The on-screen pipeline serializes every frame.** `MetalSimulation.commit`,
   `LayerSink`'s layer commit, and `CollapseRenderer.render` all wait for the

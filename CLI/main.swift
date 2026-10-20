@@ -284,8 +284,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
 
         let actor = indicator ?? IndicatorActor()
         indicator = actor
-        // The intro's final line is one automaton row thick, so the first
-        // reveal frame replaces it without a pop.
+        // The intro's ending line is measured in horizon-row heights, so it
+        // thins to the same 3% hairline the reveal grows back from.
         let cols = ViewportGeometry.columns(size: contentSize)
         let rows = ViewportGeometry.twinRows(
             baseRows: ViewportGeometry.rows(size: contentSize, cols: cols), zoom: 1)

@@ -20,16 +20,17 @@
   image until Return,
   runs the model, shows the chosen automaton until the next Return, and
   cycles the images until the window is closed. While the model runs the
-  window shows the collapse intro (`CollapseTimeline`): a point grows into a
-  shaded sphere, the frame whites out, the screen goes black, that black field
-  implodes to a dot, and the dot explodes into a straight horizontal line that
+  window shows the collapse intro (`CollapseTimeline`): a sub-pixel point fades
+  in and grows into a shaded sphere, the frame whites out, a new ink point
+  blooms to cover the screen, collapses into a straight horizontal line, and
   thins to a hairline. Every run redraws the intro with its own timings,
-  geometry, colour, and grain, so the wait never repeats itself. The ten-second
-  sequence ends on the horizon line: the opening sphere and whiteout take the
-  first five seconds, then the implosion, explosion, and thinning fill the rest.
-  The sequence holds that final line until inference finishes, and the automaton
-  is shown only after it has been presented, so a fast model does not cut off
-  the ending.
+  geometry, colour, and grain, so the wait never repeats itself. The
+  twelve-second sequence ends on the horizon line: the opening sphere and
+  whiteout take the first five seconds, then the bloom, flicker, collapse,
+  rebound, and thinning fill the rest. The sequence holds that final line until
+  inference finishes, and the automaton is shown only after it has been
+  presented, so a fast model does not cut off the ending. The reveal grows the
+  horizon row in from that hairline over its first half second.
   A `.rand` entry redraws from a fresh row each time. The reveal then grows the
   chosen entry as two mirrored branches from that line: one branch grows upward
   and the other downward from the same horizon row. Both branches advance

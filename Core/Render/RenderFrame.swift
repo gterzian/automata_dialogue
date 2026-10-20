@@ -23,9 +23,12 @@ public struct RenderFrame: Sendable {
     public let specID: String
     /// The simulation's GPU color buffer.
     public let gpu: GPUColorGrid
+    /// Row the twin branches share, or nil for a single layout.
+    public let horizonRow: Int?
 
-    public init(specID: String, gpu: GPUColorGrid) {
+    public init(specID: String, gpu: GPUColorGrid, horizonRow: Int? = nil) {
         self.specID = specID
         self.gpu = gpu
+        self.horizonRow = horizonRow
     }
 }

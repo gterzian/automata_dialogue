@@ -47,8 +47,9 @@ public final class WorkingIndicator: @unchecked Sendable {
 
     /// Starts (or restarts) the sequence from its opening point, drawing a
     /// fresh look for this run. `lineHalfThickness` is the automaton's horizon
-    /// row half-height in screen-height units, so the ending line is exactly as
-    /// thick as the row that replaces it. Safe to call after `stop()`.
+    /// row half-height in screen-height units, which the ending line thins to a
+    /// fraction of so the reveal can grow the row back from it. Safe to call
+    /// after `stop()`.
     public func start(lineHalfThickness: Float) {
         lock.lock()
         startedAt = 0

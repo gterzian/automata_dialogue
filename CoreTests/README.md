@@ -18,7 +18,8 @@ What must be covered:
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
   frames, and advances on clock ticks; the pacing math; (Metal 4 only) the GPU
   seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
-  resize, and the twin run's mirrored branches and step count.
+  resize, and the twin run's mirrored branches, step count, and reported
+  horizon row.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
   the centred or rightmost start origin, the visible span under zoom, the twin
   grid's shared horizon row, and the display-dependent zoom floor.
@@ -28,6 +29,6 @@ What must be covered:
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.
-- **Collapse intro** — the timeline's phase boundaries and that every phase
-  reaches the renderer; a seed reproduces one run's look and two seeds
-  disagree. Appearance is reviewed by hand.
+- **Collapse intro** — the timeline's phase boundaries, the horizon handoff
+  ramp, and that every phase reaches the renderer; a seed reproduces one run's
+  look and two seeds disagree. Appearance is reviewed by hand.

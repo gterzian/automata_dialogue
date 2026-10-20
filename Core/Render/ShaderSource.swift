@@ -238,8 +238,8 @@ public enum ShaderSource {
     struct LayerUniforms {
         uint cols;
         uint rows;
-        uint padding0;
-        uint padding1;
+        uint horizonRow;   // 0xFFFFFFFF when the layout has no shared horizon
+        float horizonReveal;
     };
 
     // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
@@ -288,9 +288,12 @@ public enum ShaderSource {
     struct LayerVertexOut {
         float4 position [[position]];
         float4 color;
+        float alpha;
     };
 
     // One instance per span; six vertices form the quad. Row 0 is the top edge.
+    // The horizon row starts at the intro's hairline and grows to its full
+    // height over the first half second, so the cut reads as one line.
     vertex LayerVertexOut layer_vertex(uint vid [[vertex_id]],
                                        uint iid [[instance_id]],
                                        const device Span* spans [[buffer(0)]],
@@ -300,21 +303,33 @@ public enum ShaderSource {
         float2 corner = float2((vid == 1 || vid == 4 || vid == 5) ? 1.0 : 0.0,
                                (vid == 2 || vid == 3 || vid == 5) ? 1.0 : 0.0);
         float x = (float(s.start) + corner.x * float(s.length)) / float(u.cols);
-        float y = (float(s.row) + corner.y) / float(u.rows);
+        float y0 = float(s.row) / float(u.rows);
+        float y1 = float(s.row + 1) / float(u.rows);
+        float reveal = 1.0;
+        if (s.row == u.horizonRow) {
+            reveal = clamp(u.horizonReveal, 0.0, 1.0);
+            float center = (y0 + y1) * 0.5;
+            float halfHeight = 0.5 / float(u.rows) * mix(0.03, 1.0, reveal);
+            y0 = center - halfHeight;
+            y1 = center + halfHeight;
+        }
+        float y = mix(y0, y1, corner.y);
         LayerVertexOut out;
         out.position = float4(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
         out.color = palette[s.color];
+        out.alpha = mix(0.15, 1.0, reveal);
         return out;
     }
 
     fragment float4 layer_fragment(LayerVertexOut in [[stage_in]]) {
-        return in.color;
+        return float4(in.color.rgb, in.alpha);
     }
     """
 
     /// The intro the review window shows while the model runs: a point grows
-    /// into a shaded sphere, the frame whites out, and the ink point returns as
-    /// a small dot that stretches into the horizon line the reveal starts from.
+    /// into a shaded sphere, the frame whites out, and an ink point blooms to
+    /// cover the screen before it collapses into the horizon line the reveal
+    /// starts from.
     ///
     /// Everything is drawn by one full-screen fragment shader: the mottled
     /// field, the opening sphere and whiteout, and the ending dot and line. No
@@ -343,10 +358,12 @@ public enum ShaderSource {
         float warmth;
         float grainSeed;
         float endAlpha;
-        float shrinkReveal;
-        float explode;
+        float bloom;
+        float collapse;
         float thinReveal;
         float lineHalfThickness;
+        float frontEnergy;
+        float lineSpring;
         float4 white;
         float4 ink;
     };
@@ -396,6 +413,15 @@ public enum ShaderSource {
         float a = noise.sample(s, float3(p * 0.09 + origin.xy, origin.z + t * 0.015)).r;
         float b = noise.sample(s, float3(p * 0.22 + origin.yx, origin.z + 0.57 + t * 0.025)).r;
         return (a - 0.5) * 0.8 + (b - 0.5) * 0.2;
+    }
+
+    // The silhouette's angular lobes, read from the volume by direction from
+    // the centre so ink spreads unevenly instead of like a perfect circle.
+    static float lobeNoise(texture3d<float> noise, float2 dir, float t, float3 origin) {
+        constexpr sampler s(filter::linear, address::repeat);
+        float a = noise.sample(s, float3(dir * 0.35 + origin.xy, origin.z + t * 0.05)).r;
+        float b = noise.sample(s, float3(dir * 0.90 + origin.yx, origin.z + 0.30 + t * 0.09)).r;
+        return (a - 0.5) * 0.75 + (b - 0.5) * 0.25;
     }
 
     // Per-pixel white noise for the film grain; the seed moves each frame.
@@ -466,7 +492,8 @@ public enum ShaderSource {
         // Every circle is measured against this one wandering radius. The small
         // constant term keeps the wander visible at the opening point's scale,
         // where a purely proportional wobble would round away.
-        float wander = contourWander(noise, p, u.time, origin);
+        float wander = contourWander(noise, p, u.time, origin)
+            + 0.6 * lobeNoise(noise, p / max(r, 1e-4), u.time, origin);
         float d = r * (1.0 + u.warp * 2.0 * wander) + u.warp * 0.35 * wander;
 
         float3 color = u.white.rgb;
@@ -512,26 +539,57 @@ public enum ShaderSource {
         float ending = smoothstep(4.5, 4.95, u.time);
         color = mix(color, u.white.rgb, ending);
 
-        // The ending: the screen goes black, that field collapses to a dot,
-        // and the dot explodes into the straight horizon row the two automaton
-        // branches share.
+        // The ending: a new black point appears on the white page, grows slowly,
+        // inhales, bursts to cover the screen, holds and flickers, collapses into
+        // the horizontal row the automaton branches share, rebounds, and thins.
         float2 hp = (in.uv - 0.5) * float2(u.aspect, 1.0);
-        float startRadius = length(float2(u.aspect, 1.0)) * 0.5 + 0.1;
-        float dotRadius = u.lineHalfThickness * 5.0;
-        float radius = mix(startRadius, dotRadius, u.shrinkReveal);
-        radius = mix(radius, u.lineHalfThickness, u.explode);
-        radius *= mix(1.0, 0.18, u.thinReveal);
-        float halfWidth = u.explode * (u.aspect * 0.5 + 0.05);
-        float2 q = float2(max(abs(hp.x) - halfWidth, 0.0), hp.y);
-        float distance = length(q);
-        float soft = max(radius * 0.5, 1.5 / max(u.screenHeight, 1.0));
-        float body = 1.0 - smoothstep(-soft, soft, distance - radius);
-        color = mix(color, u.ink.rgb, body * clamp(u.endAlpha, 0.0, 1.0));
+        float coverRadius = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
+        float seedRadius = 0.0005;
 
-        // A film grain over the whole frame, drawn fresh every frame.
+        // Geometric growth: constant log-rate, so the front accelerates as it grows.
+        float bloomRadius = seedRadius * pow(coverRadius / seedRadius, u.bloom);
+        float radius = mix(bloomRadius, u.lineHalfThickness, u.collapse) * u.lineSpring;
+        radius *= mix(1.0, 0.03, u.thinReveal);
+        float halfWidth = u.collapse * (u.aspect * 0.5 + 0.05);
+        float held = 1.0 - u.collapse;
+
+        // Organic silhouette: lobes by angle plus a slow breath, both fading out
+        // as the shape becomes the straight line.
+        float2 dir = hp / max(length(hp), 1e-4);
+        float lobes = lobeNoise(noise, dir, u.time, origin);
+        float settle = 1.0 - smoothstep(0.55, 1.0, u.collapse);
+        float breathing = 1.0 + 0.012 * sin(u.time * 2.1 + u.grainSeed) * held;
+        float effRadius = radius * (1.0 + 1.2 * lobes * settle) * breathing;
+
+        // The collapsing pill starts slightly tilted and rights itself.
+        float tilt = sin(u.grainSeed) * 0.12 * held;
+        float2 hr = float2(hp.x * cos(tilt) - hp.y * sin(tilt),
+                           hp.x * sin(tilt) + hp.y * cos(tilt));
+        float2 q = float2(max(abs(hr.x) - halfWidth, 0.0), hr.y);
+        float distance = length(q);
+
+        // Fast fronts carry a wider, softer edge; the settled line is crisp.
+        float soft = max(effRadius * 0.5 * (1.0 + 0.9 * u.frontEnergy),
+                         1.5 / max(u.screenHeight, 1.0));
+        float body = 1.0 - smoothstep(-soft, soft, distance - effRadius);
+
+        // The held black flickers between near-black and a warm dark brown, with a
+        // slightly lighter heart; both fade to the pure ink colour of the line.
+        constexpr sampler pulseSampler(filter::linear, address::repeat);
+        float pulse = noise.sample(pulseSampler, float3(origin.xy, origin.z + u.time * 0.35)).r - 0.5;
+        float flicker = clamp(1.0 + 3.0 * pulse, 0.3, 1.8);
+        float3 bloomColor = mix(u.ink.rgb, fieldDark * smoke, 0.35 * flicker * held);
+        float inner = 1.0 - smoothstep(0.0, max(effRadius, 1e-4), length(hp));
+        bloomColor = mix(bloomColor, fieldLight * 0.5, 0.2 * flicker * inner * held);
+
+        float alpha = body * clamp(u.endAlpha, 0.0, 1.0) * (1.0 - 0.85 * u.thinReveal);
+        color = mix(color, bloomColor, alpha);
+
+        // A film grain over the frame, drawn fresh every frame. It rides on the
+        // blackness while the bloom lives and leaves with the collapse.
         float2 pixel = in.uv * float2(u.aspect, 1.0) * u.screenHeight;
         float grain = grainAt(pixel, u.grainSeed + u.time * 60.0) - 0.5;
-        color += grain * 0.035 * (1.0 - ending);
+        color += grain * (0.035 * (1.0 - ending) + 0.03 * alpha * held);
         return float4(color, 1.0);
     }
     """

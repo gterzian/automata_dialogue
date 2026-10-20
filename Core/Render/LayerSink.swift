@@ -69,6 +69,7 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
     private let renderer: LayerRenderer
     private let lock = NSLock()
     private var latest: RenderFrame?
+    private var startedAt: CFTimeInterval?
     private var finished = false
     private var lastError: String?
 
@@ -80,7 +81,9 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         // The layer owns the residency of its drawables; the queue must know
         // about it.
         context.queue.addResidencySet(layer.residencySet)
-        clock.onDrawable = { [weak self] drawable, _ in self?.render(drawable) }
+        clock.onDrawable = { [weak self] drawable, timestamp in
+            self?.render(drawable, timestamp: timestamp)
+        }
     }
 
     public func deliver(_ frame: RenderFrame) {
@@ -104,14 +107,18 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
         return lastError
     }
 
-    private func render(_ drawable: any CAMetalDrawable) {
+    private func render(_ drawable: any CAMetalDrawable, timestamp: CFTimeInterval) {
         lock.lock()
         let frame = latest
         let done = finished
+        if startedAt == nil, frame != nil { startedAt = timestamp }
+        let elapsed = startedAt.map { timestamp - $0 } ?? 0
         lock.unlock()
         guard !done, let frame else { return }
         do {
-            try render(frame: frame, into: drawable.texture)
+            try render(
+                frame: frame, into: drawable.texture,
+                horizonReveal: HorizonHandoff.reveal(elapsed: elapsed))
         } catch {
             lock.lock()
             lastError = error.localizedDescription
@@ -127,8 +134,14 @@ public final class LayerSink: FrameSink, @unchecked Sendable {
     /// uniform, and palette buffers, so a frame that is still reading them must
     /// complete before the next frame writes them. Offscreen tests drive this
     /// directly; `render(_:)` adds the drawable and `present`.
-    func render(frame: RenderFrame, into texture: MTLTexture) throws {
+    func render(
+        frame: RenderFrame,
+        into texture: MTLTexture,
+        horizonReveal: Float = 1
+    ) throws {
         guard let spec = Catalog.spec(id: frame.specID) else { return }
-        try renderer.render(gpu: frame.gpu, palette: spec.display.palette, into: texture, wait: true)
+        try renderer.render(
+            gpu: frame.gpu, palette: spec.display.palette, into: texture,
+            horizonRow: frame.horizonRow, horizonReveal: horizonReveal, wait: true)
     }
 }
