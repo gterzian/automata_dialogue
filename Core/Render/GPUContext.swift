@@ -121,4 +121,11 @@ public final class GPUContext {
         for texture in textures { residency.addAllocation(texture) }
         residency.commit()
     }
+
+    /// Releases a texture that a later submission replaced. The caller must
+    /// have finished every command that reads it.
+    public func removeResident(_ texture: any MTLTexture) {
+        residency.removeAllocation(texture)
+        residency.commit()
+    }
 }

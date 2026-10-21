@@ -80,9 +80,12 @@ func printUsage() -> Never {
       rate <path|dir> ...               run the MLX agent over reference images
         a directory contributes its top-level images; the batch cycles
         options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
-        Enter shows each image, submits it on the next Enter, then shows the
-        chosen automaton's reveal until Enter advances to the next image.
-        Closing the window stops the run.
+        The window opens on a black drawing page. Left and right arrows move
+        through the carousel: the drawing page, then every image, then back to
+        the drawing page. Draw with the pointer; Return submits the drawing or
+        image as an image, plays the submission beat, then shows the chosen
+        automaton's reveal until Return advances to the next page. Leaving the
+        drawing page clears it. Closing the window stops the run.
         (--model default: RATER_MODEL_PATH; downloads are disabled)
       bench <path|dir> ...              time the agent on the images, headless
         options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
@@ -145,14 +148,16 @@ final class MetalHostView: NSView {
     }
 }
 
-/// Presents one image, the collapse intro, then one automaton, in a single
-/// screen-sized window using `Core/Render`'s on-screen path: a `RenderActor`
-/// owns a `LayerSink`, or an `IndicatorActor` a `WorkingIndicator`, over a
-/// `MetalHostView.metalLayer`. `showInput` holds the image until Return;
-/// `showThinking` runs the collapse intro while the model works;
-/// `present` swaps the reveal's two mirrored automaton branches into the same
-/// window and suspends until Return or close. The key monitor calls `submit()`;
-/// `NSApplication.run()` keeps delivering events while suspended.
+/// Presents the input carousel, the submission beat, the collapse intro, then
+/// one automaton, in a single screen-sized window using `Core/Render`'s
+/// on-screen path: a `RenderActor` owns a `LayerSink`, or an `IndicatorActor` a
+/// `WorkingIndicator`, over a `MetalHostView.metalLayer`. `showPage` holds one
+/// carousel page until Return or an arrow; `beginSubmission` doubles the
+/// submitted image and collapses it onto the intro's opening dot while the
+/// model works; `present` swaps the reveal's two mirrored automaton branches
+/// into the same window and suspends until Return or close. The key monitor
+/// calls `submit()` and `navigate(_:)`; `NSApplication.run()` keeps delivering
+/// events while suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// Source rows per second each branch grows. A branch fills half the
@@ -167,20 +172,57 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     private var sink: LayerSink?
     private var indicator: IndicatorActor?
     private var indicatorHost: MetalHostView?
+    private var currentPage: InputPage?
+    private var canvas: DrawingCanvasView?
+    /// Pending continuation for a page action (Return or an arrow). The reveal
+    /// has its own `enterContinuation`, so arrows during a reveal are ignored.
+    private var inputContinuation: CheckedContinuation<InputAction, Never>?
     private var enterContinuation: CheckedContinuation<Void, Never>?
+    /// True once the current run's indicator failure has been reported.
+    private var reportedIndicatorError = false
     private(set) var isClosed = false
 
-    /// Shows `image` at the screen's size and returns; the caller runs the model
-    /// next, and `present` reuses the window for the automaton.
-    func showInput(_ image: NSImage, title: String) {
+    /// The drawing captured when the drawing page is submitted. A blank page is
+    /// a valid input: the rubric maps a blank field to `repetition`.
+    var currentDrawing: Drawing? { canvas?.drawing }
+
+    /// Shows one carousel page. Moving off the drawing page clears it, so a
+    /// later return starts blank; re-showing the same page keeps the strokes.
+    func showPage(_ page: InputPage) {
+        guard !isClosed else { return }
         let window = ensureWindow()
-        let view = NSImageView(frame: NSRect(origin: .zero, size: window.contentLayoutRect.size))
-        view.image = image
-        view.imageScaling = .scaleProportionallyUpOrDown
-        window.contentView = view
-        window.title = title
+        if currentPage == .drawing, page != .drawing { canvas?.clear() }
+        let size = window.contentLayoutRect.size
+        switch page {
+        case .drawing:
+            let view: DrawingCanvasView
+            if let canvas {
+                view = canvas
+            } else {
+                view = DrawingCanvasView(frame: NSRect(origin: .zero, size: size))
+                canvas = view
+            }
+            view.frame = NSRect(origin: .zero, size: size)
+            window.contentView = view
+            view.window?.makeFirstResponder(view)
+        case .image(let url):
+            let view = NSImageView(frame: NSRect(origin: .zero, size: size))
+            view.image = NSImage(contentsOf: url)
+            view.imageScaling = .scaleProportionallyUpOrDown
+            // The letterbox is the same page the submission beat draws on.
+            view.wantsLayer = true
+            view.layer?.backgroundColor = Palette.standard(stateCount: 2)[0].cgColor
+            window.contentView = view
+        }
+        window.title = page.title
+        currentPage = page
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Clears the drawing page once a submitted drawing's turn is over.
+    func clearDrawing() {
+        canvas?.clear()
     }
 
     /// Swaps the reveal for `spec` into the window and suspends until Return or
@@ -264,11 +306,12 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         await stopRun()
     }
 
-    /// The intro the review window shows while the model's turn is prepared.
-    /// The intro and the model run together; if the model outlasts the intro,
-    /// the window holds the rest frame until the choice lands. `present` or
-    /// `stopThinking` ends it.
-    func showThinking() async {
+    /// The submission beat and intro the review window shows while the model's
+    /// turn is prepared. They and the model run together; if the model outlasts
+    /// the intro, the window holds the rest frame until the choice lands.
+    /// `present` or `stopThinking` ends it. A missing raster skips the beat and
+    /// starts the intro directly, so a failed decode still leaves a wait.
+    func beginSubmission(_ image: RasterImage?) async {
         guard !isClosed, GPUContext.isAvailable else { return }
         let window = ensureWindow()
         let contentSize = window.contentLayoutRect.size
@@ -284,6 +327,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
 
         let actor = indicator ?? IndicatorActor()
         indicator = actor
+        reportedIndicatorError = false
         // The intro's ending line is measured in horizon-row heights so the
         // retraction lands on one cell; the shader draws the line as a hairline
         // and thickens it only for that retraction.
@@ -292,11 +336,17 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             baseRows: ViewportGeometry.rows(size: contentSize, cols: cols), zoom: 1)
         let lineHalfThickness = 0.5 / Float(max(1, rows))
         do {
-            try await actor.start(
-                layer: host.metalLayer, lineHalfThickness: lineHalfThickness)
+            if let image {
+                try await actor.playSubmission(
+                    image, layer: host.metalLayer, lineHalfThickness: lineHalfThickness)
+            } else {
+                try await actor.start(
+                    layer: host.metalLayer, lineHalfThickness: lineHalfThickness)
+            }
         } catch {
-            indicator = nil
             print("rate: indicator failed: \(error.localizedDescription)")
+            await actor.shutdown()
+            indicator = nil
         }
     }
 
@@ -306,8 +356,18 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// hold the turn up, and the caller stops the intro either way.
     func waitForThinkingToSettle() async {
         var waited: TimeInterval = 0
-        while !isClosed, waited < ReviewIntro.duration + ReviewIntro.finaleDuration + 2 {
+        while !isClosed,
+              waited < SubmissionIntro.duration
+                + ReviewIntro.duration + ReviewIntro.finaleDuration + 2 {
             guard let indicator else { return }
+            if let error = await indicator.lastError {
+                if !reportedIndicatorError {
+                    reportedIndicatorError = true
+                    FileHandle.standardError.write(
+                        Data("rate: indicator render failed: \(error)\n".utf8))
+                }
+                return
+            }
             if await indicator.isSettled { return }
             do {
                 try await Task.sleep(for: .milliseconds(50))
@@ -353,12 +413,33 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         indicatorHost = nil
     }
 
-    /// Resumes a `waitForEnter`; the key monitor calls this on Return. A Return
-    /// outside a wait (while the model runs, say) is ignored.
+    /// Resumes the pending page action on Return, or the reveal's wait when the
+    /// automaton is on screen. A Return while the model runs is ignored.
     func submit() {
         guard !isClosed else { return }
+        if let input = inputContinuation {
+            inputContinuation = nil
+            input.resume(returning: .submit)
+            return
+        }
         enterContinuation?.resume()
         enterContinuation = nil
+    }
+
+    /// Steps the carousel by `delta`. Only an input page accepts the step, so
+    /// arrows during the submission beat or the reveal are ignored.
+    func navigate(_ delta: Int) {
+        guard !isClosed, let input = inputContinuation else { return }
+        inputContinuation = nil
+        input.resume(returning: .move(delta))
+    }
+
+    /// Suspends until the page is submitted, stepped, or closed.
+    func waitForInputAction() async -> InputAction {
+        if isClosed { return .closed }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<InputAction, Never>) in
+            self.inputContinuation = continuation
+        }
     }
 
     /// Suspends until Return or close.
@@ -409,6 +490,10 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         isClosed = true
+        if let input = inputContinuation {
+            inputContinuation = nil
+            input.resume(returning: .closed)
+        }
         enterContinuation?.resume()
         enterContinuation = nil
     }
@@ -526,27 +611,23 @@ struct RateOutcome: Sendable {
     let metrics: [GenerationMetrics]
 }
 
-/// Runs the agent over one image. The engine carries the recent-choice window
-/// across the batch, so each image is asked to pick an unused automaton.
-func rateOne(
+/// Runs the agent over one normalized image. The engine carries the
+/// recent-choice window across the batch, so each input is asked to pick an
+/// unused automaton. `startedAt` keeps the reported seconds inclusive of the
+/// caller's normalization/export work.
+func runEngine(
     engine: AgentEngine,
-    path: String,
-    directory: URL,
-    dimension: Int,
-    verbose: Bool
+    imageURL: URL,
+    name: String,
+    verbose: Bool,
+    startedAt: Date
 ) async -> RateOutcome {
-    let url = URL(fileURLWithPath: path)
-    let start = Date()
     var response = ""
     var choice: Choice?
     var failure: String?
     var metrics: [GenerationMetrics] = []
     do {
-        // Normalize to the model's input size so an oversized or malformed
-        // image never reaches the preprocessor's far larger edge limits.
-        let normalized = try ImageImport.normalize(url, into: directory, dimension: dimension)
-        if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
-        for try await event in engine.run(AgentInput(text: "", imageURL: normalized)) {
+        for try await event in engine.run(AgentInput(text: "", imageURL: imageURL)) {
             switch event {
             case .text(let text): response = text
             case .metrics(let pass): metrics.append(pass)
@@ -558,7 +639,7 @@ func rateOne(
     } catch {
         failure = error.localizedDescription
     }
-    let seconds = String(format: "%.2f", Date().timeIntervalSince(start))
+    let seconds = String(format: "%.2f", Date().timeIntervalSince(startedAt))
     if verbose {
         for (index, pass) in metrics.enumerated() {
             let turn = index == 0 ? "turn 1" : "turn \(index + 1) (repair)"
@@ -567,15 +648,120 @@ func rateOne(
             print(
                 "[debug] \(turn): prompt \(pass.promptTokenCount) tokens / \(promptSeconds)s, generation \(pass.generationTokenCount) tokens / \(generateSeconds)s")
         }
-        print("[debug] \(url.lastPathComponent) answer after \(seconds)s:")
+        print("[debug] \(name) answer after \(seconds)s:")
         print(response.isEmpty ? "[debug]   (empty response)" : response)
         if let choice, let spec = Catalog.spec(id: choice.id) {
             print("[debug]   parsed \(choice.id) [\(spec.behavior.rawValue)] \(spec.title)")
         }
     }
     return RateOutcome(
-        name: url.lastPathComponent, seconds: seconds, choice: choice, failure: failure,
+        name: name, seconds: seconds, choice: choice, failure: failure,
         metrics: metrics)
+}
+
+/// Runs the agent over one image file. The engine carries the recent-choice
+/// window across the batch, so each image is asked to pick an unused automaton.
+func rateOne(
+    engine: AgentEngine,
+    path: String,
+    directory: URL,
+    dimension: Int,
+    verbose: Bool
+) async -> RateOutcome {
+    let url = URL(fileURLWithPath: path)
+    let start = Date()
+    do {
+        // Normalize to the model's input size so an oversized or malformed
+        // image never reaches the preprocessor's far larger edge limits.
+        let normalized = try ImageImport.normalize(url, into: directory, dimension: dimension)
+        if verbose { print("[debug] \(url.lastPathComponent) -> \(normalized.path)") }
+        return await runEngine(
+            engine: engine, imageURL: normalized, name: url.lastPathComponent,
+            verbose: verbose, startedAt: start)
+    } catch {
+        return RateOutcome(
+            name: url.lastPathComponent,
+            seconds: String(format: "%.2f", Date().timeIntervalSince(start)),
+            choice: nil, failure: error.localizedDescription, metrics: [])
+    }
+}
+
+/// Runs the agent over the drawing page's strokes.
+func rateDrawing(
+    engine: AgentEngine,
+    drawing: Drawing,
+    directory: URL,
+    dimension: Int,
+    verbose: Bool
+) async -> RateOutcome {
+    let start = Date()
+    let name = "drawing.png"
+    do {
+        let normalized = try ImageImport.normalize(drawing, into: directory, dimension: dimension)
+        if verbose { print("[debug] \(name) -> \(normalized.path)") }
+        return await runEngine(
+            engine: engine, imageURL: normalized, name: name,
+            verbose: verbose, startedAt: start)
+    } catch {
+        return RateOutcome(
+            name: name,
+            seconds: String(format: "%.2f", Date().timeIntervalSince(start)),
+            choice: nil, failure: error.localizedDescription, metrics: [])
+    }
+}
+
+/// The concrete input a carousel page submits.
+enum ReviewInput: Sendable {
+    case image(path: String)
+    case drawing(Drawing)
+}
+
+func rateInput(
+    _ input: ReviewInput,
+    engine: AgentEngine,
+    directory: URL,
+    dimension: Int,
+    verbose: Bool
+) async -> RateOutcome {
+    switch input {
+    case .image(let path):
+        return await rateOne(
+            engine: engine, path: path, directory: directory,
+            dimension: dimension, verbose: verbose)
+    case .drawing(let drawing):
+        return await rateDrawing(
+            engine: engine, drawing: drawing, directory: directory,
+            dimension: dimension, verbose: verbose)
+    }
+}
+
+/// The image the submission beat doubles and collapses. Files decode to a
+/// screen-sized texture; a drawing renders at its captured aspect so the page
+/// keeps its shape and the strokes keep their proportions.
+func submissionRaster(for input: ReviewInput) async -> RasterImage? {
+    await Task.detached(priority: .userInitiated) {
+        do {
+            switch input {
+            case .image(let path):
+                return try ImageImport.rasterImage(from: URL(fileURLWithPath: path))
+            case .drawing(let drawing):
+                let height = 1024
+                let width = max(1, Int((Double(height) * drawing.aspect).rounded()))
+                guard let raster = DrawingImage.raster(
+                    drawing, width: width, height: height
+                ) else {
+                    FileHandle.standardError.write(
+                        Data("rate: could not render the drawing\n".utf8))
+                    return nil
+                }
+                return raster
+            }
+        } catch {
+            FileHandle.standardError.write(
+                Data("rate: submission image failed: \(error.localizedDescription)\n".utf8))
+            return nil
+        }
+    }.value
 }
 
 /// Prints the `name<TAB>id<TAB>seconds` result line and returns the chosen
@@ -594,14 +780,15 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
     return Catalog.spec(id: choice.id)
 }
 
-/// The review loop: cycle the images forever, running the agent after Return
+/// The review loop: cycle the input carousel, running the agent after Return
 /// and showing the automaton's reveal until the next Return. Closing the window
-/// stops the loop.
+/// stops the loop. The drawing page is first, and the wrap after the last image
+/// returns to it, so it sits at both ends of the carousel.
 @MainActor
 func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
-    // Load the weights while the first image is on screen. The first run then
+    // Load the weights while the first page is on screen. The first run then
     // pays only prefill and generation, not the snapshot load. A failure is
     // logged but not fatal: the run retries and reports it again.
     Task {
@@ -614,27 +801,39 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     }
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
+    let pages = InputPage.carousel(for: setup.paths)
+    var index = 0
+    presenter.showPage(pages[index])
     var chosen = 0
     var shown = 0
     while !presenter.isClosed {
-        for path in setup.paths {
-            if presenter.isClosed { break }
-            let name = URL(fileURLWithPath: path).lastPathComponent
-            if let image = NSImage(contentsOfFile: path) {
-                presenter.showInput(image, title: name)
+        switch await presenter.waitForInputAction() {
+        case .closed:
+            break
+        case .move(let delta):
+            index = wrappedIndex(index + delta, count: pages.count)
+            presenter.showPage(pages[index])
+        case .submit:
+            let page = pages[index]
+            let input: ReviewInput
+            switch page {
+            case .image(let url):
+                input = .image(path: url.path)
+            case .drawing:
+                input = .drawing(presenter.currentDrawing ?? Drawing())
             }
-            await presenter.waitForEnter()
-            if presenter.isClosed { break }
-            await presenter.showThinking()
-            // The intro and the turn run together, so the line is already up
-            // when the choice lands. If the model outlasts the intro, the
-            // window holds the line; if the intro outlasts the model, the
-            // reveal waits for it to rest so the handoff has no jump.
+            // The turn and the submission beat run together, so the model is
+            // already working while the image doubles and collapses.
             let turn = Task.detached(priority: .userInitiated) {
-                await rateOne(
-                    engine: engine, path: path, directory: directory,
+                await rateInput(
+                    input, engine: engine, directory: directory,
                     dimension: setup.configuration.imageDimension, verbose: setup.verbose)
             }
+            let submission = await submissionRaster(for: input)
+            await presenter.beginSubmission(submission)
+            // The intro follows the submission beat. If the model outlasts both,
+            // the window holds the line; if they outlast the model, the reveal
+            // waits for them to rest so the handoff has no jump.
             await presenter.waitForThinkingToSettle()
             let outcome = await turn.value
             await presenter.stopThinking()
@@ -643,12 +842,15 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
                 chosen += 1
                 await presenter.present(spec)
             } else {
-                // Put the failed image back up so it is still reviewable.
-                if let image = NSImage(contentsOfFile: path) {
-                    presenter.showInput(image, title: name)
-                }
+                // Put the failed page back up so it is still reviewable.
+                presenter.showPage(page)
                 await presenter.waitForEnter()
             }
+            // Leaving the drawing page resets it, including the wrap back to
+            // the same page when it is the only input.
+            if case .drawing = page { presenter.clearDrawing() }
+            index = wrappedIndex(index + 1, count: pages.count)
+            presenter.showPage(pages[index])
         }
     }
     await presenter.stopRun()
@@ -728,9 +930,10 @@ func runClassify(_ setup: RateSetup) async {
     print("\n\(classified)/\(setup.paths.count) classified: \(summary)")
 }
 
-/// The windowed review: one screen-sized window, driven by Return. The review
-/// loop is a main-actor task started before `NSApplication.run()`, so it can
-/// suspend and still receive the key and close events.
+/// The windowed review: one screen-sized window, driven by Return and the left
+/// and right arrows. The review loop is a main-actor task started before
+/// `NSApplication.run()`, so it can suspend and still receive the key and close
+/// events.
 @MainActor
 func runRateWindowed(_ setup: RateSetup) async {
     let app = NSApplication.shared
@@ -739,11 +942,19 @@ func runRateWindowed(_ setup: RateSetup) async {
     installMainMenu(app)
     app.finishLaunching()
     let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-        if event.keyCode == 36 || event.keyCode == 76 {
+        switch event.keyCode {
+        case 36, 76:
             MainActor.assumeIsolated { presenter.submit() }
             return nil
+        case 123:
+            MainActor.assumeIsolated { presenter.navigate(-1) }
+            return nil
+        case 124:
+            MainActor.assumeIsolated { presenter.navigate(1) }
+            return nil
+        default:
+            return event
         }
-        return event
     }
     Task { @MainActor in
         await review(setup, presenter: presenter)

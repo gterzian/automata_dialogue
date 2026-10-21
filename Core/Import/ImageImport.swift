@@ -2,22 +2,6 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// A normalized image attached to a prompt. The file lives in the session's
-/// temp folder for its whole life; the original drop location is not retained.
-public struct ImageAttachment: Sendable, Hashable, Identifiable {
-    public let id: UUID
-    /// The normalized 512×512 PNG.
-    public let url: URL
-    /// The original file's display name, for the chip.
-    public let displayName: String
-
-    public init(id: UUID = UUID(), url: URL, displayName: String) {
-        self.id = id
-        self.url = url
-        self.displayName = displayName
-    }
-}
-
 public enum ImageImportError: Error, LocalizedError, Equatable {
     case unreadable(URL)
     case notAnImage(URL)
@@ -32,7 +16,7 @@ public enum ImageImportError: Error, LocalizedError, Equatable {
     }
 }
 
-/// Loads a dropped file, normalizes it to the model's 512×512 input, and writes
+/// Loads an image file, normalizes it to the model's 512×512 input, and writes
 /// it into the session's temp folder. Pure CoreGraphics + ImageIO so `Core`
 /// stays AppKit-free.
 public enum ImageImport {
@@ -91,6 +75,53 @@ public enum ImageImport {
             throw ImageImportError.encodeFailed
         }
         return destination
+    }
+
+    /// Renders a freehand drawing at the model's square input size and writes
+    /// it into the session folder. The drawing keeps the surface's dark page
+    /// and light strokes; the prompt judges the drawn shapes, not the page.
+    @discardableResult
+    public static func normalize(
+        _ drawing: Drawing,
+        into directory: URL,
+        dimension: Int = modelDimension,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        guard let raster = DrawingImage.raster(drawing, width: dimension, height: dimension),
+              let png = raster.pngData() else {
+            throw ImageImportError.encodeFailed
+        }
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent("drawing-\(UUID().uuidString).png")
+        try png.write(to: destination, options: .atomic)
+        return destination
+    }
+
+    /// Decodes `source` for the submission animation. The animation only needs
+    /// a screen-sized texture, so a thumbnail bound keeps a large photograph
+    /// from uploading at full resolution. The model input is normalized
+    /// separately.
+    public static func rasterImage(
+        from source: URL,
+        maximumDimension: Int = 2048
+    ) throws -> RasterImage {
+        guard let imageSource = CGImageSourceCreateWithURL(source as CFURL, nil) else {
+            throw ImageImportError.unreadable(source)
+        }
+        guard CGImageSourceGetCount(imageSource) > 0 else {
+            throw ImageImportError.notAnImage(source)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maximumDimension),
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary),
+              let raster = RasterImage(thumbnail) else {
+            throw ImageImportError.unreadable(source)
+        }
+        return raster
     }
 
     /// Aspect-fit `image` inside a white `dimension × dimension` canvas.

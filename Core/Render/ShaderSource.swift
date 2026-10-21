@@ -310,6 +310,93 @@ public enum ShaderSource {
     }
     """
 
+    /// The submission beat between Return and the intro: the submitted image
+    /// doubles into two copies that part vertically, then the doubled screen
+    /// falls into the intro's opening dot. `SubmissionTimeline` owns its timing.
+    public static let submission = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    struct SubmissionUniforms {
+        float aspect;
+        float imageAspect;
+        float doubling;
+        float collapse;
+        float dotScale;
+        float lineHalfThickness;
+        float screenHeight;
+        float4 white;
+        float4 ink;
+    };
+
+    struct SubmissionOut {
+        float4 position [[position]];
+        float2 uv;
+    };
+
+    vertex SubmissionOut submission_vertex(uint vid [[vertex_id]]) {
+        float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+        SubmissionOut out;
+        out.position = float4(positions[vid], 0.0, 1.0);
+        out.uv = positions[vid] * 0.5 + 0.5;
+        return out;
+    }
+
+    // A point outside the fitted image has alpha 0, so the page shows through.
+    static float4 sampleFitted(texture2d<float> image, sampler s, float2 p,
+                               float2 fit, float2 origin) {
+        float2 local = (p - origin) / fit;
+        if (any(local < 0.0) || any(local > 1.0)) { return float4(0.0); }
+        return float4(image.sample(s, local).rgb, 1.0);
+    }
+
+    fragment float4 submission_fragment(SubmissionOut in [[stage_in]],
+                                        constant SubmissionUniforms& u [[buffer(0)]],
+                                        texture2d<float> image [[texture(0)]]) {
+        constexpr sampler s(filter::linear, address::clamp_to_edge);
+        // p is screen coordinates with y down, so the clones' directions match
+        // the view's.
+        float2 p = float2(in.uv.x, 1.0 - in.uv.y);
+
+        float screenAspect = u.aspect;
+        float imageAspect = u.imageAspect;
+        float2 fit = float2(1.0);
+        if (imageAspect > screenAspect) {
+            fit.y = screenAspect / imageAspect;
+        } else {
+            fit.x = imageAspect / screenAspect;
+        }
+        float2 origin = (1.0 - fit) * 0.5;
+
+        // The whole screen doubles: two copies of the image part vertically,
+        // leaving the page between them. Both are sampled at the same source
+        // point when the doubling is zero, so the first frame is the image.
+        float parting = 0.62 * u.doubling;
+
+        // The same point pulled toward the centre shrinks the doubled screen
+        // into the dot. At collapse 0 it is p itself, so the phases join.
+        float cover = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
+        float px = 1.0 / max(u.screenHeight, 1.0);
+        float dotR = max(u.lineHalfThickness * 3.0, 2.5 * px) * u.dotScale;
+        float scale = mix(1.0, dotR / cover, u.collapse);
+        float2 q = 0.5 + (p - 0.5) / scale;
+
+        float4 a = sampleFitted(image, s, float2(q.x, q.y + parting), fit, origin);
+        float4 b = sampleFitted(image, s, float2(q.x, q.y - parting), fit, origin);
+        float total = a.a + b.a;
+        float3 scene = total > 0.0 ? (a.rgb * a.a + b.rgb * b.a) / total : u.white.rgb;
+
+        // The dot is the intro's opening dot: the same radius, colour, and
+        // centre, so the handoff has no jump.
+        float2 hp = (p - 0.5) * float2(u.aspect, 1.0);
+        float soft = max(dotR * 0.5, 1.5 * px);
+        float dot = 1.0 - smoothstep(-soft, soft, length(hp) - dotR);
+        float dotAlpha = smoothstep(0.55, 1.0, u.collapse);
+        float3 color = mix(scene, u.ink.rgb, dot * dotAlpha);
+        return float4(color, 1.0);
+    }
+    """
+
     /// The intro the review window shows while the model's turn is prepared;
     /// `CollapseTimeline` owns its timing and `CollapseVariation` its look.
     /// Everything is drawn by one full-screen fragment shader: the layers, the

@@ -72,22 +72,37 @@ are a batch of dispatches. A full `MTLIndirectCommandBuffer` is unnecessary: the
 command shape is constant and only the instance count varies, which the indirect
 argument buffer already carries.
 
+## Submission beat
+
+`SubmissionTimeline` drives the two-second beat between Return and the intro:
+the input doubles into two full copies that part vertically, leaving the page
+between them, then the doubled screen collapses for half a second onto the dot
+the intro starts from. `SubmissionRenderer` samples a texture uploaded from the
+input's `RasterImage`; `WorkingIndicator.playSubmission` swaps from the beat to
+`CollapseTimeline` at `ReviewIntro.openingTime`, drawing both with the same
+`CollapseVariation` so the dot's radius and colour match. The model runs
+alongside both animations; `WorkingIndicator.start` plays the intro alone when
+no raster is available. Both use the indicator's drawable and clock, so there is
+no view swap between the beat and the intro.
+
 ## Collapse intro
 
 `CollapseTimeline` drives the intro the review window shows while the model's
-turn is prepared. The cycle freezes on its rest frame if the model outlasts it;
-`WorkingIndicator` freezes its display link with it, so the window keeps the
-last presented frame rather than drawing on. The indicator runs at 30 fps on a
-reduced drawable so it shares the GPU with inference (see the window sequence in
-`AGENTS.md`). Its appearance is accepted by visual inspection; the timeline and
-the shader are the place to change it.
+turn is prepared. The window starts the cycle at `ReviewIntro.openingTime`,
+where the opening dot is fully drawn and no layer has begun to grow, and freezes
+on its rest frame if the model outlasts it. `WorkingIndicator` freezes its
+display link with it, so the window keeps the last presented frame and stops
+drawing. The indicator runs at 30 fps on a reduced drawable so it shares the
+GPU with inference (see the window sequence in `AGENTS.md`). Its appearance is
+accepted by visual inspection; the timeline and the shader are the place to
+change it.
 
 `CollapseVariation.seeded` turns one 64-bit draw into the run's look, and
-`WorkingIndicator.start()` draws a fresh one for every run. Position is
-deliberately not part of the variation: every layer is centred, so the dot and
-the resting line never slide sideways. New variation belongs there, not in the
-shader as a new constant: every run has to differ, or the exchange reads as a
-fixed video.
+`WorkingIndicator.playSubmission` and `start` draw a fresh one for every run.
+Position is deliberately not part of the variation: every layer is centred, so
+the dot and the resting line never slide sideways. New variation belongs there,
+not in the shader as a new constant: every run has to differ, or the exchange
+reads as a fixed video.
 
 The resting frame becomes the reveal's first frame for an entry whose seed row
 is a single centred cell. `AutomatonWindow` plays one more beat for those
@@ -126,14 +141,18 @@ frame must finish before the next one is written.
   (`preferredFrameLatency = 1`); `LayerSink` owns the layer and the clock, and
   `LayerRenderer` turns a `GPUColorGrid` into a draw. The window refits every
   display row each frame, so every frame recompacts the whole grid.
+- **Submission beat** (`ShaderSource.submission`, `SubmissionRenderer`,
+  `SubmissionTimeline`, `WorkingIndicator.playSubmission`) — the two-clone part
+  and the collapse into the intro's opening dot, on the indicator's drawable.
 - **Collapse intro** (`ShaderSource.collapse`, `CollapseRenderer`,
   `CollapseTimeline`, `CollapseVariation`, `WorkingIndicator`,
   `IndicatorActor`) — the one-cycle intro that runs while the model's turn is
   prepared and rests on the horizon line the review window shows until the
   choice lands, plus the retraction that joins it to a single-cell seed.
-  `IndicatorActor` owns the `GPUContext`, renderer, and `DisplayLinkClock` on
-  its own `RenderExecutor`, the way `RenderActor` does for a run, and reuses the
-  indicator and layer across runs so the pipeline compiles once.
+  `IndicatorActor` owns the `GPUContext`, both renderers, and
+  `DisplayLinkClock` on its own `RenderExecutor`, the way `RenderActor` does for
+  a run, and reuses the indicator and layer across runs so the pipelines
+  compile once.
 - **Viewport geometry** (`ViewportGeometry`, `DisplayLimits`) — the cell size,
   `cols`/`rows` for a window, the ten-window board width, the centred or
   right-pinned start origin, the twin grid's shared horizon row, and the zoom
@@ -217,7 +236,9 @@ for one, never hides the newest row above the floor, and holds the floor.
 display floor, and the twin grid's rows. `LayerTests` reads the rendered
 texture back to check spans are filled with palette colours, that a renderer
 handles a grid resize, and that the sink serializes frames sharing buffers.
-`CollapseTests` checks the rest frame the reveal continues from and that the
-cycle and the seed retraction reach the renderer. The display-link presentation
-needs a screen and is not tested here; the intro's look is accepted by visual
-inspection.
+`CollapseTests` checks the rest frame the reveal continues from, the opening
+frame the submission beat lands on, the submission timeline's phases, the seed
+retraction, that a seed reproduces one run, and that the cycle, the submission
+beat, and the retraction reach their renderers. The display-link presentation
+needs a screen and is not tested here; the animation's look is accepted by
+visual inspection.

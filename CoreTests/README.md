@@ -15,7 +15,9 @@ What must be covered:
   ~4k budget.
 - **Choice** — the parser (`id:` field, markdown, prose fallback, longest-id
   match, unknown id) and the recent-choice window (limit, exclusion note).
-- **Import** — normalization writes a 512×512 PNG; temp lifecycle.
+- **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
+  drawing is a uniform raster while a stroke reaches the raster; aspect-fit
+  keeps a wide drawing's shape; a drawing normalizes to a square PNG.
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
   frames, and advances on clock ticks; the pacing math; (Metal 4 only) the GPU
   seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
@@ -30,6 +32,8 @@ What must be covered:
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.
-- **Collapse intro** — the rest frame the reveal continues from, the seed-cell
-  retraction, that a seed reproduces one run, and that the cycle and the
-  retraction reach the renderer. Appearance is accepted by visual inspection.
+- **Collapse intro and submission beat** — the rest frame the reveal continues
+  from, the opening frame the beat lands on, the beat's part-and-collapse
+  phases, the seed-cell retraction, that a seed reproduces one run, and that
+  the cycle, the beat, and the retraction reach their renderers. Appearance is
+  accepted by visual inspection.

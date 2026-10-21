@@ -142,16 +142,20 @@ change, along with the affected tests, counts, and READMEs.
 
 ## Product decisions
 
-1. **File input only.** The user passes an existing image file (or a directory
-   of them); there is no drawing surface. See `Core/Import/README.md`.
-2. **One review window.** The CLI's window shows the input, then the working
-   indicator, then the chosen automaton, in a single window with no split view.
-   The automaton is one mirrored pair: two branches grow away from the horizon
-   line the collapse intro ends on, and a camera pulls back at the growth rate
-   to keep the growth in view. The intro runs while the model works and ends on
-   that line; if the model outlasts it, the window holds the line until the
-   choice is known. The indicator runs at 30 fps on a reduced drawable so it
-   does not compete with inference for the GPU. See `CLI/README.md`.
+1. **Files plus a drawing page.** `rate` cycles a carousel of the passed image
+   files and one black drawing page. The drawing page is the wrap point, so it
+   sits at both ends of the carousel: leaving it clears the strokes, and Return
+   submits it as an image. See `CLI/README.md` and `Core/Import/README.md`.
+2. **One review window.** The CLI's window shows the input carousel, the
+   submission beat, the working indicator, then the chosen automaton, in a
+   single window with no split view. On submission the input doubles into two
+   clones that part vertically, then collapses onto the dot the collapse intro
+   starts from. The intro runs while the model works and ends on the horizon
+   line; if the model outlasts it, the window holds the line until the choice
+   is known. The automaton is one mirrored pair: two branches grow away from
+   that line, and a camera pulls back at the growth rate to keep the growth in
+   view. The indicator runs at 30 fps on a reduced drawable so it does not
+   compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
    testable; `Core` holds the prompt-building and answer-parsing logic. There is

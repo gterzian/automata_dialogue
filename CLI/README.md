@@ -16,13 +16,17 @@
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
   on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`; see
-  `Core/Render/README.md`). It shows the submitted
-  image until Return,
-  plays the collapse intro while the model runs, shows the chosen automaton
-  until the next Return, and cycles the images until the window is closed. The
-  intro (`CollapseTimeline`) runs alongside inference; if the model outlasts it,
-  the window freezes on its rest frame rather than a blank page. Every run draws
-  a fresh variation, so the wait never repeats itself. Once the chosen entry is
+  `Core/Render/README.md`). The window opens on the drawing page. Left and
+  right arrows move through the carousel: the drawing page, then every image,
+  then the drawing page again, so the drawing page is the wrap point at both
+  ends. Draw with the pointer; leaving the page clears it. Return submits the
+  current page: the image doubles into two clones that part vertically for two
+  seconds, then the doubled screen collapses for half a second onto the dot the
+  collapse intro starts from. The submission beat (`SubmissionTimeline`) and
+  the intro (`CollapseTimeline`) run while the model works; if the model
+  outlasts them, the window freezes on the intro's rest frame rather than a
+  blank page. Every run draws a fresh variation, so the wait never repeats
+  itself. Once the chosen entry is
   known, an entry that seeds from a single centred cell retracts the rest frame
   onto that cell, so the automaton appears to start from the intro's last image;
   every other entry keeps the line. A `.rand` entry redraws from a fresh row
@@ -40,7 +44,8 @@
   a board ten windows wide, so the pattern keeps evolving after it leaves the
   first view. An entry whose pattern drifts sideways (see `DisplayHints.follow`)
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
-  controls.
+  controls. Return on the reveal advances to the next carousel page; closing
+  the window stops the run.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli bench <path|dir>...` — the headless measurement path. Runs the

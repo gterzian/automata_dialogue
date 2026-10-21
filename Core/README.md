@@ -19,7 +19,7 @@ and the Metal render core. Built by SwiftPM for tests and the CLI.
   descriptors, palettes, and the catalog index. See `Catalog/README.md`.
 - `Agent/` — the `Choice` type, the plain-text answer parser, and
   system-prompt assembly. See `Agent/README.md`.
-- `Import/` — dragged-in image attachments and normalization to the model's
-  square input (512 px by default). See `Import/README.md`.
-- `Render/` — geometry, the frame-sink seam, and the Metal 4 simulation core.
-  See `Render/README.md`.
+- `Import/` — file and drawing inputs, normalization to the model's square
+  input (512 px by default), and the submission raster. See `Import/README.md`.
+- `Render/` — geometry, the frame-sink seam, the submission beat, and the
+  Metal 4 simulation core. See `Render/README.md`.

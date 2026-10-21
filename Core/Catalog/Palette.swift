@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// The four behavior classes of the inventory, used by the catalog and the
@@ -26,6 +27,11 @@ public struct PaletteColor: Sendable, Hashable {
     }
 
     public var simd: SIMD4<Float> { SIMD4(r, g, b, a) }
+
+    /// The same colour in CoreGraphics' space, for the drawing surface.
+    public var cgColor: CGColor {
+        CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: CGFloat(a))
+    }
 }
 
 public struct Palette: Sendable, Hashable {

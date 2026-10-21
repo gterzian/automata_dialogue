@@ -1,27 +1,46 @@
 # Core/Import
 
-Image input without a drawing canvas: the user passes a file path and it
-becomes the input image for the next agent turn.
+Turns a file or a freehand drawing into the model's input, and produces the
+raster the submission beat uploads. AppKit-free: decoding and drawing use
+ImageIO/CoreGraphics, not `NSImage`.
 
-## Attachment lifecycle
+## Inputs
 
-1. A drop provides a file `URL`. `ImageImport.normalize(_:into:dimension:)`
-   decodes it, scales it to a square of `dimension` pixels (512 by default,
-   overridable through the engine's `imageDimension`), and writes a PNG into
-   the session's temp folder:
-   `<tmp>/Rater/<session-id>/drawing-<uuid>.png`.
-2. The caller holds an `ImageAttachment` (source name + normalized path).
-3. The agent receives that path as `AgentInput.imageURL`.
-4. On close, the session's temp folder is removed; at launch, temp session
+A file arrives as a `URL`. A drawing arrives as a `Drawing`: normalized
+top-left points plus the aspect of the surface that captured them, so any
+pointer source can fill it (the CLI's canvas is one adapter). The prompt judges
+the drawn shapes rather than the page, so a drawing keeps the surface's dark
+page and light strokes.
+
+`DrawingImage.raster` aspect-fits a drawing into the target size, so a square
+model input keeps the shapes proportional.
+
+## Normalized input
+
+1. A file goes through `ImageImport.normalize(_:into:dimension:)`, which decodes
+   it, scales it (aspect-fit, centered on white) to a square of `dimension`
+   pixels (512 by default, overridable through the engine's `imageDimension`),
+   and writes a PNG into the session's temp folder:
+   `<tmp>/Rater/<session-id>/drawing-<uuid>.png`. The drawing overload renders
+   the strokes at that square size.
+2. The caller passes that path as `AgentInput.imageURL`.
+3. On close, the session's temp folder is removed; at launch, temp session
    folders with no open session are purged.
 
-Normalization runs off the main thread. A row whose file has disappeared shows
-a quiet placeholder tile of the same size rather than failing.
+Normalization and raster rendering are called off the main thread by the
+review loop.
+
+## Submission raster
+
+The review window plays the submission beat from a `RasterImage`, tightly
+packed RGBA8 pixels that upload straight to a texture. `rasterImage(from:)`
+bounds a file decode for the screen, and `DrawingImage.raster` renders a
+drawing at the surface's aspect. The model still reads the normalized PNG, so
+the beat's texture and the model's input are independent views of the same
+input.
 
 ## Notes
 
-- Core is AppKit-free: decoding uses ImageIO/CoreGraphics, not `NSImage`.
-- A non-image drop is rejected with a short message; the input keeps its state.
 - `purgeStaleSessions(keeping:)` deletes every folder under its root. Purging
   the real `<tmp>/Rater` while another process (a `rater-cli rate` run) holds a
   live session deletes that session's images mid-run, so the test suite passes

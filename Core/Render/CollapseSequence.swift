@@ -7,6 +7,11 @@ public enum ReviewIntro {
     /// continues from.
     public static let duration: TimeInterval = 6.8
 
+    /// Seconds into the cycle at which the opening dot is fully drawn and the
+    /// bloom has not started. The submission beat hands its collapsed screen
+    /// off to the intro here, so the two animations share one dot.
+    public static let openingTime: TimeInterval = 0.2
+
     /// Seconds the settled line takes to retract onto the single centred cell
     /// an entry that starts there seeds from. The window plays this once the
     /// entry is chosen, so the reveal grows out of the intro's last image.
@@ -14,12 +19,13 @@ public enum ReviewIntro {
 }
 
 /// One run's look for the intro: where the form sits, and which colour,
-/// texture, and grain it takes. `WorkingIndicator.start()` draws a fresh seed
-/// per run, so two runs never paint the same sequence, and one seed always
-/// reproduces one run's sequence.
+/// texture, and grain it takes. `WorkingIndicator.playSubmission` and `start`
+/// draw a fresh seed per run, so two runs never paint the same sequence, and one
+/// seed always reproduces one run's sequence.
 struct CollapseVariation {
-    /// Seconds the cycle leads or lags. The skew tapers to zero before the rest
-    /// frame, so every run rests on the same last image.
+    /// Seconds the cycle leads or lags. The skew is zero at the opening dot and
+    /// tapers out before the rest frame, so the submission handoff and the last
+    /// image are the same on every run.
     var timeSkew: Float
     /// 0 keeps the field violet, 1 makes it the reference film's rose.
     var warmth: Float
@@ -130,9 +136,12 @@ enum CollapseTimeline {
     /// branches share.
     static func frame(time rawTime: Float, variation: CollapseVariation = .standard) -> Frame {
         let time = min(max(rawTime, 0), duration)
-        // The cycle leads or lags per run, but the skew is gone before the rest
-        // frame, so every run stops on the same last image.
-        let skew = variation.timeSkew * (1 - smoothstep(3.0, duration, time))
+        // The cycle leads or lags per run, but the skew is zero at the opening
+        // dot so the submission beat always hands off to the same frame, then
+        // tapers to zero again before the rest frame.
+        let skewEnvelope = smoothstep(Float(ReviewIntro.openingTime), 1.0, time)
+            * (1 - smoothstep(3.0, duration, time))
+        let skew = variation.timeSkew * skewEnvelope
         let t = min(max(time + skew, 0), duration)
 
         let endAlpha = smoothstep(0, 0.2, t)
