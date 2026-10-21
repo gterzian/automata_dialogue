@@ -17,16 +17,19 @@ lines:
 
 ```
 id: <one id from the list>
-reason: <one sentence>
+reason: <one full sentence>
 ```
 
 `ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
 and otherwise taking the first catalog id anywhere in the text (longest match
-first, so `E90.sparse` beats `E90`). The engine gives one **repair turn**: if the
-first answer names no usable id (unknown, or recently used), it appends a
-correction and asks again, and only a second miss ends the run in `.failed`.
-Text beyond the two fields is ignored. The parser is pure, so the MLX engine and
-the tests share one implementation.
+first, so `E90.sparse` beats `E90`). The engine gives **repair turns** when
+needed: one if the first answer names no usable id (unknown, or recently used),
+appended as a correction, and only a second miss ends the run in `.failed`.
+Text beyond the two fields is ignored. A bare class name is not a reason: when
+the id is usable but `Choice.hasFullReason` is false, the engine asks once more
+for a sentence with the same id and keeps the first choice if that retry does
+not improve it. The parser is pure, so the MLX engine and the tests share one
+implementation.
 
 ## No repeats
 
@@ -63,5 +66,5 @@ carries `text` and an optional `imageURL`.
 ## Tests
 
 Choice parsing (the `id:` field, markdown, fallback to prose, the longest-id
-match, an unknown id), the prompt's class descriptions and per-entry class
-lines, and the prompt budget.
+match, an unknown id, and the reason's sentence check), the prompt's class
+descriptions and per-entry class lines, and the prompt budget.

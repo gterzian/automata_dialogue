@@ -76,13 +76,16 @@ public enum SystemPrompt {
         return lines.joined(separator: "\n")
     }()
 
-    /// The exact reply shape the parser (`ChoiceParser`) understands.
+    /// The exact reply shape the parser (`ChoiceParser`) understands. The
+    /// reason instruction leads with a complete sentence because a model that
+    /// is told to "name the class" returns the bare class name; the reply
+    /// starts with `id:` so a reason sentence cannot become a preamble.
     public static let answer = """
     ## How to answer
 
-    Reply with exactly two lines and no other text:
+    Reply with exactly two lines, starting with `id:` and no other text:
 
     id: <one id from the list>
-    reason: <one sentence naming the class you matched and why it fits>
+    reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>
     """
 }

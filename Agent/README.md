@@ -49,7 +49,9 @@ It emits the whole answer as `.text`, one `.metrics` event per generation pass
 `.failed` when no catalog id appears; the parser is `Core/Agent`'s
 `ChoiceParser`. If the first answer names no catalog id, the engine appends a
 correction and asks once more (the session still holds the image); only a second
-miss fails the run.
+miss fails the run. A usable id whose reason is a bare class name gets one more
+turn that asks for a full sentence with the same id; if that retry does not
+improve the reason, the first choice stands.
 
 ## Remaining work
 
@@ -66,4 +68,5 @@ miss fails the run.
   expected class of every reference drawing is in `artifacts/README.md`; score
   the set with `rater-cli classify artifacts/`.
 - `AgentEngine` is not covered by `CoreTests`; test answer parsing in `Core`
-  against `ChoiceParser` and test the model only through `rater-cli rate`.
+  against `ChoiceParser` and test the model through the headless
+  `rater-cli bench` (or the interactive `rater-cli rate`).

@@ -41,7 +41,18 @@ final class SystemPromptTests: XCTestCase {
     func testStatesTheAnswerFormat() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains("id: <one id from the list>"))
-        XCTAssertTrue(prompt.contains("reason: <one sentence naming the class you matched and why it fits>"))
+        XCTAssertTrue(prompt.contains(
+            "reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>"))
+    }
+
+    /// The reason must be a sentence about the drawing, not the class name the
+    /// model matched; the reply starts at the id line so the sentence cannot
+    /// drift in front of the answer.
+    func testRequiresAFullSentenceReason() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains(
+            "Reply with exactly two lines, starting with `id:` and no other text:"))
+        XCTAssertTrue(prompt.contains("one full sentence, not just the class name"))
     }
 
     func testSaysToMatchByBehaviorNotLikeness() {
@@ -167,6 +178,19 @@ final class ChoiceParserTests: XCTestCase {
     func testIsCaseInsensitive() {
         XCTAssertEqual(ChoiceParser.choice(from: "ID: e250")?.id, "E250")
         XCTAssertEqual(ChoiceParser.choice(from: "id: e110")?.id, "E110")
+    }
+
+    /// A bare class name or a fragment is not a reason. The engine uses this to
+    /// ask once more for the full sentence the prompt requires.
+    func testReasonCompletenessRejectsLabels() {
+        XCTAssertFalse(Choice(id: "E30", rationale: "randomness").hasFullReason)
+        XCTAssertFalse(Choice(id: "E30", rationale: "Randomness.").hasFullReason)
+        XCTAssertFalse(Choice(id: "E30", rationale: "repetition because stripes").hasFullReason)
+        XCTAssertFalse(Choice(id: "E30", rationale: "").hasFullReason)
+        XCTAssertTrue(Choice(
+            id: "E30",
+            rationale: "The marks scatter with no regular part, so the class is randomness."
+        ).hasFullReason)
     }
 }
 

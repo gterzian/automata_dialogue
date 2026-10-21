@@ -5,6 +5,17 @@ public struct Choice: Sendable, Hashable, Codable {
     public var id: String
     public var rationale: String
 
+    /// Fewest words a reason needs to count as a sentence rather than a label.
+    /// The prompt asks for a full sentence; this is the mechanical floor that
+    /// rejects a bare class name or a two-word fragment, not a quality judge.
+    public static let minimumReasonWords = 4
+
+    /// True when the model wrote a sentence for its reason. The engine asks
+    /// once more when this is false and keeps the choice if the retry fails.
+    public var hasFullReason: Bool {
+        rationale.split(whereSeparator: \.isWhitespace).count >= Self.minimumReasonWords
+    }
+
     public init(id: String, rationale: String) {
         self.id = id
         self.rationale = rationale

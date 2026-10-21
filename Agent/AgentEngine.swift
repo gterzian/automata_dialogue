@@ -83,7 +83,15 @@ public actor AgentEngine: AgentRunning {
     private static let repairPrompt = """
     Your previous answer did not name a usable id. Reply with exactly two lines and nothing else:
     id: <one id from the list, not one of the recently used ids>
-    reason: <one sentence naming the class you matched and why it fits>
+    reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>
+    """
+
+    /// Keeps the already chosen id and asks only for the sentence the answer
+    /// format requires.
+    private static let reasonRepairPrompt = """
+    Your previous answer's reason was not a full sentence. Reply with exactly two lines and nothing else, keeping the same id:
+    id: <the id from your previous answer>
+    reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>
     """
 
     public init(configuration: Configuration = Configuration()) {
@@ -150,6 +158,20 @@ public actor AgentEngine: AgentRunning {
                 response = repaired.text
                 if let metrics = repaired.metrics { passes.append(metrics) }
                 choice = Self.allowed(ChoiceParser.choice(from: response), excluding: excluded)
+            }
+            // A usable id with a label instead of a reason gets one more turn.
+            // Keep the first choice when the retry does not improve it; the
+            // exchange is about the automaton, and a terse reason must not end
+            // it.
+            if let valid = choice, !valid.hasFullReason, !response.isEmpty {
+                let repaired = try await answer(session, to: Self.reasonRepairPrompt, image: nil)
+                if let metrics = repaired.metrics { passes.append(metrics) }
+                if let retried = Self.allowed(
+                    ChoiceParser.choice(from: repaired.text), excluding: excluded),
+                   retried.hasFullReason {
+                    response = repaired.text
+                    choice = retried
+                }
             }
             if !response.isEmpty { continuation.yield(.text(response)) }
             for metrics in passes { continuation.yield(.metrics(metrics)) }

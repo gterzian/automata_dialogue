@@ -15,7 +15,8 @@ What must be covered:
   and a disordered part (so a recognizable figure such as the house is
   repetition), states the answer format, and stays within the ~4k budget.
 - **Choice** — the parser (`id:` field, markdown, prose fallback, longest-id
-  match, unknown id) and the recent-choice window (limit, exclusion note).
+  match, unknown id), the reason's sentence check, and the recent-choice window
+  (limit, exclusion note).
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
   drawing is a uniform raster while a stroke reaches the raster; aspect-fit
   keeps a wide drawing's shape; a drawing normalizes to a square PNG.

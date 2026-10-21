@@ -115,6 +115,8 @@ change, along with the affected tests, counts, and READMEs.
   SwiftPM's own sandbox cannot apply here, so the flag is required; plain
   `swift build`/`swift test` fail with `sandbox_apply: Operation not
   permitted` before compiling anything.
+- A documentation-only change needs no build or test; run them when source,
+  tests, or `Package.swift` change.
 - To see only warnings from this repo's targets (the `Agent` dependency tree
   emits its own warnings from `.build/checkouts`):
   `swift build --disable-sandbox -c release 2>&1 | grep warning: | grep -v .build/checkouts`.
@@ -131,12 +133,14 @@ change, along with the affected tests, counts, and READMEs.
   undefined `_mlx_*` symbols, the `mlx-swift` checkout's `mlx-c` submodule is
   empty; populate it once with `git -C .build/checkouts/mlx-swift submodule
   update --init Source/Cmlx/mlx-c`.
-- **Running the model does not work inside the agent sandbox.** MLX
-  JIT-compiles some Metal kernels at runtime, and the Metal frontend's module
-  cache (`/var/folders/…/C/com.apple.metalfe`) is not writable here, so the
-  process traps with `Unable to build metal library from source … Operation not
-  permitted`. Build and `swift test` work; run `rater-cli rate` from a normal
-  Terminal.
+- **A model whose Metal kernels are not yet cached must first run outside the
+  sandbox.** MLX compiles its Metal kernels on first use and writes
+  the frontend module cache under `/var/folders/…/C/com.apple.metalfe`, which
+  the sandbox cannot write; a fresh run traps with `Unable to build metal
+  library from source … monolithic_metal.pcm: Operation not permitted`. Run that
+  model once from a normal Terminal, then `rater-cli bench` runs headless here
+  (verified with `Models/Qwen3.5-4B-MLX-4bit`). `rate` remains the interactive
+  path.
 - Toolchain: Swift 6.4, `swift-tools-version: 6.0`, macOS 26, strict
   concurrency (`complete`).
 

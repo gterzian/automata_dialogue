@@ -55,7 +55,7 @@ Each line is an id and its class. Pick an id whose class matches the class you c
 
 ## How to answer
 
-Reply with exactly two lines and no other text:
+Reply with exactly two lines, starting with `id:` and no other text:
 
 id: <one id from the list>
-reason: <one sentence naming the class you matched and why it fits>
+reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>
