@@ -54,13 +54,13 @@ final class FrameSlotRing {
 /// caller-sized chunk of source rows so a caller can animate instead of running
 /// the whole board in one commit.
 ///
-/// The run is a window over a board much wider than the display: it keeps only
-/// the newest `capacity` source rows in a ring and maps display row `d` to a
-/// source step at or before the newest one, so a short board grows from the top
-/// and then the window follows the newest row without an end. A twin run maps
-/// one history into two mirrored branches around a shared horizon row instead.
-/// `setZoom` resizes the display grid and the viewport, reusing the same ring
-/// and color buffer.
+/// The run is a window over a board much wider than the display: the history
+/// ring grows to hold every source row the run has produced, and `fit` maps a
+/// display row to a source row at a sampling stride that grows past the
+/// display floor, so a short board grows into the grid and the whole history
+/// stays visible without an end. A twin run maps one history into two mirrored
+/// branches around a shared horizon row instead. `setZoom` resizes the display
+/// grid and the viewport, reusing the color buffer.
 @available(macOS 26.0, *)
 public final class MetalSimulation {
     private struct StepParams {
@@ -77,10 +77,10 @@ public final class MetalSimulation {
         var displayCols: UInt32
         var displayRows: UInt32
         var capacity: UInt32
-        var viewportStart: UInt32
-        var viewportOrigin: UInt32
         var currentStep: UInt32
         var topRows: UInt32
+        var centreColumn: Float
+        var sourceStride: Float
     }
 
     private struct SeedParams {
@@ -100,11 +100,16 @@ public final class MetalSimulation {
     /// Grid at zoom 1; a zoom scales it.
     private let baseCols: Int
     private let baseRows: Int
-    /// First source column the window shows, clamped to `maxViewportOrigin`.
+    /// Board column the window's left edge samples. Negative once the whole
+    /// board is narrower than the window and sits centred in it.
     public private(set) var viewportOrigin: Int
-    /// Display cells per board cell; see `ViewportGeometry.zoomFloor`.
+    /// Board columns the window spans; grows with the reveal's sampling stride.
+    private var sourceSpan: Int
+    /// Display cells per board cell; see `ViewportGeometry.zoomFloor`. Past the
+    /// floor the grid stops growing and the fit's sampling stride carries the
+    /// zoom, so this value can fall below `minimumZoom`.
     public private(set) var zoom = 1.0
-    /// The widest zoom-out this run allows, chosen from the display.
+    /// The widest zoom-out the display grid shows one-to-one.
     public let minimumZoom: Double
     /// The reveal's two-branch mapping: one shared horizon row, with the upper
     /// branch growing up and the lower growing down from it.
@@ -121,28 +126,30 @@ public final class MetalSimulation {
     /// to pull back.
     public var steppedRows: Int { step }
 
-    /// The origin a `reseed` returns to (rightmost for a right-pinned entry).
-    private var startOrigin: Int
+    /// Board column at the display's centre; the window grows symmetrically
+    /// around it as the sampling stride rises.
+    private var centreColumn: Double
 
     private let context: GPUContext
     private let width: Int
     /// The board the run simulates. Wider than the catalog board when the
     /// review window needs room to pan; see `ViewportGeometry.boardWidth`.
     private let board: Board
-    /// Source rows the history ring holds; a step indexes it modulo this. Sized
-    /// for the widest zoom-out so zooming never reallocates the ring.
-    private let capacity: Int
-    private let history: any MTLBuffer
+    /// Source rows the history ring holds. The ring grows with the run so the
+    /// fit can keep sampling from the seed row; a source row indexes it modulo
+    /// this.
+    private var capacity: Int
+    private var history: any MTLBuffer
     private let colorBuffer: any MTLBuffer
     private let stepBuffer: any MTLBuffer
     private let viewBuffer: any MTLBuffer
     private let seedBuffer: any MTLBuffer
     private let blockBuffer: any MTLBuffer
     private let headBuffer: any MTLBuffer
-    private let stepTable: any MTL4ArgumentTable
+    private var stepTable: any MTL4ArgumentTable
     private let bumpTable: any MTL4ArgumentTable
-    private let fitTable: any MTL4ArgumentTable
-    private let seedTable: any MTL4ArgumentTable
+    private var fitTable: any MTL4ArgumentTable
+    private var seedTable: any MTL4ArgumentTable
     private let stepPipeline: any MTLComputePipelineState
     private let ring: FrameSlotRing
     /// Board column of the seed's leading edge in the follow direction. The
@@ -240,8 +247,9 @@ public final class MetalSimulation {
         let startOrigin = ViewportGeometry.initialOrigin(
             boardWidth: width, cols: displayCols, start: runBoard.start,
             pinRight: spec.display.pinRight)
-        self.startOrigin = startOrigin
         self.viewportOrigin = startOrigin
+        self.sourceSpan = displayCols
+        self.centreColumn = Double(startOrigin) + Double(displayCols) / 2
 
         self.stepParams = StepParams(
             width: UInt32(width), rule: rule, colors: colors, capacity: UInt32(capacity),
@@ -252,17 +260,12 @@ public final class MetalSimulation {
             displayCols: UInt32(displayCols),
             displayRows: UInt32(displayRows),
             capacity: UInt32(capacity),
-            viewportStart: 0,
-            viewportOrigin: UInt32(startOrigin),
             currentStep: 0,
-            topRows: UInt32(halfRows))
+            topRows: UInt32(halfRows),
+            centreColumn: Float(centreColumn),
+            sourceStride: 1)
 
         try reseed()
-    }
-
-    /// Largest `viewportOrigin` the window can pan to.
-    private var maxViewportOrigin: Int {
-        max(0, width - cols)
     }
 
     /// Shifts the window `delta` source columns, clamped to the board. A manual
@@ -270,53 +273,70 @@ public final class MetalSimulation {
     /// re-fits (`renderGPU(chunk: 0)`) to show the new window.
     public func pan(by delta: Int) {
         userPanned = true
-        setOrigin(viewportOrigin + delta)
+        centreColumn = clampedCentre(centreColumn + Double(delta), span: Double(sourceSpan))
     }
 
     /// Resizes the display grid for `value`, keeping the board column at the
-    /// viewport's centre fixed. Clamped to this run's floor; the caller re-fits
-    /// (`renderGPU(chunk: 0)`) to show the new view.
+    /// display's centre fixed. The grid is clamped to this run's display floor;
+    /// a smaller `value` keeps the grid there and the fit samples the history at
+    /// a coarser stride instead. The caller re-fits (`renderGPU(chunk: 0)`) to
+    /// show the new view.
     public func setZoom(_ value: Double) {
-        let clamped = min(max(value, minimumZoom), ViewportGeometry.maximumZoom)
-        guard clamped != zoom else { return }
-        let centre = Double(viewportOrigin) + Double(cols) / 2
+        let clamped = min(max(value, Double.leastNormalMagnitude), ViewportGeometry.maximumZoom)
         zoom = clamped
-        cols = ViewportGeometry.zoomedColumns(baseCols: baseCols, zoom: clamped)
-        rows = twin
-            ? ViewportGeometry.twinRows(baseRows: baseRows, zoom: clamped)
-            : ViewportGeometry.zoomedRows(baseRows: baseRows, zoom: clamped)
+        let gridZoom = max(clamped, minimumZoom)
+        let newCols = ViewportGeometry.zoomedColumns(baseCols: baseCols, zoom: gridZoom)
+        let newRows = twin
+            ? ViewportGeometry.twinRows(baseRows: baseRows, zoom: gridZoom)
+            : ViewportGeometry.zoomedRows(baseRows: baseRows, zoom: gridZoom)
+        guard newCols != cols || newRows != rows else { return }
+        cols = newCols
+        rows = newRows
         twinHalfRows = twin ? ViewportGeometry.twinHalfRows(rows: rows) : 0
-        startOrigin = ViewportGeometry.initialOrigin(
-            boardWidth: width, cols: cols, start: board.start, pinRight: spec.display.pinRight)
-        viewportOrigin = min(
-            max(0, Int((centre - Double(cols) / 2).rounded())), maxViewportOrigin)
+        centreColumn = clampedCentre(centreColumn, span: Double(cols))
+        viewportOrigin = Int((centreColumn - Double(cols) / 2).rounded())
+        sourceSpan = cols
         viewParams.displayCols = UInt32(cols)
         viewParams.displayRows = UInt32(rows)
-        viewParams.viewportOrigin = UInt32(viewportOrigin)
         viewParams.topRows = UInt32(twinHalfRows)
+        viewParams.centreColumn = Float(centreColumn)
+        viewParams.sourceStride = 1
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
     }
 
-    private func setOrigin(_ origin: Int) {
-        let clamped = min(max(0, origin), maxViewportOrigin)
-        guard clamped != viewportOrigin else { return }
-        viewportOrigin = clamped
-        viewParams.viewportOrigin = UInt32(clamped)
-        memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
+    /// Keeps the window's centre on the board, or centres the whole board once
+    /// it is narrower than the window.
+    private func clampedCentre(_ centre: Double, span: Double) -> Double {
+        guard span < Double(width) else { return Double(width) / 2 }
+        return min(max(span / 2, centre), Double(width) - span / 2)
     }
 
     /// Scrolls the viewport as the pattern's leading edge advances, but only
-    /// once that edge would leave the viewport: while the edge is still inside,
-    /// the origin does not move. The edge is `leadAnchor` moved by the entry's
-    /// signed rate, so a left-growing pattern is not pushed off the right.
+    /// once that edge would leave the window: while the edge is still inside,
+    /// the centre does not move. The edge is `leadAnchor` moved by the entry's
+    /// signed rate, so a left-growing pattern is not pushed off the right. The
+    /// window widens with the reveal's sampling stride, so the edge moves only
+    /// once the pattern outruns that wider view.
     private func follow(to currentStep: Int) {
         let rate = spec.display.follow.columnsPerStep
         guard rate != 0, !userPanned else { return }
+        let windowSpan = Double(cols) * sourceStride(steps: currentStep)
         let lead = leadAnchor + rate * Double(currentStep)
-        let raw = rate > 0
-            ? max(Double(startOrigin), lead - Double(cols - 1))
-            : min(Double(startOrigin), lead)
-        setOrigin(Int(raw.rounded()))
+        if rate > 0 {
+            let right = centreColumn + windowSpan / 2
+            if lead > right - 1 { centreColumn = lead - windowSpan / 2 + 1 }
+        } else {
+            let left = centreColumn - windowSpan / 2
+            if lead < left { centreColumn = lead + windowSpan / 2 }
+        }
+        centreColumn = clampedCentre(centreColumn, span: windowSpan)
+    }
+
+    /// Source cells per display cell at `steps`; 1 until the history outgrows
+    /// the displayed rows. See `ViewportGeometry.sourceStride`.
+    private func sourceStride(steps: Int) -> Double {
+        let span = twin ? twinHalfRows : max(1, rows - 1)
+        return ViewportGeometry.sourceStride(steps: steps, span: span)
     }
 
     /// Regenerates the seed row on the GPU, resets the head counter and grid,
@@ -349,14 +369,17 @@ public final class MetalSimulation {
         memset(colorBuffer.contents(), 0, cols * rows)
         step = 0
         userPanned = false
-        startOrigin = ViewportGeometry.initialOrigin(
+        let origin = ViewportGeometry.initialOrigin(
             boardWidth: width, cols: cols, start: start, pinRight: spec.display.pinRight)
-        viewportOrigin = startOrigin
+        centreColumn = clampedCentre(
+            Double(origin) + Double(cols) / 2, span: Double(cols))
+        viewportOrigin = Int((centreColumn - Double(cols) / 2).rounded())
+        sourceSpan = cols
         viewParams.currentStep = 0
-        viewParams.viewportStart = 0
         viewParams.displayCols = UInt32(cols)
         viewParams.displayRows = UInt32(rows)
-        viewParams.viewportOrigin = UInt32(startOrigin)
+        viewParams.centreColumn = Float(centreColumn)
+        viewParams.sourceStride = 1
         viewParams.topRows = UInt32(twinHalfRows)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
 
@@ -392,6 +415,7 @@ public final class MetalSimulation {
     /// Encodes the step and fit work for `chunk` rows and commits it.
     func advance(chunk: Int) throws {
         let target = step + max(0, chunk)
+        try growHistory(to: target + 1)
         follow(to: target)
         let (_, slot) = ring.borrow()
 
@@ -526,11 +550,15 @@ public final class MetalSimulation {
     }
 
     private func encodeFit(target: Int, encoder: any MTL4ComputeCommandEncoder) {
-        // The twin layout pins the newest row to both outer edges around the
-        // shared horizon; the single layout pins it to the grid's bottom.
-        viewParams.viewportStart = UInt32(max(0, target - (twin ? twinHalfRows : rows - 1)))
+        let stride = sourceStride(steps: target)
+        let span = max(1, Int((Double(cols) * stride).rounded()))
+        centreColumn = clampedCentre(centreColumn, span: Double(span))
+        viewportOrigin = Int((centreColumn - Double(span) / 2).rounded())
+        sourceSpan = span
         viewParams.currentStep = UInt32(clamping: target)
         viewParams.topRows = UInt32(twinHalfRows)
+        viewParams.centreColumn = Float(centreColumn)
+        viewParams.sourceStride = Float(stride)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
         encoder.setArgumentTable(fitTable)
         encoder.setComputePipelineState(
@@ -539,6 +567,47 @@ public final class MetalSimulation {
             threadsPerGrid: MTLSize(width: cols, height: rows, depth: 1),
             threadsPerThreadgroup: MTLSize(width: min(16, cols), height: min(16, rows), depth: 1)
         )
+    }
+
+    /// Grows the history ring so it can hold every source row the run has
+    /// produced. The fit keeps sampling back to the seed, so the ring may not
+    /// wrap and drop rows. The previous frame has completed on the GPU, so the
+    /// shared buffer can be copied on this thread.
+    private func growHistory(to rows: Int) throws {
+        guard rows > capacity else { return }
+        var grownCapacity = max(1, capacity)
+        while grownCapacity < rows { grownCapacity += max(1, grownCapacity / 2) }
+        guard let grown = context.device.makeBuffer(
+            length: grownCapacity * width, options: .storageModeShared
+        ) else {
+            throw GPUContext.GPUError.resource("history ring")
+        }
+        let old = history.contents()
+        let new = grown.contents()
+        // SAFETY: the ring holds `capacity` rows and the run grows it before any
+        // step could reach that capacity, so every stored source row is inside
+        // the old buffer; the new ring is larger than `step`, and each row is
+        // `width` bytes in both buffers.
+        precondition(grownCapacity > step && capacity > step)
+        for row in 0...step {
+            memcpy(new + row * width, old + (row % capacity) * width, width)
+        }
+        let newStepTable = try Self.makeTable(
+            device: context.device, history: grown, second: stepBuffer, third: headBuffer)
+        let newFitTable = try Self.makeTable(
+            device: context.device, history: grown, second: colorBuffer, third: viewBuffer)
+        let newSeedTable = try Self.makeTable(
+            device: context.device, history: grown, second: seedBuffer, third: blockBuffer)
+        context.makeResident([grown])
+        context.removeResident(history)
+        history = grown
+        capacity = grownCapacity
+        stepTable = newStepTable
+        fitTable = newFitTable
+        seedTable = newSeedTable
+        stepParams.capacity = UInt32(clamping: grownCapacity)
+        memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
+        viewParams.capacity = UInt32(clamping: grownCapacity)
     }
 
     private func commit(_ slot: FrameSlot) throws {

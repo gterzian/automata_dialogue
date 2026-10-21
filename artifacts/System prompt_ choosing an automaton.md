@@ -16,36 +16,37 @@ Do not look for an automaton that resembles the image. Match at the level of beh
 
 Judge the drawn shapes, not the page: paper background, dotted grids, and UI labels carry no pattern.
 
+A recognizable subject does not by itself make a picture complexity. A house, a face, a letter, or a glyph drawn with plain regular parts is fully ordered, so it belongs to repetition, or to nesting when the same shape repeats at several scales. Complexity requires both order and randomness in the same picture.
+
 ## The four classes
 
-- repetition: a blank or uniformly filled field; one basic shape alone; one unit repeated by translation, mirroring, or even spacing; or identical marks at irregular positions. Stripes, a row of identical marks, and a grid belong here. The picture is settled and quiet, and each mark stands on its own.
-- nesting: one shape at several different scales, so larger copies contain smaller ones. The composition is self-similar and fractal-like, such as one shape shown in three sizes. Every scale shows the same shape.
-- randomness: marks placed without an organizing idea. The marks may be sparse or busy, and they may cross or close into accidental triangles and polygons, but the picture has no subject, no focal arrangement, and no motif that is composed; it reads as a scatter that could be reshuffled at random and look the same. Local structure does not change this: strokes of one kind, differing only in angle, length, or position, stay one kind, so a web of them that crosses or closes into shapes is still a tangle.
-- complexity: the picture reads as designed or meaningful, not as a scatter. It has a visible organizing idea: a recognizable subject or symbol (a glyph, an object, a deliberate abstract composition), or several different kinds of parts that clearly respond to one another. One kind of straight stroke at different angles or lengths stays one kind; a web of such strokes is randomness even when it closes into polygons, unless it depicts a recognizable subject.
-
-Do not call a drawing complexity just because it looks busy or balanced. A web of straight line segments that cross or close into shapes, with no recognizable subject, is randomness.
+- repetition: fully regular. A blank or uniformly filled field; one mark or one figure alone; a few plain shapes joined into one settled figure; one unit repeated by translation, mirroring, or even spacing; or identical marks at irregular positions. Stripes, a grid, a house built from rectangles and a triangle, and a glyph belong here. The picture is settled and quiet, and every part is alone or repeated. No part is disordered.
+- nesting: one shape at several different scales, so larger copies contain smaller ones. The composition is self-similar and fractal-like, such as one shape shown in three sizes. Every scale shows the same shape. Nesting is fully ordered; it is not complexity.
+- randomness: no regular part. Marks are placed without an organizing idea. They may be sparse or busy, and they may cross or close into accidental triangles and polygons, but the picture has no subject, no focal arrangement, and no composed motif; it reads as a scatter that could be reshuffled at random and look the same. Local structure does not make it complexity: strokes of one kind, differing only in angle, length, or position, stay one kind, so a web of them that crosses or closes into shapes is still a tangle.
+- complexity: order and randomness mix in the same picture. A regular, repeating, or ordered part coexists with a disordered part, or localized structures sit in a different texture and appear to interact with it: a regular background crossed by clusters, chains, knots, or branching shapes that grow, meet, and collide. Both regimes must be visible. A picture that is wholly ordered is repetition or nesting; a picture that is wholly disordered is randomness.
 
 ## How to choose
 
 1. Decide the class of the image's pattern from the four above.
 2. Choose an automaton below that has that class.
 3. Among those, prefer the one whose character best fits the image.
-4. Between randomness and complexity, choose randomness unless the organizing idea is clear.
 
 Signals, checked in this order:
 - a blank or uniformly filled field -> repetition
-- one mark or a single plain shape alone -> repetition
+- one mark or a single figure alone -> repetition
 - one shape repeated, mirrored, or placed at irregular positions -> repetition
 - one shape at several scales -> nesting
 - a scatter of marks, sparse or busy, with no subject or focal arrangement -> randomness
-- a web of straight line segments that crosses or closes into shapes, with no recognizable subject -> randomness
-- several different kinds of shapes whose arrangement shows balance, flow, or mutual dependence -> complexity
-- a character or glyph of several interacting strokes -> complexity
+- a tangle of one kind of stroke with no regular part, even if it closes into polygons -> randomness
+- a regular part and a disordered part in the same picture -> complexity
+- localized structures sitting in a different texture and meeting it -> complexity
+
+When in doubt, choose the simpler class: repetition or nesting over complexity, randomness over complexity. Choose complexity only when you can point to both an ordered part and a disordered part, or to localized structures interacting with a background of a different texture. A coherent, balanced, or meaningful arrangement of plain shapes is not enough.
 
 ## Two quick tests for borderline cases
 
-- Vocabulary: if the picture reads as designed or meaningful, with a subject, a focal arrangement, or a composed motif, the class is complexity. If it reads as a scatter that could be reshuffled at random without changing its character, the class is randomness.
-- Sensitivity: imagine deleting one stroke. If the picture loses nothing important, the class is randomness. If its subject, balance, or meaning would change, the class is complexity. If the effect stays in that stroke's neighborhood, the class is repetition.
+- Mixture test: name one ordered part and one disordered part, or one localized structure and the different texture around it. If you cannot name both, the class is not complexity: use repetition, nesting, or randomness.
+- Meaning test: ignore what the drawing depicts. A recognizable subject has a cultural meaning, not a pattern class. Judge the marks alone: a wholly ordered figure is repetition (or nesting), whether or not you recognize it.
 
 ## Automata
 

@@ -282,8 +282,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 layout: .twin,
                 minimumZoom: zoomFloor,
                 reveal: RevealSetup(
-                    branchRows: ViewportGeometry.twinHalfRows(rows: rows),
-                    floor: zoomFloor),
+                    branchRows: ViewportGeometry.twinHalfRows(rows: rows)),
                 sink: sink)
             await actor.drive(
                 clock: sink.clock,

@@ -79,14 +79,16 @@ final class MetalTests: XCTestCase {
         let context = try GPUContext()
         let spec = Catalog.spec(id: "E28")!   // grows right at one column per step
         let board = Board(width: 1000, height: spec.board.height, start: .center)
+        // The grid is tall enough that the sampling stride stays 1 over the run,
+        // so this pins the follow, not the below-floor zoom-out.
         let simulation = try MetalSimulation(
-            spec: spec, cols: 100, rows: 10, context: context, board: board)
+            spec: spec, cols: 100, rows: 400, context: context, board: board)
         let start = simulation.viewportOrigin
 
         _ = try simulation.renderGPU(chunk: 40)
         XCTAssertEqual(simulation.viewportOrigin, start)
 
-        _ = try simulation.renderGPU(chunk: 300)
+        _ = try simulation.renderGPU(chunk: 340)
         XCTAssertGreaterThan(simulation.viewportOrigin, start)
     }
 
@@ -120,8 +122,14 @@ final class MetalTests: XCTestCase {
         XCTAssertEqual(simulation.zoom, ViewportGeometry.maximumZoom)
         XCTAssertEqual(simulation.cols, 8)
         XCTAssertEqual(simulation.rows, 2)
+        // Below the display floor the zoom keeps falling while the grid stays
+        // at the floor size; the fit samples the history at a coarser stride.
+        simulation.setZoom(0.25)
+        XCTAssertEqual(simulation.zoom, 0.25)
+        XCTAssertEqual(simulation.cols, 64)
+        XCTAssertEqual(simulation.rows, 16)
         simulation.setZoom(0.01)
-        XCTAssertEqual(simulation.zoom, 0.5)
+        XCTAssertEqual(simulation.zoom, 0.01)
         XCTAssertEqual(simulation.cols, 64)
         XCTAssertEqual(simulation.rows, 16)
     }
@@ -207,6 +215,38 @@ final class MetalTests: XCTestCase {
         XCTAssertGreaterThan(
             rowCount(zoomed, row: half - 4, cols: simulation.cols), 1,
             "the latest row stays in view")
+    }
+
+    /// Past the display floor the fit samples the history at a coarser stride
+    /// instead of dropping rows: the seed row stays on the horizon and the
+    /// newest row on the outer edges, so the whole growth stays in view.
+    func testTwinKeepsTheSeedRowBelowTheDisplayFloor() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        let board = Board(width: 160, height: 16, start: .center)
+        let simulation = try MetalSimulation(
+            spec: spec, cols: 40, rows: 21, context: context, board: board,
+            minimumZoom: 0.5, twin: true)
+        simulation.setZoom(0.5)
+        XCTAssertEqual(simulation.cols, 80)
+        XCTAssertEqual(simulation.rows, 41)
+        let half = ViewportGeometry.twinHalfRows(rows: simulation.rows)
+        XCTAssertEqual(half, 20)
+
+        // 60 steps is three times the rows a branch shows, so the fit must
+        // sample every third source row to keep the seed. Growing to 160 then
+        // makes the history ring reallocate and copy the older rows.
+        _ = try simulation.renderGPU(chunk: 60)
+        _ = try simulation.renderGPU(chunk: 100)
+        XCTAssertEqual(simulation.steppedRows, 160)
+        let grown = values(try simulation.renderGPU(chunk: 0))
+        let horizon = (0..<simulation.cols).filter {
+            grown[half * simulation.cols + $0] != 0
+        }
+        XCTAssertEqual(
+            horizon, [simulation.cols / 2],
+            "the seed cell sits on the horizon at every stride")
     }
 
     private func values(_ grid: GPUColorGrid) -> [UInt8] {

@@ -154,7 +154,10 @@ change, along with the affected tests, counts, and READMEs.
    line; if the model outlasts it, the window holds the line until the choice
    is known. The automaton is one mirrored pair: two branches grow away from
    that line, and a camera pulls back at the growth rate to keep the growth in
-   view. The indicator runs at 30 fps on a reduced drawable so it does not
+   view. Past the point where one cell is one display element the camera keeps
+   pulling back by sampling the history at a coarser stride, so the whole
+   growth stays in view at decreasing resolution instead of sliding out through
+   the horizon. The indicator runs at 30 fps on a reduced drawable so it does not
    compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and

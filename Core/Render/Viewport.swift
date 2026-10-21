@@ -20,8 +20,10 @@ public enum ViewportGeometry {
     /// pan, so the board is deliberately much wider than the window.
     public static let boardWindows = 10
 
-    /// Hard lower bound on a run's zoom. A run never zooms out past this, so a
-    /// degenerate display cannot ask for an unbounded grid.
+    /// Hard lower bound on a run's grid zoom. A run never grows the display
+    /// grid past the floor this implies, so a degenerate display cannot ask
+    /// for an unbounded grid; the reveal's sampling stride carries the zoom
+    /// below it (see `sourceStride`).
     public static let minimumZoomLimit = 1.0 / 64
     public static let maximumZoom = 4.0
 
@@ -46,8 +48,9 @@ public enum ViewportGeometry {
 
     /// Display columns for a zoomed window: zooming in shrinks the grid so a
     /// board cell covers more display cells, and zooming out grows it so more
-    /// board fits. The drawable is resized to match, so zoomed-out detail stays
-    /// at native resolution instead of being subsampled.
+    /// board fits. The grid stops at the display floor, where one cell is one
+    /// drawable element; past it `sourceStride` samples more source cells per
+    /// display cell instead of growing the grid.
     public static func zoomedColumns(baseCols: Int, zoom: Double) -> Int {
         max(1, Int((Double(max(1, baseCols)) / zoom).rounded()))
     }
@@ -63,6 +66,17 @@ public enum ViewportGeometry {
     public static func twinRows(baseRows: Int, zoom: Double) -> Int {
         let rows = zoomedRows(baseRows: baseRows, zoom: zoom)
         return rows % 2 == 1 ? rows : max(1, rows - 1)
+    }
+
+    /// Source cells a display cell samples once a branch has grown more rows
+    /// than its half of the window can show. The camera's mapping always puts
+    /// the seed row on the horizon and the newest row on the outer edge, so
+    /// display distance `d` from the horizon reads source row `round(d ×
+    /// stride)`. At or below the stride of 1 this is the one-to-one mapping;
+    /// above it the whole history stays visible at decreasing resolution.
+    public static func sourceStride(steps: Int, span: Int) -> Double {
+        guard span > 0 else { return 1 }
+        return max(1, Double(max(0, steps)) / Double(span))
     }
 
     /// Source rows from the shared horizon row to each outer edge.

@@ -33,10 +33,10 @@ public enum ShaderSource {
         uint displayCols;
         uint displayRows;
         uint capacity;       // history rows, modulo index
-        uint viewportStart;  // oldest source step the window still shows
-        uint viewportOrigin; // first source column the window shows
         uint currentStep;    // source rows computed so far
         uint topRows;        // twin layout: rows from the horizon to an outer edge
+        float centreColumn;  // board column at the display's centre
+        float sourceStride;  // source cells per display cell in each axis
     };
 
     // The seed row. `mode` selects the `BoardStart` shape: 0 center cell,
@@ -181,19 +181,30 @@ public enum ShaderSource {
         history[gid] = value;
     }
 
-    // The window shows one board cell per display cell at `viewportOrigin`.
-    // Rows the run has not reached yet stay background, so a short board grows
-    // from the top before it starts to scroll. Zoom changes `displayCols` and
-    // `displayRows`, not this mapping.
+    // A display cell samples a source cell at `sourceStride`. At stride 1 the
+    // mapping is one-to-one; past the display floor the stride grows and the
+    // whole history is kept in view at decreasing resolution. Rows the run has
+    // not reached stay background, so a short board grows into the grid.
+    static uint sample_row(constant ViewParams& p, uint local) {
+        return uint(round(float(local) * p.sourceStride));
+    }
+
+    static bool sample_column(constant ViewParams& p, uint x, thread uint& column) {
+        float source = p.centreColumn
+            + (float(x) - float(p.displayCols) * 0.5f) * p.sourceStride;
+        if (source < 0.0f || source >= float(p.boardWidth)) { return false; }
+        column = uint(round(source));
+        return column < p.boardWidth;
+    }
     kernel void fit(device const uchar* history [[buffer(0)]],
                     device uchar* colorGrid [[buffer(1)]],
                     constant ViewParams& p [[buffer(2)]],
                     uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
-        uint target = p.viewportStart + gid.y;
-        uint index = p.viewportOrigin + gid.x;
+        uint target = sample_row(p, gid.y);
+        uint index = 0;
         uchar value = 0;
-        if (target <= p.currentStep && index < p.boardWidth) {
+        if (target <= p.currentStep && sample_column(p, gid.x, index)) {
             value = history[(target % p.capacity) * p.boardWidth + index];
         }
         colorGrid[gid.y * p.displayCols + gid.x] = value;
@@ -202,9 +213,9 @@ public enum ShaderSource {
     // The reveal's mirrored pair: one shared horizon row at the centre, with
     // the upper branch growing up from it and the lower branch growing down
     // from the same row. `p.topRows` is the distance from the horizon to each
-    // outer edge, so display rows above and below the horizon read the same
-    // source row. The newest source row is pinned to both outer edges; older
-    // rows leave through the horizon. The horizon row is written once.
+    // outer edge. The seed row stays on the horizon and the newest source row
+    // on both outer edges as the sampling stride grows, so the whole growth
+    // stays in view; the horizon row is written once.
     kernel void fit_twin(device const uchar* history [[buffer(0)]],
                          device uchar* colorGrid [[buffer(1)]],
                          constant ViewParams& p [[buffer(2)]],
@@ -212,10 +223,10 @@ public enum ShaderSource {
         if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
         uint halfRows = p.topRows;
         uint local = gid.y <= halfRows ? (halfRows - gid.y) : (gid.y - halfRows);
-        uint target = p.viewportStart + local;
-        uint index = p.viewportOrigin + gid.x;
+        uint target = sample_row(p, local);
+        uint index = 0;
         uchar value = 0;
-        if (target <= p.currentStep && index < p.boardWidth) {
+        if (target <= p.currentStep && sample_column(p, gid.x, index)) {
             value = history[(target % p.capacity) * p.boardWidth + index];
         }
         colorGrid[gid.y * p.displayCols + gid.x] = value;

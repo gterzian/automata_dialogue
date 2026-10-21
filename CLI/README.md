@@ -34,11 +34,13 @@
   then grows the chosen entry as two mirrored branches from that line: one
   branch grows upward and the other downward from the same horizon row. Both
   branches advance together, and the camera zooms out continuously at the
-  branches' growth rate so the whole growth stays in view, down to the widest
-  zoom-out the display can show one cell per element. Once the floor is reached
-  the zoom holds while the branches keep growing, and older rows leave through
-  the horizon until Return.
-  The run starts at 40 source rows per second (`.timed`); each branch fills half
+  branches' growth rate so the whole growth stays in view. At the display floor
+  one cell is one drawable element; past it the camera keeps pulling back
+  by sampling the stored history at a coarser stride, so the seed stays on the
+  horizon and the newest rows stay on the outer edges at decreasing resolution
+  instead of older rows leaving through the horizon. The history ring grows with
+  the run so no row is dropped. The run starts at 40 source rows per second
+  (`.timed`); each branch fills half
   the window, so the visible growth speed matches a single run at 20. The
   window's drawable is allocated at the floor's grid size, and the run simulates
   a board ten windows wide, so the pattern keeps evolving after it leaves the

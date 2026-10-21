@@ -128,4 +128,11 @@ public final class GPUContext {
         residency.removeAllocation(texture)
         residency.commit()
     }
+
+    /// Releases a buffer that a grow replaced (the history ring). The caller
+    /// must have finished every command that reads it.
+    public func removeResident(_ buffer: any MTLBuffer) {
+        residency.removeAllocation(buffer)
+        residency.commit()
+    }
 }

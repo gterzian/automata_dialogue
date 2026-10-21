@@ -11,8 +11,9 @@ What must be covered:
   catalog ids agree; per-entry follow rates, and which seed rows are a single
   centred cell.
 - **Prompt** — `SystemPrompt.build` embeds every catalog id with its class,
-  describes all four classes, states the answer format, and stays within the
-  ~4k budget.
+  describes all four classes, states that complexity requires both an ordered
+  and a disordered part (so a recognizable figure such as the house is
+  repetition), states the answer format, and stays within the ~4k budget.
 - **Choice** — the parser (`id:` field, markdown, prose fallback, longest-id
   match, unknown id) and the recent-choice window (limit, exclusion note).
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
@@ -21,14 +22,14 @@ What must be covered:
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
   frames, and advances on clock ticks; the pacing math; (Metal 4 only) the GPU
   seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
-  resize, and the twin run's mirrored branches, step count, and reported
-  horizon row.
+  resize, and the twin run's mirrored branches, step count, reported horizon
+  row, and seed row staying on the horizon past the display floor.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
   the centred or rightmost start origin, the visible span under zoom, the twin
-  grid's shared horizon row, and the display-dependent zoom floor.
+  grid's shared horizon row, the display-dependent zoom floor, and the sampling
+  stride past it.
 - **Reveal camera** — `RevealCamera` starts at 1×, never zooms in, matches the
-  branches' growth one for one, keeps the newest row visible above the floor,
-  and holds the floor once the growth fits.
+  branches' growth one for one, and keeps pulling back below the display floor.
 - **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
   palette colour, a renderer handles a grid resize, and the sink serializes
   frames that share buffers.

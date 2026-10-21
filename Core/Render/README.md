@@ -16,18 +16,21 @@ One frame is a batch of dispatches plus a render pass, with explicit barriers.
    SplitMix64 draw is indexed by cell, not carried across threads.
 2. **Advance the board** (`step_eca`/`step_totalistic`/`step_k2r2` plus
    `bump_head`): each step reads the row at a GPU-side `head` counter and writes
-   the next row into a ring of the newest `capacity` rows (sized for the widest
-   zoom-out). `injection`
-   overwrites the centre cell after each step.
-3. **Clip to the window** (`fit`): display row `d` reads source step
-   `step - (rows - 1) + d` at column `viewportOrigin + d`; rows the run has not
-   reached stay background, so a short board grows from the top. `fit_twin`
+   the next row into a history ring that grows to hold every row the run has
+   produced; `injection` overwrites the centre cell after each step.
+3. **Clip to the window** (`fit`): each display cell samples a source row and
+   column. At a sampling stride of 1 that is one board cell per display cell;
+   rows the run has not reached stay background, so a short board grows from
+   the top. `fit_twin`
    shares one horizon row between an upper branch growing up and a lower branch
-   growing down: each branch pins its newest row to its outer edge, so the pair
-   grows away from the horizon and mirrors exactly around it. Every grid cell is
+   growing down: the seed row sits on the horizon and, as the history fills the
+   branch, the newest row sits on its outer edge, so the pair grows away from
+   the horizon and mirrors exactly around it. Every grid cell is
    written each frame because nothing clears the grid between frames. Zoom
-   changes `displayCols`/`displayRows` (and the drawable), so the same
-   one-cell-per-cell mapping shows more or fewer board cells.
+   changes `displayCols`/`displayRows` up to the display floor, where one cell
+   is one drawable element. Past the floor the grid stays there and the stride
+   grows, so the fit samples the whole history (see
+   `ViewportGeometry.sourceStride`).
 4. **Draw** (`LayerRenderer`): `runs` compacts each same-colour non-background
    run into a `Span`, `encode_draw` writes the indirect draw arguments on the
    GPU, and the render pass clears to the background and draws one instanced
@@ -46,20 +49,24 @@ leaves the viewport fixed and lets the growth fill it.
 
 The reveal's camera is the only zoom. It lowers the zoom continuously so the
 rows each branch has grown always fill its half: `RevealCamera.zoom` returns
-`branchRows / (steps + 1)`, clamped to the floor. A zoom is a grid refit and a
+`branchRows / (steps + 1)` and never stops. A zoom is a grid refit and a
 redraw of the same target, not a drawable resize: the drawable is allocated
 once at the floor's grid size, and the layer stretches the current grid over
-it. At the floor each cell is one drawable pixel; earlier each cell covers
-more than one, matching the compositor stretch the small grid used to get. The
+it. At the floor each cell is one drawable element; earlier the grid is
+smaller and each cell covers more than one, matching the compositor stretch
+the small grid gets. The
 floor comes from `DisplayLimits`: the widest grid the surface shows with one
 cell per element, bounded by `ViewportGeometry.maximumGridCells`. A Retina
 display reports its pixels (0.25× for a 1440 × 800 pt window); an LED surface
-reports its addressable elements instead. The history ring and color buffer are
-sized once for the floor. The layer's span buffer grows geometrically when the
-continuously growing grid outgrows it, so a run reallocates it a handful of
-times; a `LayerSink` is created per presented automaton, so the peak is
-released on the next Return. Once the floor is reached the camera holds while
-the branches keep growing, and older rows leave through the horizon. The CLI
+reports its addressable elements instead. Beyond the floor the grid stays at
+the floor size and the fit samples the history at `sourceStride` — one display
+cell per `stride` source cells on each axis — so the seed row stays on the
+horizon, the newest row on the outer edges, and no row is dropped as the whole
+history shrinks into the window. The history ring grows with the run (see
+Remaining work); the color buffer is sized once for the floor grid. The
+layer's span buffer grows geometrically while the grid grows to the floor, so
+a run reallocates it a handful of times; a `LayerSink` is created per
+presented automaton, so the peak is released on the next Return. The CLI
 exposes no manual zoom, pan, speed, or restart controls: the reveal is one
 fixed animation.
 
@@ -124,7 +131,9 @@ frame must finish before the next one is written.
   `MTL4CommandAllocator`, reusable command buffers, a residency set, and the
   `seed_row`/`step_*`/`bump_head`/`fit`/`fit_twin` kernels. `MetalSimulation`
   owns the history ring and the GPU-side `head` counter and advances one chunk
-  per `renderGPU(chunk:)`. A twin run maps that one history into two mirrored
+  per `renderGPU(chunk:)`; the ring grows geometrically when the run outlives it
+  so the fit can keep sampling back to the seed. A twin run maps that one
+  history into two mirrored
   branches around a shared horizon row. `reseed(seed:)` regenerates the seed on
   the GPU (used by `RenderActor.restart`) without reallocating buffers.
 - **Render seam** (`RenderActor`, `RenderExecutor`, `FrameSink`, `FrameClock`)
@@ -155,11 +164,11 @@ frame must finish before the next one is written.
   compile once.
 - **Viewport geometry** (`ViewportGeometry`, `DisplayLimits`) — the cell size,
   `cols`/`rows` for a window, the ten-window board width, the centred or
-  right-pinned start origin, the twin grid's shared horizon row, and the zoom
-  floor the display can show.
+  right-pinned start origin, the twin grid's shared horizon row, the zoom
+  floor the display can show, and the sampling stride past it.
 - **Reveal camera** (`RevealCamera`) — the continuous pull-back: the zoom that
-  keeps the rows a branch has grown filling its half, held at the floor once
-  the region starts clipping older rows.
+  keeps the rows a branch has grown filling its half, never clamped; the fit's
+  sampling stride carries the zoom below the display floor.
 
 ## Metal 4 gotchas
 
@@ -200,6 +209,21 @@ frame must finish before the next one is written.
 
 ## Remaining work
 
+- **Keeping the whole history costs memory that grows with the run.** The
+  history ring holds every source row, about `boardWidth` bytes per step (a
+  ten-window board at the CLI's 40 rows/s is ~288 KB/s), and each growth copies
+  the rows on the render thread. A window left on one automaton for minutes
+  holds tens to hundreds of MB, and a growth copy after a long run can pause
+  the reveal. A cap would have to hold the camera there and let the oldest rows
+  leave as before.
+- **The board bounds the horizontal zoom-out.** The fit's stride widens the
+  visible source window on both axes, so once the window spans more than the
+  ten-window board the whole board fits and further zoom-out shows background
+  on each side; the pattern then shrinks into a centred strip. A longer reveal
+  would need a wider board, which grows the history memory with it.
+- **The below-floor fit point-samples.** Each display cell takes the source
+  cell at its centre, so a periodic pattern can alias as the stride changes;
+  a block filter would need a reduction over the stride window.
 - **The reveal's floor was measured at 0.25× on one machine.** A full frame at
   the floor grid (2880 × 1600 from a 720 × 400 base: one step, `fit` over
   4.6 M cells, span compaction, draw, GPU wait) takes 2.7 ms, and a pre-fitted
@@ -226,14 +250,17 @@ When `MTLCreateSystemDefaultDevice()` reports `.metal4`, `MetalTests` checks the
 `seed_row` kernel against every `BoardStart` shape, that a run grows from the
 seed, that a followed pattern scrolls the window at the boundary, that zoom
 resizes the grid without restarting the run, and that the twin layout grows
-both branches away from the horizon, mirrors them cell for cell, and refits both
-on a zoom. `RenderActorTests` asserts the actor runs off the main thread,
+both branches away from the horizon, mirrors them cell for cell, refits both
+on a zoom, and keeps the seed row on the horizon once the run outgrows the
+display floor (including across a history-ring growth). `RenderActorTests`
+asserts the actor runs off the main thread,
 delivers GPU-resident frames, advances on a clock tick, restarts, refits on
 zoom, and exposes the twin run's step count. `RevealCameraTests` pins the
 pull-back: it starts at 1×, never zooms in, matches the branches' growth one
-for one, never hides the newest row above the floor, and holds the floor.
+for one, and keeps pulling back below the display floor.
 `RenderTests` pins the pan anchor (`leadColumn`) to each start shape, the
-display floor, and the twin grid's rows. `LayerTests` reads the rendered
+display floor, the sampling stride, and the twin grid's rows. `LayerTests`
+reads the rendered
 texture back to check spans are filled with palette colours, that a renderer
 handles a grid resize, and that the sink serializes frames sharing buffers.
 `CollapseTests` checks the rest frame the reveal continues from, the opening

@@ -75,6 +75,24 @@ final class ViewportTests: XCTestCase {
         XCTAssertEqual(ViewportGeometry.twinHalfRows(rows: 399), 199)
         XCTAssertEqual(ViewportGeometry.twinHalfRows(rows: 401), 200)
     }
+
+    /// Below the display floor the camera keeps pulling back by sampling the
+    /// history at a coarser stride, so the whole history stays in view instead
+    /// of older rows leaving through the horizon.
+    func testSourceStrideKeepsTheWholeHistoryInView() {
+        XCTAssertEqual(ViewportGeometry.sourceStride(steps: 0, span: 20), 1)
+        XCTAssertEqual(ViewportGeometry.sourceStride(steps: 10, span: 20), 1)
+        XCTAssertEqual(ViewportGeometry.sourceStride(steps: 20, span: 20), 1)
+        XCTAssertEqual(ViewportGeometry.sourceStride(steps: 40, span: 20), 2)
+        XCTAssertEqual(ViewportGeometry.sourceStride(steps: 100, span: 20), 5)
+        XCTAssertEqual(ViewportGeometry.sourceStride(steps: 40, span: 0), 1)
+        // The newest row lands on the outer edge at every stride.
+        let span = 20
+        for steps in [25, 40, 100, 1_000] {
+            let stride = ViewportGeometry.sourceStride(steps: steps, span: span)
+            XCTAssertEqual((Double(span) * stride).rounded(), Double(steps))
+        }
+    }
 }
 
 /// The pan anchor is computed from the `BoardStart` (mirroring the GPU

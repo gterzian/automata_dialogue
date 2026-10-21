@@ -61,7 +61,9 @@ miss fails the run.
   `gemma-4-e2b-it-4bit` is larger and weaker; `Qwen3.5-9B-4bit` is accurate but
   too slow. Re-check when the prompt or an example changes.
 - Image-only turns and the two-line `id:`/`reason:` answer work on the local
-  snapshots. The soft class boundary is a dense composition of many different
-  shapes, which some models read as nesting rather than complexity.
+  snapshots. The mixture rubric's soft boundary is a wholly ordered,
+  recognizable figure versus a picture that mixes order and randomness. The
+  expected class of every reference drawing is in `artifacts/README.md`; score
+  the set with `rater-cli classify artifacts/`.
 - `AgentEngine` is not covered by `CoreTests`; test answer parsing in `Core`
   against `ChoiceParser` and test the model only through `rater-cli rate`.

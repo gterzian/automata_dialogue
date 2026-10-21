@@ -62,15 +62,29 @@ final class SystemPromptTests: XCTestCase {
         XCTAssertLessThan(tokens, 2500, "system prompt is larger than the ~1k budget")
     }
 
-    /// The rubric must separate randomness from complexity: class 3 can show
-    /// local motifs but no non-local interaction, while class 4 has structures
-    /// that travel and interact (NKS ch. 6).
-    func testDistinguishesRandomnessFromComplexity() {
+    /// `complexity` is reserved for a picture that visibly mixes an ordered
+    /// part with a disordered one. A coherent, recognizable figure is fully
+    /// ordered, so it must land in repetition or nesting; the old rubric's
+    /// "designed or meaningful" test sent the house to complexity.
+    func testComplexityRequiresAMixtureOfOrderAndRandomness() {
         let prompt = SystemPrompt.build()
-        XCTAssertTrue(prompt.contains("marks placed without an organizing idea"))
-        XCTAssertTrue(prompt.contains("Local structure does not change this"))
-        XCTAssertTrue(prompt.contains("reads as designed or meaningful"))
-        XCTAssertTrue(prompt.contains("choose randomness unless the organizing idea is clear"))
+        XCTAssertTrue(prompt.contains("- complexity: order and randomness mix in the same picture."))
+        XCTAssertTrue(prompt.contains("A picture that is wholly ordered is repetition or nesting"))
+        XCTAssertTrue(prompt.contains("When in doubt, choose the simpler class"))
+        XCTAssertTrue(prompt.contains("Mixture test: name one ordered part and one disordered part"))
+        XCTAssertTrue(prompt.contains("a wholly ordered figure is repetition (or nesting), whether or not you recognize it"))
+    }
+
+    func testDoesNotTreatARecognizableSubjectAsComplexity() {
+        let prompt = SystemPrompt.build()
+        for retired in [
+            "reads as designed or meaningful",
+            "character or glyph of several interacting strokes -> complexity",
+            "Sensitivity: imagine deleting one stroke",
+            "unless the organizing idea is clear",
+        ] {
+            XCTAssertFalse(prompt.contains(retired), "prompt still uses the retired subject test: \(retired)")
+        }
     }
 
     /// The artifact is the human-readable copy of the prompt; nothing generates

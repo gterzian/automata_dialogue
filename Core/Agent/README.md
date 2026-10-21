@@ -43,12 +43,15 @@ accepted id.
 `SystemPrompt.build()` joins three parts into one immutable string: the four
 behavior classes described plainly, the flat catalog
 (`Catalog.promptIndexLines`, one line per entry as `id | class`), and the
-answer format. Each entry carries its own class instead of being grouped, so
-the model does not have to map a separate class table onto a listing. The string
-is identical on every run, so it is a cacheable prefix. The per-entry `look`
-sentence stays in `Catalog` for the inventory sync but is not submitted: the
-class is what the model matches, and the prompt's ~1k-token budget assumes the
-listing is `id | class`.
+answer format. The rubric reserves `complexity` for a picture that contains
+both an ordered and a disordered part (or localized structures inside a
+different texture); a wholly ordered figure, even a recognizable one such as a
+house or a glyph, is `repetition` or `nesting`. Each entry carries its own
+class instead of being grouped, so the model does not have to map a separate
+class table onto a listing. The string is identical on every run, so it is a
+cacheable prefix. The per-entry `look` sentence stays in `Catalog` for the
+inventory sync but is not submitted: the class is what the model matches, and
+the prompt's ~1k-token budget assumes the listing is `id | class`.
 
 ## Events
 

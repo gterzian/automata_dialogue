@@ -21,24 +21,28 @@ covers class-2 pictures whose fixed marks are scattered irregularly
 `example_*.png` are the drawings used to re-check the model when the prompt or
 a snapshot changes (`Agent/README.md`, `rater-cli classify`). The table records
 the class each drawing illustrates, so the set can be scored without re-reading
-the images. `example_7.png` (a photograph of light trails) and `example_8.png`
-(crossing line segments that close into polygons) are the borderline cases
-between `complexity` and `randomness`; either class is defensible, so they are
-the drawings to watch when the rubric changes.
+the images.
+
+Four rows guard the `complexity` boundary. `example_7.png` (flowing trails
+crossed by a knot) is the mixed case: an ordered part and a disordered part in
+one picture. `example_8.png` (crossing line segments) is one kind of stroke
+with no regular part, so it is randomness even where the segments close into
+polygons. `example_3.png` (a glyph) and `example_12.png` (a house) are wholly
+ordered, recognizable figures, so they are repetition and not complexity.
 
 | file | class | what it shows |
 |---|---|---|
 | `example_1.png` | repetition | three parallel diagonal lines at even spacing |
-| `example_2.png` | complexity | crossing lines with shapes meeting at the intersections |
-| `example_3.png` | complexity | a calligraphy glyph of interacting strokes |
+| `example_2.png` | complexity | crossing lines with localized shapes at the intersections |
+| `example_3.png` | repetition | a calligraphy glyph: one figure, wholly ordered |
 | `example_4.png` | nesting | one triangle at three scales |
-| `example_5.png` | complexity | crossing lines with triangles and circles at the intersections |
+| `example_5.png` | complexity | crossing lines with ordered chains of triangles and circles |
 | `example_6.png` | repetition | one plain circle |
-| `example_7.png` | randomness (borderline) | long-exposure light trails |
-| `example_8.png` | complexity (borderline) | crossing line segments that close into polygons |
+| `example_7.png` | complexity | flowing light trails with a dense knot of trails |
+| `example_8.png` | randomness | crossing line segments of one kind that close into polygons |
 | `example_9.png` | randomness | a busy tangle of random strokes |
 | `example_10.png` | randomness | scattered dots with accidental clusters |
 | `example_11.png` | randomness | a meandering scribble |
-| `example_12.png` | complexity | a house, a recognizable subject |
+| `example_12.png` | repetition | a house: a few plain shapes joined into one settled figure |
 | `example_13.png` | nesting | one square at five scales |
 | `example_14.png` | repetition | one cross repeated on a regular grid |

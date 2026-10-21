@@ -173,7 +173,7 @@ public actor RenderActor {
         if let reveal, let simulation {
             let target = simulation.steppedRows + steps
             simulation.setZoom(RevealCamera.zoom(
-                steps: target, branchRows: reveal.branchRows, floor: reveal.floor))
+                steps: target, branchRows: reveal.branchRows))
         }
         _ = try advance(by: steps)
     }
