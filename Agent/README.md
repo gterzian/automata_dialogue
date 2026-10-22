@@ -62,7 +62,7 @@ improve the reason, the first choice stands.
   fails to name a usable id once the exclusion list is present;
   `gemma-4-e2b-it-4bit` is larger and weaker; `Qwen3.5-9B-4bit` is accurate but
   too slow. Re-check when the prompt or an example changes.
-- Image-only turns and the two-line `id:`/`reason:` answer work on the local
+- Image-only turns and the three-line `class:`/`id:`/`reason:` answer work on the local
   snapshots. The mixture rubric's soft boundary is a wholly ordered,
   recognizable figure versus a picture that mixes order and randomness. The
   expected class of every reference drawing is in `artifacts/README.md`; score

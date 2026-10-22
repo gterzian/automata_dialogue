@@ -40,19 +40,30 @@ final class SystemPromptTests: XCTestCase {
 
     func testStatesTheAnswerFormat() {
         let prompt = SystemPrompt.build()
-        XCTAssertTrue(prompt.contains("id: <one id from the list>"))
+        XCTAssertTrue(prompt.contains("class: <one of repetition, nesting, randomness, complexity>"))
+        XCTAssertTrue(prompt.contains("id: <one id from the list whose class is the class on the first line>"))
         XCTAssertTrue(prompt.contains(
             "reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>"))
     }
 
     /// The reason must be a sentence about the drawing, not the class name the
-    /// model matched; the reply starts at the id line so the sentence cannot
+    /// model matched; the reply starts at the class line so the sentence cannot
     /// drift in front of the answer.
     func testRequiresAFullSentenceReason() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains(
-            "Reply with exactly two lines, starting with `id:` and no other text:"))
+            "Reply with exactly three lines, starting with `class:` and no other text:"))
         XCTAssertTrue(prompt.contains("one full sentence, not just the class name"))
+    }
+
+    /// The reason and the chosen id must agree: the observed failure named
+    /// randomness in the reason and then replied with a complexity id.
+    func testRequiresTheIDToCarryTheClassTheReasonNames() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains(
+            "The class printed next to your id must be the class you decided; the answer is wrong when those differ."))
+        XCTAssertTrue(prompt.contains(
+            "the class after your id must be the same word as the class your reason names"))
     }
 
     func testSaysToMatchByBehaviorNotLikeness() {

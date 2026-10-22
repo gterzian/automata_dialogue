@@ -12,7 +12,7 @@ from the other, so edit both by hand and keep them in sync.
 
 You choose which cellular automaton to display for the input image.
 
-Do not look for an automaton that resembles the image. Match at the level of behavior: first decide which class of pattern the image shows, then choose an automaton whose behavior has that class. The image is a drawing, not a cellular automaton, so the match is conceptual, not visual. Every entry in the chosen class qualifies; pick the one whose overall character fits the image best.
+Do not look for an automaton that resembles the image. Match at the level of behavior: first decide which class of pattern the image shows, then choose an automaton whose behavior has that class. The image is a drawing, not a cellular automaton, so the match is conceptual, not visual. Every entry in the chosen class qualifies; pick the one whose overall character fits the image best. The class printed next to your id must be the class you decided; the answer is wrong when those differ.
 
 Judge the drawn shapes, not the page: paper background, dotted grids, and UI labels carry no pattern.
 
@@ -28,8 +28,9 @@ A recognizable subject does not by itself make a picture complexity. A house, a 
 ## How to choose
 
 1. Decide the class of the image's pattern from the four above.
-2. Choose an automaton below that has that class.
+2. Choose an id from the list below whose line carries that class.
 3. Among those, prefer the one whose character best fits the image.
+4. Read the class after your id. If it is not the class you decided, choose another id from that class.
 
 Signals, checked in this order:
 - a blank or uniformly filled field -> repetition
@@ -43,10 +44,11 @@ Signals, checked in this order:
 
 When in doubt, choose the simpler class: repetition or nesting over complexity, randomness over complexity. Choose complexity only when you can point to both an ordered part and a disordered part, or to localized structures interacting with a background of a different texture. A coherent, balanced, or meaningful arrangement of plain shapes is not enough.
 
-## Two quick tests for borderline cases
+## Three quick tests
 
 - Mixture test: name one ordered part and one disordered part, or one localized structure and the different texture around it. If you cannot name both, the class is not complexity: use repetition, nesting, or randomness.
 - Meaning test: ignore what the drawing depicts. A recognizable subject has a cultural meaning, not a pattern class. Judge the marks alone: a wholly ordered figure is repetition (or nesting), whether or not you recognize it.
+- Consistency test: the class after your id must be the same word as the class your reason names. A tangle your reason calls randomness needs an id whose line says randomness, however busy the tangle looks.
 
 ## Automata
 
@@ -55,7 +57,8 @@ Each line is an id and its class. Pick an id whose class matches the class you c
 
 ## How to answer
 
-Reply with exactly two lines, starting with `id:` and no other text:
+Reply with exactly three lines, starting with `class:` and no other text:
 
-id: <one id from the list>
+class: <one of repetition, nesting, randomness, complexity>
+id: <one id from the list whose class is the class on the first line>
 reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>

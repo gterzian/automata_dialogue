@@ -120,8 +120,12 @@ final class MetalTests: XCTestCase {
 
         simulation.setZoom(100)
         XCTAssertEqual(simulation.zoom, ViewportGeometry.maximumZoom)
-        XCTAssertEqual(simulation.cols, 8)
-        XCTAssertEqual(simulation.rows, 2)
+        XCTAssertEqual(
+            simulation.cols,
+            ViewportGeometry.zoomedColumns(baseCols: 32, zoom: ViewportGeometry.maximumZoom))
+        XCTAssertEqual(
+            simulation.rows,
+            ViewportGeometry.zoomedRows(baseRows: 8, zoom: ViewportGeometry.maximumZoom))
         // Below the display floor the zoom keeps falling while the grid stays
         // at the floor size; the fit samples the history at a coarser stride.
         simulation.setZoom(0.25)

@@ -25,7 +25,10 @@ public enum ViewportGeometry {
     /// for an unbounded grid; the reveal's sampling stride carries the zoom
     /// below it (see `sourceStride`).
     public static let minimumZoomLimit = 1.0 / 64
-    public static let maximumZoom = 4.0
+    /// Hard upper bound on a run's grid zoom: the closest the reveal opens, one
+    /// cell covering this many base cells. A zoom never inverts the window into
+    /// a grid coarser than a handful of columns.
+    public static let maximumZoom = 8.0
 
     /// Largest display grid the reveal allocates. The layer's span buffer holds
     /// one 16-byte span per cell, so this caps it at ~128 MB. It has to cover the

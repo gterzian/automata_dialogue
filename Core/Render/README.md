@@ -88,9 +88,12 @@ that edge at the boundary. A `pan(by:)` call aborts the follow for the rest of
 the run (a `restart` restores it). E110 (left-growing, seed at the right edge)
 leaves the viewport fixed and lets the growth fill it.
 
-The reveal's camera is the only zoom. It lowers the zoom continuously so the
-rows each branch has grown always fill its half: `RevealCamera.zoom` returns
-`branchRows / (steps + 1)` and never stops. A zoom is a grid refit and a
+The reveal's camera is the only zoom. It opens at `RevealCamera.startZoom` — a
+close-up where one cell is eight base cells — and lowers the zoom continuously
+so the rows each branch has grown then always fill its half: `RevealCamera.zoom`
+returns `min(startZoom, branchRows / (steps + 1))` and never stops. The seed
+frame is delivered at that same scale, so the hand-off from the intro does not
+jump. A zoom is a grid refit and a
 redraw of the same surface, not a surface resize: the surface is allocated
 once at the floor's grid size, and the target stretches the current grid over
 it. At the floor each cell is one surface element; earlier the grid is
@@ -161,10 +164,13 @@ The resting frame becomes the reveal's first frame for an entry whose seed row
 is a single centred cell. `AutomatonWindow` plays one more beat for those
 entries: `settle` retracts the line onto that cell, half a cell right of the
 frame's centre because the viewport's centre column starts at the centre line,
-and in the palette colour that cell holds. The retraction's last frame is the
-rest frame with `settle` at 1, so the reveal starts from the dot the automaton
-actually begins with. Every other entry keeps the line, which is already its
-first row.
+and in the palette colour that cell holds. The cell is measured on the grid the
+reveal opens on (`RevealCamera.startZoom`), so the hand-off does not change its
+size; the resting hairline and the opening dot are scaled from a base-grid row
+instead, so a closer reveal does not thicken the line. The retraction's last
+frame is the rest frame with `settle` at 1, so the reveal starts from the dot
+the automaton actually begins with. Every other entry keeps the line, which is
+already its first row.
 
 The CPU recomputes the timeline uniforms each frame. The scene shader writes the
 target's surface directly; there are no offscreen targets, upscale, or bloom
@@ -222,9 +228,10 @@ buffer, so a frame must finish before the next one is written.
   right-pinned start origin, the twin grid's shared horizon row, the zoom
   floor the display can show, the sampling stride past it, and the cell budget
   that floor may allocate.
-- **Reveal camera** (`RevealCamera`) — the continuous pull-back: the zoom that
-  keeps the rows a branch has grown filling its half, never clamped; the fit's
-  block average carries the zoom below the display floor.
+- **Reveal camera** (`RevealCamera`) — the close-up the reveal opens on and the
+  continuous pull-back from it: the zoom that keeps the rows a branch has grown
+  filling its half, never clamped; the fit's block average carries the zoom
+  below the display floor.
 
 ## Metal 4 gotchas
 
@@ -332,13 +339,14 @@ layout grows both branches away from the horizon, mirrors them cell for cell,
 refits both on a zoom, and keeps the seed row on the horizon once the run
 outgrows the display floor (including across a history-ring growth).
 `RenderActorTests` asserts the actor runs off the main thread, delivers
-GPU-resident frames, advances on each frame the target delivers, and that
-`stopDriving` ends them, restarts, refits on zoom, and exposes the twin run's
-step count. `RevealCameraTests` pins the
-pull-back: it starts at 1×, never zooms in, matches the branches' growth one
-for one, and keeps pulling back below the display floor.
-`RenderTests` pins the pan anchor (`leadColumn`) to each start shape, the
-display floor, the sampling stride, and the twin grid's rows. `CellGridTests`
+GPU-resident frames, advances on each frame the target delivers, that
+`stopDriving` ends them, restarts, refits on zoom, exposes the twin run's step
+count, and delivers the first frame of a reveal at the camera's close-up.
+`RevealCameraTests` pins the camera: it opens at the close-up, holds it while
+the branch has room, never zooms in, then matches the branches' growth one for
+one and keeps pulling back below the display floor. `RenderTests` pins the pan
+anchor (`leadColumn`) to each start shape, the display floor, the sampling
+stride, and the twin grid's rows. `CellGridTests`
 reads the rendered
 texture back to check spans are filled with palette colours, that a toned grid
 is drawn through the tone renderer with its cells' own colours and its row

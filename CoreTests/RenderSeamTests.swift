@@ -189,6 +189,40 @@ final class RenderActorTests: XCTestCase {
         await actor.shutdown()
     }
 
+    /// The reveal's first frame is already the camera's close-up, so the seed
+    /// the intro hands over is drawn at the scale the pull-back starts from
+    /// rather than jumping on the first tick; a restart reopens it.
+    func testConfigureDeliversTheSeedAtTheCloseUpZoom() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 80
+        let rows = 41
+        let sink = RecordingSink()
+        let actor = RenderActor()
+        let seed = try await actor.configure(
+            spec: spec, cols: cols, rows: rows,
+            layout: .twin,
+            reveal: RevealSetup(branchRows: ViewportGeometry.twinHalfRows(rows: rows)),
+            sink: sink)
+        XCTAssertEqual(
+            seed.gpu.cols,
+            ViewportGeometry.zoomedColumns(baseCols: cols, zoom: RevealCamera.startZoom))
+        XCTAssertEqual(
+            seed.gpu.rows,
+            ViewportGeometry.twinRows(baseRows: rows, zoom: RevealCamera.startZoom))
+
+        // Zoomed out by hand, a restart still opens at the close-up.
+        await actor.setZoom(1)
+        XCTAssertEqual(sink.frames.last?.gpu.cols, cols)
+        await actor.restart()
+        XCTAssertEqual(sink.frames.last?.gpu.cols, seed.gpu.cols)
+        let restarted = await actor.steppedRows
+        XCTAssertEqual(restarted, 0)
+        await actor.shutdown()
+    }
+
     /// `setZoom` refits the run and delivers the new frame, so the reveal
     /// camera's level changes go through the actor.
     func testSetZoomDeliversARefittedFrame() async throws {

@@ -36,6 +36,9 @@ public final class WorkingIndicator: @unchecked Sendable {
     private var finished = false
     private var settled = false
     private var lineHalfThickness: Float = 0.00125
+    /// Half the height of one cell of the grid the reveal opens on; the
+    /// retraction lands on that cell.
+    private var cellHalfHeight: Float = 0.00125
     /// The seed cell's colour, used for the retraction so the dot it lands on
     /// matches the entry's first frame.
     private var finaleInk: PaletteColor?
@@ -60,7 +63,11 @@ public final class WorkingIndicator: @unchecked Sendable {
     /// Plays the submission beat for `image`, then the intro. A fresh look is
     /// drawn for this run, so the dot the image collapses onto is the same dot
     /// the intro starts from. Safe to call after `stop()`.
-    public func playSubmission(_ image: RasterImage, lineHalfThickness: Float) throws {
+    public func playSubmission(
+        _ image: RasterImage,
+        lineHalfThickness: Float,
+        cellHalfHeight: Float
+    ) throws {
         lock.lock()
         submissionStartedAt = 0
         introStartedAt = nil
@@ -71,6 +78,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         error = nil
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
+        self.cellHalfHeight = cellHalfHeight
         lock.unlock()
         try submissionRenderer.setImage(image)
         target.start { [weak self] _ in self?.draw() }
@@ -78,11 +86,11 @@ public final class WorkingIndicator: @unchecked Sendable {
 
     /// Starts (or restarts) the intro from its opening dot without a
     /// submission beat, drawing a fresh look for this run.
-    /// `lineHalfThickness` is the automaton's horizon row half-height in
-    /// screen-height units: the shader scales the opening dot and the resting
-    /// hairline from it, and the finale lands on one cell of that row. Safe to
-    /// call after `stop()`.
-    public func start(lineHalfThickness: Float) {
+    /// `lineHalfThickness` is the half-height of the row the cycle ends on in
+    /// screen-height units, which the shader scales the opening dot and the
+    /// resting hairline from; `cellHalfHeight` is half the height of the cell
+    /// the finale lands on, the reveal's first. Safe to call after `stop()`.
+    public func start(lineHalfThickness: Float, cellHalfHeight: Float) {
         lock.lock()
         submissionStartedAt = nil
         introStartedAt = 0
@@ -93,6 +101,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         error = nil
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
+        self.cellHalfHeight = cellHalfHeight
         lock.unlock()
         target.start { [weak self] _ in self?.draw() }
     }
@@ -156,6 +165,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         let finaleStart = finaleStartedAt
         let variation = variation
         let lineHalfThickness = lineHalfThickness
+        let cellHalfHeight = cellHalfHeight
         let ink = finaleStart == nil ? self.ink : (finaleInk ?? self.ink)
         lock.unlock()
 
@@ -173,7 +183,7 @@ public final class WorkingIndicator: @unchecked Sendable {
                 let frame = CollapseTimeline.rested(settle: Float(eased), variation: variation)
                 try renderer.render(
                     into: surface.texture, frame: frame, white: white, ink: ink,
-                    lineHalfThickness: lineHalfThickness)
+                    lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
                 resting = progress >= 1
             } else if let submissionStart {
                 let elapsed = now - submissionStart
@@ -197,7 +207,8 @@ public final class WorkingIndicator: @unchecked Sendable {
                         frame: CollapseTimeline.frame(
                             time: Float(ReviewIntro.openingTime), variation: variation),
                         white: white, ink: ink,
-                        lineHalfThickness: lineHalfThickness)
+                        lineHalfThickness: lineHalfThickness,
+                        cellHalfHeight: cellHalfHeight)
                 }
             } else if let introStart {
                 let elapsed = now - introStart
@@ -205,7 +216,8 @@ public final class WorkingIndicator: @unchecked Sendable {
                 let frame = CollapseTimeline.frame(time: Float(introTime), variation: variation)
                 try renderer.render(
                     into: surface.texture, frame: frame, white: white, ink: ink,
-                    lineHalfThickness: lineHalfThickness)
+                    lineHalfThickness: lineHalfThickness,
+                    cellHalfHeight: cellHalfHeight)
                 resting = introTime >= ReviewIntro.duration
             } else {
                 return

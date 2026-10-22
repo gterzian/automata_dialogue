@@ -571,6 +571,7 @@ public enum ShaderSource {
         float haloScale;
         float stretch;
         float lineHalfThickness;
+        float cellHalfHeight;
         float settle;
         float4 grow;
         float4 white;
@@ -629,9 +630,10 @@ public enum ShaderSource {
 
         float cover = length(float2(u.aspect, 1.0)) * 0.5 + 0.15;
         // The resting line is a hairline so it barely shows; the retraction
-        // thickens it back to the seed cell it lands on.
+        // thickens it to the seed cell it lands on, which is one cell of the
+        // grid the reveal opens on.
         float startR = max(u.lineHalfThickness * 3.0, 2.5 * px) * u.dotScale;
-        float lineR = mix(u.lineHalfThickness * 0.35, u.lineHalfThickness, u.settle);
+        float lineR = mix(u.lineHalfThickness * 0.35, u.cellHalfHeight, u.settle);
         float dotR = mix(startR, lineR, u.stretch);
 
         // Every layer is centred on the frame, so the dot never moves between
@@ -688,7 +690,7 @@ public enum ShaderSource {
         float2 q = float2(max(abs(p.x) - u.stretch * (u.aspect * 0.5 + 0.05), 0.0), p.y);
         // The finale retracts the line onto the reveal's seed: one cell, half a
         // cell right of the frame's centre, as tall as the horizon row.
-        float2 cell = p - float2(u.lineHalfThickness, 0.0);
+        float2 cell = p - float2(u.cellHalfHeight, 0.0);
         float dist = mix(length(q), max(abs(cell.x), abs(cell.y)), u.settle);
         float dotSoft = max(dotR * 0.5, mix(1.5 * px, 0.5 * px, u.stretch));
         float dotBody = 1.0 - smoothstep(-dotSoft, dotSoft, dist - dotR);

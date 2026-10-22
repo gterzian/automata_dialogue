@@ -33,8 +33,10 @@ What must be covered:
   grid's shared horizon row, the display-dependent zoom floor (from a display's
   pixels and from a fixed-resolution surface's elements), and the sampling
   stride past it.
-- **Reveal camera** — `RevealCamera` starts at 1×, never zooms in, matches the
-  branches' growth one for one, and keeps pulling back below the display floor.
+- **Reveal camera** — `RevealCamera` opens at its close-up, holds it while the
+  branch has room, then matches the branches' growth one for one and keeps
+  pulling back below the display floor; the review window's first frame is
+  already at that close-up.
 - **Cell grid sink** — (Metal 4 only) an offscreen render fills each span with
   its palette colour, a toned grid is drawn with its cells' own colours, a
   renderer handles a grid resize, the sink draws into

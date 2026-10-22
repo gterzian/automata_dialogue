@@ -12,20 +12,25 @@ stable cacheable prefix.
 
 ## One answer, no tool call
 
-There is no tool schema and no tool-dispatch round. The prompt asks for two
+There is no tool schema and no tool-dispatch round. The prompt asks for three
 lines:
 
 ```
-id: <one id from the list>
+class: <one of repetition, nesting, randomness, complexity>
+id: <one id from the list whose class is the class on the first line>
 reason: <one full sentence>
 ```
+
+The `class` line is the answer's self-check: the model commits to a class
+before choosing an id, and the reason must name that same class. The parser
+reads only `id:` and `reason:`; the class line is ignored.
 
 `ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
 and otherwise taking the first catalog id anywhere in the text (longest match
 first, so `E90.sparse` beats `E90`). The engine gives **repair turns** when
 needed: one if the first answer names no usable id (unknown, or recently used),
 appended as a correction, and only a second miss ends the run in `.failed`.
-Text beyond the two fields is ignored. A bare class name is not a reason: when
+Text beyond the parsed fields is ignored. A bare class name is not a reason: when
 the id is usable but `Choice.hasFullReason` is false, the engine asks once more
 for a sentence with the same id and keeps the first choice if that retry does
 not improve it. The parser is pure, so the MLX engine and the tests share one

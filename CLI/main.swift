@@ -331,13 +331,19 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         let actor = indicator ?? IndicatorActor()
         indicator = actor
         reportedIndicatorError = false
-        // The intro's ending line is measured in horizon-row heights so the
-        // retraction lands on one cell; the shader draws the line as a hairline
-        // and thickens it only for that retraction.
+        // The shader draws the horizon as a hairline and thickens it only for
+        // the retraction, which lands on the cell the reveal opens with. The
+        // hairline and the dot are scaled from half a row of the base grid, so
+        // they keep their size however far the camera starts zoomed in; the
+        // cell comes from the grid the reveal builds: one twin grid at 1× and
+        // then the zoom the camera opens on.
         let cols = ViewportGeometry.columns(size: contentSize)
-        let rows = ViewportGeometry.twinRows(
+        let baseRows = ViewportGeometry.twinRows(
             baseRows: ViewportGeometry.rows(size: contentSize, cols: cols), zoom: 1)
-        let lineHalfThickness = 0.5 / Float(max(1, rows))
+        let rows = ViewportGeometry.twinRows(
+            baseRows: baseRows, zoom: RevealCamera.startZoom)
+        let lineHalfThickness = 0.5 / Float(max(1, baseRows))
+        let cellHalfHeight = 0.5 / Float(max(1, rows))
         // The model runs while this animates, so 30 fps with the slow radial
         // motion leaves most of the GPU to inference.
         let target = indicatorTarget ?? MetalLayerTarget(
@@ -349,10 +355,14 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         do {
             if let image {
                 try await actor.playSubmission(
-                    image, target: target, lineHalfThickness: lineHalfThickness)
+                    image, target: target,
+                    lineHalfThickness: lineHalfThickness,
+                    cellHalfHeight: cellHalfHeight)
             } else {
                 try await actor.start(
-                    target: target, lineHalfThickness: lineHalfThickness)
+                    target: target,
+                    lineHalfThickness: lineHalfThickness,
+                    cellHalfHeight: cellHalfHeight)
             }
         } catch {
             print("rate: indicator failed: \(error.localizedDescription)")

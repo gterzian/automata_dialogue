@@ -6,11 +6,19 @@ import Foundation
 /// one-cell-per-element floor the fit reduces a wider block of the history per
 /// cell, so the whole growth stays in view at decreasing resolution.
 public enum RevealCamera {
-    /// The zoom that shows `steps + 1` rows in one branch. Never zooms in past
-    /// 1×; below the display floor the value only drives the sampling stride.
+    /// The zoom the reveal opens at: one display cell is this many times the
+    /// window's base cell, so the run starts as a close-up of the seed and the
+    /// pull-back carries it out to the branches' own scale. It is the closest
+    /// zoom a run may ask for (`ViewportGeometry.maximumZoom`), one cell
+    /// covering eight base cells.
+    public static let startZoom = ViewportGeometry.maximumZoom
+
+    /// The zoom that shows `steps + 1` rows in one branch, never past the
+    /// close-up the reveal opens at. Below the display floor the value only
+    /// drives the sampling stride.
     public static func zoom(steps: Int, branchRows: Int) -> Double {
-        guard branchRows > 0 else { return 1.0 }
-        return min(1.0, Double(branchRows) / Double(max(1, steps + 1)))
+        guard branchRows > 0 else { return startZoom }
+        return min(startZoom, Double(branchRows) / Double(max(1, steps + 1)))
     }
 }
 

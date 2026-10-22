@@ -20,25 +20,35 @@ public actor IndicatorActor {
 
     /// Plays the submission beat for `image` on `target`, then the intro. The
     /// context, renderer, and target are reused across runs, so the pipelines
-    /// compile once. `lineHalfThickness` is the automaton horizon row's
-    /// half-height in screen-height units.
+    /// compile once. `lineHalfThickness` is the half-height of the row the
+    /// cycle ends on in screen-height units, which the dot and the resting
+    /// hairline are scaled from; `cellHalfHeight` is half the height of the
+    /// cell the retraction lands on.
     public func playSubmission(
         _ image: RasterImage,
         target: any RenderTarget,
-        lineHalfThickness: Float
+        lineHalfThickness: Float,
+        cellHalfHeight: Float
     ) throws {
         let indicator = try ensureIndicator(target: target)
-        try indicator.playSubmission(image, lineHalfThickness: lineHalfThickness)
+        try indicator.playSubmission(
+            image, lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
     }
 
     /// Starts the intro on `target` without a submission beat, creating the GPU
     /// context on first use. Reusing the same target only restarts its frame
     /// loop, so the pipeline is not recompiled for every run.
-    /// `lineHalfThickness` is the automaton horizon row's half-height in
-    /// screen-height units.
-    public func start(target: any RenderTarget, lineHalfThickness: Float) throws {
+    /// `lineHalfThickness` is the half-height of the row the cycle ends on in
+    /// screen-height units; `cellHalfHeight` is half the height of the cell the
+    /// retraction lands on.
+    public func start(
+        target: any RenderTarget,
+        lineHalfThickness: Float,
+        cellHalfHeight: Float
+    ) throws {
         let indicator = try ensureIndicator(target: target)
-        indicator.start(lineHalfThickness: lineHalfThickness)
+        indicator.start(
+            lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
     }
 
     private func ensureIndicator(target: any RenderTarget) throws -> WorkingIndicator {

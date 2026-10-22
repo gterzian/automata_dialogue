@@ -121,13 +121,13 @@ final class CollapseTests: XCTestCase {
             let frame = CollapseTimeline.frame(time: time)
             try renderer.render(
                 into: texture, frame: frame, white: palette[0], ink: palette[1],
-                lineHalfThickness: 0.0035)
+                lineHalfThickness: 0.0035, cellHalfHeight: 0.014)
         }
         for settle in [Float(0), 0.5, 1] {
             let frame = CollapseTimeline.rested(settle: settle, variation: .standard)
             try renderer.render(
                 into: texture, frame: frame, white: palette[0], ink: palette[1],
-                lineHalfThickness: 0.0035)
+                lineHalfThickness: 0.0035, cellHalfHeight: 0.014)
         }
     }
 
@@ -209,7 +209,7 @@ final class CollapseTests: XCTestCase {
         let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
         let target = OffscreenTarget(textures: [texture])
         let indicator = try WorkingIndicator(target: target, context: context)
-        indicator.start(lineHalfThickness: 0.0035)
+        indicator.start(lineHalfThickness: 0.0035, cellHalfHeight: 0.014)
         XCTAssertTrue(indicator.target === target)
         target.tick(0)
         XCTAssertEqual(target.presentCount, 1)

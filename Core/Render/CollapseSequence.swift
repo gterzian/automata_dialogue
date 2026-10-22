@@ -237,6 +237,7 @@ final class CollapseRenderer {
         var haloScale: Float
         var stretch: Float
         var lineHalfThickness: Float
+        var cellHalfHeight: Float
         var settle: Float
         var grow: SIMD4<Float>
         var white: SIMD4<Float>
@@ -287,19 +288,21 @@ final class CollapseRenderer {
 
     /// Renders one frame and blocks until the GPU finishes, so the surface is
     /// complete (tests read the same texture back) and the next frame can
-    /// safely rewrite the shared buffer. `lineHalfThickness` is the horizon
-    /// row's half-height in screen-height units: the line the cycle ends on and
-    /// the dot's radius at that rest frame.
+    /// safely rewrite the shared buffer. `lineHalfThickness` is the half-height
+    /// of the row the cycle ends on, which the opening dot and the resting
+    /// hairline are scaled from, and `cellHalfHeight` is half the height of one
+    /// cell of the grid the reveal opens on, which the retraction lands on.
     func render(
         into texture: MTLTexture,
         frame: CollapseTimeline.Frame,
         white: PaletteColor,
         ink: PaletteColor,
-        lineHalfThickness: Float
+        lineHalfThickness: Float,
+        cellHalfHeight: Float
     ) throws {
         write(
             frame: frame, into: texture, white: white, ink: ink,
-            lineHalfThickness: lineHalfThickness)
+            lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
 
         try submitter.submit { command in
             let pass = MTL4RenderPassDescriptor()
@@ -329,7 +332,8 @@ final class CollapseRenderer {
         into texture: MTLTexture,
         white: PaletteColor,
         ink: PaletteColor,
-        lineHalfThickness: Float
+        lineHalfThickness: Float,
+        cellHalfHeight: Float
     ) {
         var uniforms = Uniforms(
             time: frame.time,
@@ -348,6 +352,7 @@ final class CollapseRenderer {
             haloScale: frame.haloScale,
             stretch: frame.stretch,
             lineHalfThickness: lineHalfThickness,
+            cellHalfHeight: cellHalfHeight,
             settle: frame.settle,
             grow: frame.grow,
             white: white.simd,

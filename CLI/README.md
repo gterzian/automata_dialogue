@@ -35,8 +35,9 @@
   line. A `.rand` entry redraws from a fresh row each time. The reveal then
   grows the chosen entry as two mirrored branches from that line: one branch
   grows upward and the other downward from the same horizon row. Both branches
-  advance together, and the camera zooms out continuously at the branches'
-  growth rate so the whole growth stays in view.
+  advance together. The reveal opens on a close-up of the seed, where one cell
+  is eight of the window's base cells, and the camera zooms out from there at
+  the branches' growth rate so the whole growth stays in view.
   At the display floor one cell is one element of the surface; past it the
   camera keeps pulling back by averaging a wider block of the stored history
   into each cell and drawing that average as tone, so the seed stays on the

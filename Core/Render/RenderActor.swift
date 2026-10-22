@@ -68,6 +68,12 @@ public actor RenderActor {
         )
         self.simulation = simulation
         self.reveal = reveal
+        // The seed frame is already the close-up the camera opens at, so the
+        // first tick continues from it instead of jumping scale.
+        if let reveal {
+            simulation.setZoom(
+                RevealCamera.zoom(steps: 0, branchRows: reveal.branchRows))
+        }
         return try deliver(simulation, chunk: 0)
     }
 
@@ -113,6 +119,11 @@ public actor RenderActor {
         guard let simulation else { return }
         do {
             try simulation.reseed(seed: UInt64.random(in: .min ... .max))
+            // A restarted run opens where a fresh one does.
+            if let reveal {
+                simulation.setZoom(
+                    RevealCamera.zoom(steps: 0, branchRows: reveal.branchRows))
+            }
             _ = try deliver(simulation, chunk: 0)
         } catch {
             lastError = error.localizedDescription

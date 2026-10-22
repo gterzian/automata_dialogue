@@ -81,15 +81,17 @@ public actor AgentEngine: AgentRunning {
     /// id, or one the harness excluded). The session still holds the image, so
     /// the retry sees the same input.
     private static let repairPrompt = """
-    Your previous answer did not name a usable id. Reply with exactly two lines and nothing else:
-    id: <one id from the list, not one of the recently used ids>
+    Your previous answer did not name a usable id. Reply with exactly three lines and nothing else:
+    class: <one of repetition, nesting, randomness, complexity>
+    id: <one id from the list whose class is the class on the first line, not one of the recently used ids>
     reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>
     """
 
     /// Keeps the already chosen id and asks only for the sentence the answer
     /// format requires.
     private static let reasonRepairPrompt = """
-    Your previous answer's reason was not a full sentence. Reply with exactly two lines and nothing else, keeping the same id:
+    Your previous answer's reason was not a full sentence. Reply with exactly three lines and nothing else, keeping the same id:
+    class: <the class printed after that id in the list>
     id: <the id from your previous answer>
     reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>
     """
