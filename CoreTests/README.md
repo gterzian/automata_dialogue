@@ -24,7 +24,9 @@ What must be covered:
   frames, and advances on each frame its target delivers; the pacing math;
   (Metal 4 only) the GPU
   seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
-  resize, and the twin run's mirrored branches, step count, reported horizon
+  resize, a display cell below the floor reducing its block rather than
+  sampling one cell of it, and the twin run's mirrored branches, step count,
+  reported horizon
   row, and seed row staying on the horizon past the display floor.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
   the centred or rightmost start origin, the visible span under zoom, the twin

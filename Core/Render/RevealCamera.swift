@@ -3,8 +3,8 @@ import Foundation
 /// The reveal's pull-back. The camera zooms continuously so the rows a branch
 /// has grown always fill its half of the window: as the step count rises, the
 /// zoom falls at the same rate. It never stops: past the display's
-/// one-cell-per-element floor the fit samples the history at a coarser stride,
-/// so the whole growth stays in view at decreasing resolution.
+/// one-cell-per-element floor the fit reduces a wider block of the history per
+/// cell, so the whole growth stays in view at decreasing resolution.
 public enum RevealCamera {
     /// The zoom that shows `steps + 1` rows in one branch. Never zooms in past
     /// 1×; below the display floor the value only drives the sampling stride.

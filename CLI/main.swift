@@ -82,8 +82,8 @@ func printUsage() -> Never {
         options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
         The window opens on a black drawing page. Left and right arrows move
         through the carousel: the drawing page, then every image, then back to
-        the drawing page. Draw by moving the pointer, so a trackpad finger
-        draws without pressing the pad; Return submits the drawing or
+        the drawing page. Draw by pressing the pointer down on the page and
+        dragging, from the press to the release; Return submits the drawing or
         image as an image, plays the submission beat, then shows the chosen
         automaton's reveal until Return advances to the next page. Leaving the
         drawing page clears it. Closing the window stops the run.

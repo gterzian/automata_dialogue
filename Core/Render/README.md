@@ -48,10 +48,12 @@ One frame is a batch of dispatches plus a render pass, with explicit barriers.
    `bump_head`): each step reads the row at a GPU-side `head` counter and writes
    the next row into a history ring that grows to hold every row the run has
    produced; `injection` overwrites the centre cell after each step.
-3. **Clip to the window** (`fit`): each display cell samples a source row and
-   column. At a sampling stride of 1 that is one board cell per display cell;
-   rows the run has not reached stay background, so a short board grows from
-   the top. `fit_twin`
+3. **Clip to the window** (`fit`): each display cell covers the block of source
+   cells between its own sample position and the next cell's, so the blocks tile
+   the board. At a sampling stride of 1 a block is one cell; past the display
+   floor a block covers more, and the cell takes the block's most common value.
+   Rows the run has not reached and columns off the board count as background,
+   so a short board grows from the top. `fit_twin`
    shares one horizon row between an upper branch growing up and a lower branch
    growing down: the seed row sits on the horizon and, as the history fills the
    branch, the newest row sits on its outer edge, so the pair grows away from
@@ -59,7 +61,7 @@ One frame is a batch of dispatches plus a render pass, with explicit barriers.
    written each frame because nothing clears the grid between frames. Zoom
    changes `displayCols`/`displayRows` up to the display floor, where one cell
    is one element of the surface. Past the floor the grid stays there and the
-   stride grows, so the fit samples the whole history (see
+   stride grows, so the fit reduces the whole history into the grid (see
    `ViewportGeometry.sourceStride`).
 4. **Draw** (`CellGridRenderer`): `runs` compacts each same-colour non-background
    run into a `Span`, `encode_draw` writes the indirect draw arguments on the
@@ -113,9 +115,11 @@ argument buffer already carries.
 ## Submission beat
 
 `SubmissionTimeline` drives the two-second beat between Return and the intro:
-the input doubles into two full copies that part vertically, leaving the page
-between them, then the doubled screen collapses for half a second onto the dot
-the intro starts from. `SubmissionRenderer` samples a texture uploaded from the
+the input separates into a double exposure — two copies a fraction of the
+image's height apart, so it reads as one image with a ghost — then the doubled
+screen collapses for half a second onto the dot the intro starts from, bringing
+the two copies back together as it shrinks them. `SubmissionRenderer` samples a
+texture uploaded from the
 input's `RasterImage`; `WorkingIndicator.playSubmission` swaps from the beat to
 `CollapseTimeline` at `ReviewIntro.openingTime`, drawing both with the same
 `CollapseVariation` so the dot's radius and colour match. The model runs
@@ -204,10 +208,11 @@ buffer, so a frame must finish before the next one is written.
 - **Viewport geometry** (`ViewportGeometry`, `DisplayLimits`) — the cell size,
   `cols`/`rows` for a window, the ten-window board width, the centred or
   right-pinned start origin, the twin grid's shared horizon row, the zoom
-  floor the display can show, and the sampling stride past it.
+  floor the display can show, the sampling stride past it, and the cell budget
+  that floor may allocate.
 - **Reveal camera** (`RevealCamera`) — the continuous pull-back: the zoom that
   keeps the rows a branch has grown filling its half, never clamped; the fit's
-  sampling stride carries the zoom below the display floor.
+  block reduction carries the zoom below the display floor.
 
 ## Metal 4 gotchas
 
@@ -261,16 +266,29 @@ buffer, so a frame must finish before the next one is written.
   ten-window board the whole board fits and further zoom-out shows background
   on each side; the pattern then shrinks into a centred strip. A longer reveal
   would need a wider board, which grows the history memory with it.
-- **The below-floor fit point-samples.** Each display cell takes the source
-  cell at its centre, so a periodic pattern can alias as the stride changes;
-  a block filter would need a reduction over the stride window.
+- **The below-floor fit reduces a block by sampling it.** A display cell takes
+  the most common value of the block of source cells it covers, sampled at up to
+  three stratified positions per axis, so a block larger than 3 × 3 is estimated
+  rather than counted. A feature that covers less than half its block reduces to
+  background — which is why the twin layout's horizon row stays an exact sample:
+  the seed row is the axis the branches mirror around and the frame the intro
+  hands over. Counting the whole block instead would need a summed-area table
+  over the history. The blocks still re-round every frame as the stride moves,
+  so a pattern below the floor re-lays out rather than blurring: it can crawl,
+  just without duplicated rows and drifting edges. The fit outputs palette
+  indices, so no amount of reduction can soften an edge below one display cell.
+  A filtered minification would need colour in the grid (or a palette-aware
+  blend) and a textured draw, which gives up the span draw.
 - **The reveal's floor was measured at 0.25× on one machine.** A full frame at
   the floor grid (2880 × 1600 from a 720 × 400 base: one step, `fit` over
   4.6 M cells, span compaction, draw, GPU wait) takes 2.7 ms, and a pre-fitted
   grid draws in 1.6 ms. The surface is allocated at the floor size from the
   first frame, so the clear and draw cost is the floor cost even at 1×; only
-  the grid's fit and compaction are smaller earlier. The span buffer's worst
-  case is 16 B per cell (~74 MB). Re-measure on the target display; if 60 Hz
+  the grid's fit and compaction are smaller earlier. The span buffer is 16 B per
+  cell, so the 8 M-cell cap is 128 MB at worst; the buffer is sized to the grid
+  the run actually reaches. The 2.7 ms figure is for one read per cell; below
+  the floor the fit reads up to nine, so the fit's share grows once the stride
+  passes 3. Re-measure on the target display; if 60 Hz
   does not hold there, lower `ViewportGeometry.maximumGridCells` or raise the
   floor rather than guessing.
 - **The collapse intro has a fixed length.** It does not track the model's
@@ -294,7 +312,9 @@ buffer, so a frame must finish before the next one is written.
 When `MTLCreateSystemDefaultDevice()` reports `.metal4`, `MetalTests` checks the
 `seed_row` kernel against every `BoardStart` shape, that a run grows from the
 seed, that a followed pattern scrolls the window at the boundary, that zoom
-resizes the grid without restarting the run, and that the twin layout grows
+resizes the grid without restarting the run, that a display cell below the
+floor reduces its block rather than sampling one cell of it, and that the twin
+layout grows
 both branches away from the horizon, mirrors them cell for cell, refits both
 on a zoom, and keeps the seed row on the horizon once the run outgrows the
 display floor (including across a history-ring growth). `RenderActorTests`

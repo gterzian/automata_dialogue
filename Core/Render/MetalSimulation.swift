@@ -8,7 +8,8 @@ import Metal
 ///
 /// The run is a window over a board much wider than the display: the history
 /// ring grows to hold every source row the run has produced, and `fit` maps a
-/// display row to a source row at a sampling stride that grows past the
+/// display cell to the block of source cells it covers, at a sampling stride
+/// that grows past the
 /// display floor, so a short board grows into the grid and the whole history
 /// stays visible without an end. A twin run maps one history into two mirrored
 /// branches around a shared horizon row instead. `setZoom` resizes the display
@@ -24,6 +25,8 @@ public final class MetalSimulation {
         var injectSeed: UInt64
     }
 
+    /// Mirrors `ViewParams` in `ShaderSource.simulation`; a field added here has
+    /// to be added there first, and the buffer is sized from this type.
     private struct ViewParams {
         var boardWidth: UInt32
         var displayCols: UInt32
@@ -33,6 +36,8 @@ public final class MetalSimulation {
         var topRows: UInt32
         var centreColumn: Float
         var sourceStride: Float
+        /// Palette entries a cell can hold, which bounds the fit's reduction.
+        var colors: UInt32
     }
 
     private struct SeedParams {
@@ -215,7 +220,8 @@ public final class MetalSimulation {
             currentStep: 0,
             topRows: UInt32(halfRows),
             centreColumn: Float(centreColumn),
-            sourceStride: 1)
+            sourceStride: 1,
+            colors: UInt32(spec.stateCount))
 
         try reseed()
     }
@@ -230,9 +236,9 @@ public final class MetalSimulation {
 
     /// Resizes the display grid for `value`, keeping the board column at the
     /// display's centre fixed. The grid is clamped to this run's display floor;
-    /// a smaller `value` keeps the grid there and the fit samples the history at
-    /// a coarser stride instead. The caller re-fits (`renderGPU(chunk: 0)`) to
-    /// show the new view.
+    /// a smaller `value` keeps the grid there and the fit reduces a wider block
+    /// of the history per cell instead. The caller re-fits (`renderGPU(chunk: 0)`)
+    /// to show the new view.
     public func setZoom(_ value: Double) {
         let clamped = min(max(value, Double.leastNormalMagnitude), ViewportGeometry.maximumZoom)
         zoom = clamped

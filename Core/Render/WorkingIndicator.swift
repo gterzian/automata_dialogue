@@ -3,13 +3,14 @@ import Metal
 import QuartzCore
 
 /// Presents the submission beat and the intro the review window shows while the
-/// model's turn is prepared. The submission doubles the input image into two
-/// copies that part vertically, then collapses them onto the intro's opening
-/// dot; the intro then runs its one cycle and rests on the horizon line the
-/// reveal's two branches grow from. The target freezes there if the model
-/// outlasts the intro, so the surface keeps the last presented frame and nothing
-/// is drawn. Both animations run at a reduced rate on a reduced surface because
-/// they share the GPU with inference.
+/// model's turn is prepared. The submission separates the input image into a
+/// double exposure — two copies a fraction of its height apart — then collapses
+/// them onto the intro's opening dot, rejoining the copies as the image shrinks;
+/// the intro then runs its one cycle and rests on the
+/// horizon line the reveal's two branches grow from. The target freezes there if
+/// the model outlasts the intro, so the surface keeps the last presented frame
+/// and nothing is drawn. Both animations run at a reduced rate on a reduced
+/// surface because they share the GPU with inference.
 ///
 /// Like every presenter, it is confined to a render actor's thread and shared
 /// with the target's frame callback, so it is `@unchecked Sendable` and

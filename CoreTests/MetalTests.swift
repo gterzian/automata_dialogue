@@ -134,6 +134,34 @@ final class MetalTests: XCTestCase {
         XCTAssertEqual(simulation.rows, 16)
     }
 
+    /// Below the display floor a display cell reduces the block of source cells it
+    /// covers instead of sampling one of them: rule 90 turns a full seed row into
+    /// an empty one, so at a stride of two every block is half ink and reduces to
+    /// background, where a single sample of the same block would show the ink.
+    func testFitReducesTheBlockBelowTheFloor() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 16
+        let rows = 10
+        let board = Board(width: 64, height: 16, start: .block([1]))
+        let simulation = try MetalSimulation(
+            spec: spec, cols: cols, rows: rows, context: context, board: board)
+
+        let seed = values(try simulation.renderGPU(chunk: 0))
+        XCTAssertEqual(
+            rowCount(seed, row: 0, cols: cols), cols,
+            "one source cell per display cell shows the full seed row")
+
+        // Eighteen rows over a nine-row span is a sampling stride of exactly two.
+        _ = try simulation.renderGPU(chunk: 18)
+        XCTAssertEqual(simulation.steppedRows, 18)
+        let reduced = values(try simulation.renderGPU(chunk: 0))
+        XCTAssertEqual(
+            reduced.filter { $0 != 0 }.count, 0,
+            "each block is one ink row and one background row, so it reduces to background")
+    }
+
     /// The twin layout shares one horizon row and grows away from it in both
     /// directions. Each branch pins its newest row to its outer edge, and the
     /// pair is an exact vertical mirror around the horizon.

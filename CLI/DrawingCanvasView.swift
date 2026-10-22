@@ -5,9 +5,10 @@ import Core
 /// normalized top-left coordinates; any other source can fill the same value,
 /// so the export and submission paths do not depend on this view.
 ///
-/// A tracking area turns bare pointer movement into strokes, so a trackpad
-/// finger draws without pressing the pad. A click-drag draws the same way and
-/// does not start a second stroke.
+/// A press starts a stroke, the drag extends it, and the release ends it, so
+/// moving the pointer over the page without pressing draws nothing. Moving past
+/// the page's edge ends the stroke there, so a drag that travels off the page
+/// does not smear ink along the edge.
 @MainActor
 final class DrawingCanvasView: NSView {
     private let pageColor = Palette.standard(stateCount: 2)[1]
@@ -44,20 +45,13 @@ final class DrawingCanvasView: NSView {
         needsDisplay = true
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        // The tracking area asks for mouse-moved events; the window has to
-        // accept them before AppKit delivers any.
-        window?.acceptsMouseMovedEvents = true
-    }
-
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas { removeTrackingArea(area) }
         addTrackingArea(
             NSTrackingArea(
                 rect: .zero,
-                options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                 owner: self))
     }
 
@@ -98,12 +92,10 @@ final class DrawingCanvasView: NSView {
         }
     }
 
+    /// The press is the pen down. It starts a stroke where the pointer is, so a
+    /// press elsewhere does not connect to the previous stroke.
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        extendStroke(with: event)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
         extendStroke(with: event)
     }
 
@@ -111,12 +103,13 @@ final class DrawingCanvasView: NSView {
         extendStroke(with: event)
     }
 
-    /// A press-drag-release is one stroke. Movement after the release starts a
-    /// new one, so a drag that left the page does not draw a line back onto it.
+    /// The release is the pen up.
     override func mouseUp(with event: NSEvent) {
         endStroke()
     }
 
+    /// Leaving the page lifts the pen, and re-entering under a held button
+    /// starts a new stroke instead of a line back to the exit point.
     override func mouseExited(with event: NSEvent) {
         endStroke()
     }

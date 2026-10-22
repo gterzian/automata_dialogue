@@ -3,12 +3,13 @@ import Metal
 
 /// Public timing for the beat between Return on an input page and the intro.
 public enum SubmissionIntro {
-    /// Seconds the submitted image spends parting into two copies. The two
-    /// clones move in opposite vertical directions and the page shows between
-    /// them.
+    /// Seconds the submitted image spends separating into its double exposure.
+    /// The two copies move in opposite vertical directions, so the beat reads as
+    /// one image with a ghost.
     public static let doublingDuration: TimeInterval = 2.0
 
-    /// Seconds the doubled screen takes to fall into the intro's opening dot.
+    /// Seconds the doubled screen takes to fall into the intro's opening dot,
+    /// bringing the two copies back together as it shrinks them.
     public static let collapseDuration: TimeInterval = 0.5
 
     public static var duration: TimeInterval { doublingDuration + collapseDuration }
@@ -22,9 +23,11 @@ enum SubmissionTimeline {
 
     struct Frame {
         var time: Float
-        /// 0 keeps the two copies on top of each other; 1 has fully parted them.
+        /// 0 keeps the two copies on top of each other; 1 has reached the double
+        /// exposure's full offset.
         var doubling: Float
-        /// 0 keeps the parted screen; 1 has collapsed it onto the opening dot.
+        /// 0 keeps the doubled screen; 1 has rejoined the copies and collapsed
+        /// them onto the opening dot.
         var collapse: Float
     }
 

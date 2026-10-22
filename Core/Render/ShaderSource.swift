@@ -37,6 +37,7 @@ public enum ShaderSource {
         uint topRows;        // twin layout: rows from the horizon to an outer edge
         float centreColumn;  // board column at the display's centre
         float sourceStride;  // source cells per display cell in each axis
+        uint colors;         // palette entries the cells can hold
     };
 
     // The seed row. `mode` selects the `BoardStart` shape: 0 center cell,
@@ -181,14 +182,59 @@ public enum ShaderSource {
         history[gid] = value;
     }
 
-    // A display cell samples a source cell at `sourceStride`. At stride 1 the
-    // mapping is one-to-one; past the display floor the stride grows and the
-    // whole history is kept in view at decreasing resolution. Rows the run has
-    // not reached stay background, so a short board grows into the grid.
-    static uint sample_row(constant ViewParams& p, uint local) {
-        return uint(round(float(local) * p.sourceStride));
+    // A display cell covers the block of source cells between its own sample
+    // position and the next cell's, so the blocks tile the board with no gap and
+    // no overlap. At stride 1 a block is one cell and the mapping is exact; past
+    // the display floor the stride grows and each block covers more, so the fit
+    // reduces the block to its most common value. A single sample per block
+    // instead drops and duplicates rows and columns, makes a periodic pattern
+    // beat against the sampling lattice, and changes the angle of a diagonal
+    // edge. Rows the run has not reached and columns off the board count as
+    // background, so a short board grows into the grid.
+    static float column_origin(constant ViewParams& p) {
+        return p.centreColumn - float(p.displayCols) * 0.5f * p.sourceStride;
     }
 
+    static int block_start(float origin, int index, float stride) {
+        return int(round(origin + float(index) * stride));
+    }
+
+    // At most three samples per axis, so a long run's stride does not turn the
+    // fit into a loop over the whole block: a one- or two-cell block is sampled
+    // exactly, a larger one at the centre of evenly spread sub-blocks. Ties go to
+    // the lower index, which keeps a block that is half background background.
+    static uchar block_value(device const uchar* history, constant ViewParams& p,
+                             int firstRow, int rows, int firstColumn, int columns) {
+        if (rows <= 0 || columns <= 0) { return 0; }
+        // The catalog's automata have two or three states; a palette index above
+        // the last one cannot occur.
+        uint values = min(p.colors, 4u);
+        uint rowTaps = uint(min(rows, 3));
+        uint columnTaps = uint(min(columns, 3));
+        uint counts[4] = {0, 0, 0, 0};
+        for (uint r = 0; r < rowTaps; ++r) {
+            int row = firstRow + int((float(r) + 0.5f) * float(rows) / float(rowTaps));
+            for (uint c = 0; c < columnTaps; ++c) {
+                int column = firstColumn
+                    + int((float(c) + 0.5f) * float(columns) / float(columnTaps));
+                uchar value = 0;
+                if (row >= 0 && row <= int(p.currentStep)
+                    && column >= 0 && column < int(p.boardWidth)) {
+                    value = history[uint(row) % p.capacity * p.boardWidth + uint(column)];
+                }
+                counts[min(uint(value), values - 1)] += 1;
+            }
+        }
+        uint best = 0;
+        for (uint v = 1; v < values; ++v) {
+            if (counts[v] > counts[best]) { best = v; }
+        }
+        return uchar(best);
+    }
+
+    // The board column display cell `x` samples when one cell is one block. The
+    // twin layout's horizon row uses this lattice, so the seed row stays exact
+    // at every stride.
     static bool sample_column(constant ViewParams& p, uint x, thread uint& column) {
         float source = p.centreColumn
             + (float(x) - float(p.displayCols) * 0.5f) * p.sourceStride;
@@ -196,18 +242,20 @@ public enum ShaderSource {
         column = uint(round(source));
         return column < p.boardWidth;
     }
+
     kernel void fit(device const uchar* history [[buffer(0)]],
                     device uchar* colorGrid [[buffer(1)]],
                     constant ViewParams& p [[buffer(2)]],
                     uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
-        uint target = sample_row(p, gid.y);
-        uint index = 0;
-        uchar value = 0;
-        if (target <= p.currentStep && sample_column(p, gid.x, index)) {
-            value = history[(target % p.capacity) * p.boardWidth + index];
-        }
-        colorGrid[gid.y * p.displayCols + gid.x] = value;
+        float origin = column_origin(p);
+        int firstRow = block_start(0.0f, int(gid.y), p.sourceStride);
+        int firstColumn = block_start(origin, int(gid.x), p.sourceStride);
+        colorGrid[gid.y * p.displayCols + gid.x] = block_value(
+            history, p, firstRow,
+            block_start(0.0f, int(gid.y) + 1, p.sourceStride) - firstRow,
+            firstColumn,
+            block_start(origin, int(gid.x) + 1, p.sourceStride) - firstColumn);
     }
 
     // The reveal's mirrored pair: one shared horizon row at the centre, with
@@ -223,13 +271,24 @@ public enum ShaderSource {
         if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
         uint halfRows = p.topRows;
         uint local = gid.y <= halfRows ? (halfRows - gid.y) : (gid.y - halfRows);
-        uint target = sample_row(p, local);
-        uint index = 0;
-        uchar value = 0;
-        if (target <= p.currentStep && sample_column(p, gid.x, index)) {
-            value = history[(target % p.capacity) * p.boardWidth + index];
+        if (local == 0) {
+            // The horizon is the axis both branches mirror around and the frame
+            // the intro hands over, so it keeps the seed row exactly rather than
+            // reducing its block to background.
+            uint column = 0;
+            uchar value = 0;
+            if (sample_column(p, gid.x, column)) { value = history[column]; }
+            colorGrid[gid.y * p.displayCols + gid.x] = value;
+            return;
         }
-        colorGrid[gid.y * p.displayCols + gid.x] = value;
+        float origin = column_origin(p);
+        int firstRow = block_start(0.0f, int(local), p.sourceStride);
+        int firstColumn = block_start(origin, int(gid.x), p.sourceStride);
+        colorGrid[gid.y * p.displayCols + gid.x] = block_value(
+            history, p, firstRow,
+            block_start(0.0f, int(local) + 1, p.sourceStride) - firstRow,
+            firstColumn,
+            block_start(origin, int(gid.x) + 1, p.sourceStride) - firstColumn);
     }
     """
 
@@ -322,8 +381,9 @@ public enum ShaderSource {
     """
 
     /// The submission beat between Return and the intro: the submitted image
-    /// doubles into two copies that part vertically, then the doubled screen
-    /// falls into the intro's opening dot. `SubmissionTimeline` owns its timing.
+    /// separates into a double exposure — two copies a fraction of the image's
+    /// height apart — then the doubled screen falls into the intro's opening
+    /// dot. `SubmissionTimeline` owns its timing.
     public static let submission = """
     #include <metal_stdlib>
     using namespace metal;
@@ -379,10 +439,12 @@ public enum ShaderSource {
         }
         float2 origin = (1.0 - fit) * 0.5;
 
-        // The whole screen doubles: two copies of the image part vertically,
-        // leaving the page between them. Both are sampled at the same source
-        // point when the doubling is zero, so the first frame is the image.
-        float parting = 0.62 * u.doubling;
+        // A double exposure rather than two images leaving the frame: the copies
+        // separate by a fraction of the image's own height, then return to zero
+        // as the doubled screen collapses, so they merge back together on the way
+        // into the dot. Both are sampled at the same source point when the offset
+        // is zero, so the first frame is the image and the last is the dot.
+        float parting = 0.2 * fit.y * u.doubling * (1.0 - u.collapse);
 
         // The same point pulled toward the centre shrinks the doubled screen
         // into the dot. At collapse 0 it is p itself, so the phases join.

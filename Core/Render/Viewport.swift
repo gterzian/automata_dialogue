@@ -28,8 +28,13 @@ public enum ViewportGeometry {
     public static let maximumZoom = 4.0
 
     /// Largest display grid the reveal allocates. The layer's span buffer holds
-    /// one 16-byte span per cell, so this caps it at ~74 MB at the floor.
-    public static let maximumGridCells = 4_600_000
+    /// one 16-byte span per cell, so this caps it at ~128 MB. It has to cover the
+    /// largest screen-sized window at one cell per element (a 16-inch MacBook
+    /// Pro's window is ~7.5 M device pixels); a smaller budget makes the floor
+    /// cover more than one element per cell, and the layer then stretches the
+    /// grid over the window, which shows as every Nth row and column of the
+    /// pattern being one element wider.
+    public static let maximumGridCells = 8_000_000
 
     /// The widest zoom-out a display can show without drawing two cells into
     /// one element. The floor is the larger of the surface's one-to-one column

@@ -152,14 +152,15 @@ change, along with the affected tests, counts, and READMEs.
    submits it as an image. See `CLI/README.md` and `Core/Import/README.md`.
 2. **One review window.** The CLI's window shows the input carousel, the
    submission beat, the working indicator, then the chosen automaton, in a
-   single window with no split view. On submission the input doubles into two
-   clones that part vertically, then collapses onto the dot the collapse intro
-   starts from. The intro runs while the model works and ends on the horizon
+   single window with no split view. On submission the input separates into a
+   double exposure — two copies a fraction of its height apart — then collapses
+   onto the dot the collapse intro starts from, rejoining the copies as it
+   shrinks them. The intro runs while the model works and ends on the horizon
    line; if the model outlasts it, the window holds the line until the choice
    is known. The automaton is one mirrored pair: two branches grow away from
    that line, and a camera pulls back at the growth rate to keep the growth in
    view. Past the point where one cell is one display element the camera keeps
-   pulling back by sampling the history at a coarser stride, so the whole
+   pulling back by reducing a wider block of the history per cell, so the whole
    growth stays in view at decreasing resolution instead of sliding out through
    the horizon. The indicator runs at 30 fps on a reduced drawable so it does not
    compete with inference for the GPU. See `CLI/README.md`.
