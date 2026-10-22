@@ -1,54 +1,6 @@
 import Foundation
 import Metal
 
-/// A reusable per-frame command allocator and command buffer. `FrameSlotRing`
-/// rotates three of them so frame N+1/N+2 could be encoded while the GPU runs
-/// N. `MetalSimulation` waits after every commit today, so the rotation is
-/// structural until that wait is dropped (see `README.md`).
-@available(macOS 26.0, *)
-final class FrameSlot: @unchecked Sendable {
-    let allocator: any MTL4CommandAllocator
-    let command: any MTL4CommandBuffer
-    private let available = DispatchSemaphore(value: 1)
-
-    init(device: any MTLDevice, label: String) throws {
-        guard let allocator = device.makeCommandAllocator(),
-              let command = device.makeCommandBuffer() else {
-            throw GPUContext.GPUError.resource("frame slot \(label)")
-        }
-        self.allocator = allocator
-        self.command = command
-    }
-
-    /// Waits until the slot's previous frame has finished on the GPU.
-    func acquire() { available.wait() }
-
-    /// Returns the slot to the ring. Called when the GPU finishes the frame.
-    func release() { available.signal() }
-}
-
-@available(macOS 26.0, *)
-final class FrameSlotRing {
-    private let slots: [FrameSlot]
-    private var next = 0
-
-    init(device: any MTLDevice, count: Int = 3) throws {
-        var slots: [FrameSlot] = []
-        for index in 0..<max(1, count) {
-            slots.append(try FrameSlot(device: device, label: "\(index)"))
-        }
-        self.slots = slots
-    }
-
-    func borrow() -> (index: Int, slot: FrameSlot) {
-        let index = next
-        let slot = slots[index]
-        next = (next + 1) % slots.count
-        slot.acquire()
-        return (index, slot)
-    }
-}
-
 /// The GPU simulation core, sink-independent. It owns the history buffer, the
 /// GPU-side `head` counter, and the `seed`/`step`/`fit` kernels, and advances a
 /// caller-sized chunk of source rows so a caller can animate instead of running
@@ -151,7 +103,7 @@ public final class MetalSimulation {
     private var fitTable: any MTL4ArgumentTable
     private var seedTable: any MTL4ArgumentTable
     private let stepPipeline: any MTLComputePipelineState
-    private let ring: FrameSlotRing
+    private let submitter: FrameSubmitter
     /// Board column of the seed's leading edge in the follow direction. The
     /// viewport only scrolls once the growing edge reaches a viewport boundary,
     /// so the pattern is never pushed out of view.
@@ -237,7 +189,7 @@ public final class MetalSimulation {
         self.blockBuffer = blockBuffer
         self.headBuffer = headBuffer
         self.stepPipeline = pipeline
-        self.ring = try FrameSlotRing(device: device)
+        self.submitter = try FrameSubmitter(context: context)
 
         self.stepTable = try Self.makeTable(device: device, history: history, second: stepBuffer, third: headBuffer)
         self.bumpTable = try Self.makeTable(device: device, history: headBuffer, second: nil, third: nil)
@@ -383,21 +335,18 @@ public final class MetalSimulation {
         viewParams.topRows = UInt32(twinHalfRows)
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
 
-        let (_, slot) = ring.borrow()
-        slot.command.beginCommandBuffer(allocator: slot.allocator)
-        slot.command.useResidencySet(context.residency)
-        guard let encoder = slot.command.makeComputeCommandEncoder() else {
-            throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
+        try submitter.submit { command in
+            guard let encoder = command.makeComputeCommandEncoder() else {
+                throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
+            }
+            encoder.setArgumentTable(seedTable)
+            encoder.setComputePipelineState(context.seedPipeline)
+            encoder.dispatchThreads(
+                threadsPerGrid: MTLSize(width: width, height: 1, depth: 1),
+                threadsPerThreadgroup: MTLSize(width: min(64, width), height: 1, depth: 1)
+            )
+            encoder.endEncoding()
         }
-        encoder.setArgumentTable(seedTable)
-        encoder.setComputePipelineState(context.seedPipeline)
-        encoder.dispatchThreads(
-            threadsPerGrid: MTLSize(width: width, height: 1, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: min(64, width), height: 1, depth: 1)
-        )
-        encoder.endEncoding()
-        slot.command.endCommandBuffer()
-        try commit(slot)
 
         leadAnchor = Self.leadColumn(
             start: start, width: width, colors: spec.stateCount,
@@ -417,19 +366,15 @@ public final class MetalSimulation {
         let target = step + max(0, chunk)
         try growHistory(to: target + 1)
         follow(to: target)
-        let (_, slot) = ring.borrow()
 
-        slot.command.beginCommandBuffer(allocator: slot.allocator)
-        slot.command.useResidencySet(context.residency)
-        guard let encoder = slot.command.makeComputeCommandEncoder() else {
-            throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
+        try submitter.submit { command in
+            guard let encoder = command.makeComputeCommandEncoder() else {
+                throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
+            }
+            encodeSteps(from: step, to: target, encoder: encoder)
+            encodeFit(target: target, encoder: encoder)
+            encoder.endEncoding()
         }
-        encodeSteps(from: step, to: target, encoder: encoder)
-        encodeFit(target: target, encoder: encoder)
-        encoder.endEncoding()
-        slot.command.endCommandBuffer()
-
-        try commit(slot)
         step = target
     }
 
@@ -608,16 +553,6 @@ public final class MetalSimulation {
         stepParams.capacity = UInt32(clamping: grownCapacity)
         memcpy(stepBuffer.contents(), &stepParams, MemoryLayout<StepParams>.stride)
         viewParams.capacity = UInt32(clamping: grownCapacity)
-    }
-
-    private func commit(_ slot: FrameSlot) throws {
-        let done = DispatchSemaphore(value: 0)
-        let options = MTL4CommitOptions()
-        options.addFeedbackHandler { _ in done.signal() }
-        context.queue.commit([slot.command], options: options)
-        done.wait()
-        slot.allocator.reset()
-        slot.release()
     }
 
     private static func makeTable(

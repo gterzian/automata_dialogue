@@ -1,9 +1,9 @@
 import Foundation
 
-/// Owns pacing: the sink decides *how* a frame is delivered,
-/// the clock decides *when* the simulation advances. A `CAMetalDisplayLink`-
-/// backed clock runs the tick on the render actor's run loop, the same thread
-/// that owns the Metal objects, so presentation stays off the main thread.
+/// Owns pacing: the target decides *where* a frame is delivered, the clock
+/// decides *when* the simulation advances. A `CAMetalDisplayLink`-backed clock
+/// runs the tick on the render actor's run loop, the same thread that owns the
+/// Metal objects, so presentation stays off the main thread.
 public protocol FrameClock: AnyObject, Sendable {
     /// Begins delivering ticks. `tick` receives the seconds elapsed since the
     /// previous tick.

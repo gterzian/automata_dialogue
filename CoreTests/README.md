@@ -21,21 +21,26 @@ What must be covered:
   drawing is a uniform raster while a stroke reaches the raster; aspect-fit
   keeps a wide drawing's shape; a drawing normalizes to a square PNG.
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
-  frames, and advances on clock ticks; the pacing math; (Metal 4 only) the GPU
+  frames, and advances on each frame its target delivers; the pacing math;
+  (Metal 4 only) the GPU
   seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
   resize, and the twin run's mirrored branches, step count, reported horizon
   row, and seed row staying on the horizon past the display floor.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
   the centred or rightmost start origin, the visible span under zoom, the twin
-  grid's shared horizon row, the display-dependent zoom floor, and the sampling
+  grid's shared horizon row, the display-dependent zoom floor (from a display's
+  pixels and from a fixed-resolution surface's elements), and the sampling
   stride past it.
 - **Reveal camera** — `RevealCamera` starts at 1×, never zooms in, matches the
   branches' growth one for one, and keeps pulling back below the display floor.
-- **Layer sink** — (Metal 4 only) an offscreen render fills each span with its
-  palette colour, a renderer handles a grid resize, and the sink serializes
-  frames that share buffers.
+- **Cell grid sink** — (Metal 4 only) an offscreen render fills each span with
+  its palette colour, a renderer handles a grid resize, the sink draws into
+  whichever `RenderTarget` it is given and takes that target's limits and pixel
+  format, a layer target has no surface before its first display-link update,
+  and the sink serializes frames that share buffers.
 - **Collapse intro and submission beat** — the rest frame the reveal continues
   from, the opening frame the beat lands on, the beat's part-and-collapse
-  phases, the seed-cell retraction, that a seed reproduces one run, and that
-  the cycle, the beat, and the retraction reach their renderers. Appearance is
-  accepted by visual inspection.
+  phases, the seed-cell retraction, that a seed reproduces one run, that
+  the cycle, the beat, and the retraction reach their renderers, and that the
+  intro draws through the target it is given. Appearance is accepted by visual
+  inspection.

@@ -1,9 +1,39 @@
 # Core/Render
 
 Turns a `ProgramSpec` into a `GPUColorGrid` (one `UInt8` palette index per
-display cell, row-major) that stays on the GPU, and draws it. The whole run —
-seed, step, fit, span compaction, draw — is GPU-resident; the CPU only sets the
-run's parameters and never moves cell data.
+display cell, row-major) that stays on the GPU, and draws it into whatever
+surface the frame's **render target** offers. The whole run — seed, step, fit,
+span compaction, draw — is GPU-resident; the CPU only sets the run's parameters
+and never moves cell data.
+
+## Compute and render
+
+Every path here is the same three stages, and the third is the only one that
+knows where pixels go:
+
+1. **Compute** produces a device-independent value: `MetalSimulation` renders a
+   `GPUColorGrid` on the GPU, and `CollapseTimeline`/`SubmissionTimeline` produce
+   the intro's and the beat's frame values. Neither reads or writes a target, a
+   texture, or a pixel format.
+2. **Encode** turns that value into draw calls against a surface texture:
+   `CellGridRenderer`, `CollapseRenderer`, `SubmissionRenderer`. A renderer
+   takes a `MTLTexture` and encodes; it never acquires, presents, or configures
+   a surface.
+3. **Target** owns everything else about the destination: the pixel format the
+   pipelines compile against, the elements the surface resolves one-to-one
+   (`DisplayLimits`), when frames are due, the surface itself, and presenting it
+   (`RenderTarget`). `MetalLayerTarget` is one implementation; a panel with a
+   fixed element count is another, and no code above stage 3 changes.
+
+A new destination is a new `RenderTarget` and nothing else: no branch on the
+target's type above the seam, and no code between a value and the encode that
+reads it back to the CPU. When a target needs a different mapping (a panel whose
+elements are not a grid, say), that mapping is a kernel or a draw the target
+runs, so the compute stage stays on the GPU.
+
+`FrameSubmitter` is the one place that commits: frame slots, the residency set,
+the completion handler, and the wait. A renderer only encodes into the command
+buffer it hands over.
 
 ## Pipeline
 
@@ -28,10 +58,10 @@ One frame is a batch of dispatches plus a render pass, with explicit barriers.
    the horizon and mirrors exactly around it. Every grid cell is
    written each frame because nothing clears the grid between frames. Zoom
    changes `displayCols`/`displayRows` up to the display floor, where one cell
-   is one drawable element. Past the floor the grid stays there and the stride
-   grows, so the fit samples the whole history (see
+   is one element of the surface. Past the floor the grid stays there and the
+   stride grows, so the fit samples the whole history (see
    `ViewportGeometry.sourceStride`).
-4. **Draw** (`LayerRenderer`): `runs` compacts each same-colour non-background
+4. **Draw** (`CellGridRenderer`): `runs` compacts each same-colour non-background
    run into a `Span`, `encode_draw` writes the indirect draw arguments on the
    GPU, and the render pass clears to the background and draws one instanced
    quad per span. Draw cost follows the structure, not the grid area.
@@ -50,22 +80,23 @@ leaves the viewport fixed and lets the growth fill it.
 The reveal's camera is the only zoom. It lowers the zoom continuously so the
 rows each branch has grown always fill its half: `RevealCamera.zoom` returns
 `branchRows / (steps + 1)` and never stops. A zoom is a grid refit and a
-redraw of the same target, not a drawable resize: the drawable is allocated
-once at the floor's grid size, and the layer stretches the current grid over
-it. At the floor each cell is one drawable element; earlier the grid is
+redraw of the same surface, not a surface resize: the surface is allocated
+once at the floor's grid size, and the target stretches the current grid over
+it. At the floor each cell is one surface element; earlier the grid is
 smaller and each cell covers more than one, matching the compositor stretch
 the small grid gets. The
-floor comes from `DisplayLimits`: the widest grid the surface shows with one
-cell per element, bounded by `ViewportGeometry.maximumGridCells`. A Retina
-display reports its pixels (0.25× for a 1440 × 800 pt window); an LED surface
-reports its addressable elements instead. Beyond the floor the grid stays at
+floor comes from the target's `DisplayLimits`: the widest grid the surface
+shows with one cell per element, bounded by `ViewportGeometry.maximumGridCells`.
+A Retina display reports its pixels (0.25× for a 1440 × 800 pt window);
+`DisplayLimits.elements(columns:)` reports a fixed-resolution surface's
+elements instead. Beyond the floor the grid stays at
 the floor size and the fit samples the history at `sourceStride` — one display
 cell per `stride` source cells on each axis — so the seed row stays on the
 horizon, the newest row on the outer edges, and no row is dropped as the whole
 history shrinks into the window. The history ring grows with the run (see
 Remaining work); the color buffer is sized once for the floor grid. The
-layer's span buffer grows geometrically while the grid grows to the floor, so
-a run reallocates it a handful of times; a `LayerSink` is created per
+renderer's span buffer grows geometrically while the grid grows to the floor, so
+a run reallocates it a handful of times; a `CellGridSink` is created per
 presented automaton, so the peak is released on the next Return. The CLI
 exposes no manual zoom, pan, speed, or restart controls: the reveal is one
 fixed animation.
@@ -89,8 +120,8 @@ input's `RasterImage`; `WorkingIndicator.playSubmission` swaps from the beat to
 `CollapseTimeline` at `ReviewIntro.openingTime`, drawing both with the same
 `CollapseVariation` so the dot's radius and colour match. The model runs
 alongside both animations; `WorkingIndicator.start` plays the intro alone when
-no raster is available. Both use the indicator's drawable and clock, so there is
-no view swap between the beat and the intro.
+no raster is available. Both draw into the same target, so there is
+no surface swap between the beat and the intro.
 
 ## Collapse intro
 
@@ -98,11 +129,11 @@ no view swap between the beat and the intro.
 turn is prepared. The window starts the cycle at `ReviewIntro.openingTime`,
 where the opening dot is fully drawn and no layer has begun to grow, and freezes
 on its rest frame if the model outlasts it. `WorkingIndicator` freezes its
-display link with it, so the window keeps the last presented frame and stops
-drawing. The indicator runs at 30 fps on a reduced drawable so it shares the
-GPU with inference (see the window sequence in `AGENTS.md`). Its appearance is
-accepted by visual inspection; the timeline and the shader are the place to
-change it.
+target with it, so the surface keeps the last presented frame and nothing is
+drawn. The window gives the indicator's target 30 fps and a reduced surface so
+it shares the GPU with inference (see the window sequence in `AGENTS.md`). Its
+appearance is accepted by visual inspection; the timeline and the shader are
+the place to change it.
 
 `CollapseVariation.seeded` turns one 64-bit draw into the run's look, and
 `WorkingIndicator.playSubmission` and `start` draw a fresh one for every run.
@@ -121,9 +152,9 @@ actually begins with. Every other entry keeps the line, which is already its
 first row.
 
 The CPU recomputes the timeline uniforms each frame. The scene shader writes the
-drawable directly; there are no offscreen targets, upscale, or bloom passes. The
-renderer waits for the GPU before rewriting the shared uniform buffer, so a
-frame must finish before the next one is written.
+target's surface directly; there are no offscreen targets, upscale, or bloom
+passes. The renderer waits for the GPU before rewriting the shared uniform
+buffer, so a frame must finish before the next one is written.
 
 ## What exists
 
@@ -142,26 +173,34 @@ frame must finish before the next one is written.
   the frame's buffer only on the render actor. `RenderPacing` turns clock ticks
   into advances: `.fixed` for deterministic tests, `.timed` accumulates
   `Δ × stepsPerSecond` and clamps each tick; `setPacing` changes a driven run's
-  rate in flight. `RenderActor.makeLayerSink(layer:)` builds a layer sink on the
+  rate in flight. `RenderActor.makeCellGridSink(target:)` builds the sink on the
   actor's own `GPUContext`, so the sink and the simulation share one device,
   queue, and residency set.
-- **On-screen sink** (`DisplayLinkClock`, `LayerSink`, `LayerRenderer`) —
-  `DisplayLinkClock` conforms to `FrameClock` over `CAMetalDisplayLink`
-  (`preferredFrameLatency = 1`); `LayerSink` owns the layer and the clock, and
-  `LayerRenderer` turns a `GPUColorGrid` into a draw. The window refits every
+- **Render target** (`RenderTarget`, `RenderSurface`, `MetalLayerTarget`,
+  `DisplayLinkClock`) — the swap point between the render logic and the surface
+  it draws into. A target owns the pixel format the pipelines compile against,
+  the elements it resolves one-to-one (`DisplayLimits`, which the zoom floor is
+  computed from), the frame loop, the surface the frame draws into, and
+  presenting it. `MetalLayerTarget` is the on-screen implementation: its frame
+  loop is a `CAMetalDisplayLink` (`preferredFrameLatency = 1`) whose update's
+  drawable becomes the frame's surface, and presenting it shows the frame. A
+  surface backed by something other than a layer implements the same protocol
+  and nothing above it changes.
+- **Cell-grid sink** (`CellGridSink`, `CellGridRenderer`) — the sink draws each
+  delivered `GPUColorGrid` into the target's surface, and the renderer
+  compacts the grid into spans and draws them. The window refits every
   display row each frame, so every frame recompacts the whole grid.
 - **Submission beat** (`ShaderSource.submission`, `SubmissionRenderer`,
   `SubmissionTimeline`, `WorkingIndicator.playSubmission`) — the two-clone part
-  and the collapse into the intro's opening dot, on the indicator's drawable.
+  and the collapse into the intro's opening dot, on the indicator's target.
 - **Collapse intro** (`ShaderSource.collapse`, `CollapseRenderer`,
   `CollapseTimeline`, `CollapseVariation`, `WorkingIndicator`,
   `IndicatorActor`) — the one-cycle intro that runs while the model's turn is
   prepared and rests on the horizon line the review window shows until the
   choice lands, plus the retraction that joins it to a single-cell seed.
-  `IndicatorActor` owns the `GPUContext`, both renderers, and
-  `DisplayLinkClock` on its own `RenderExecutor`, the way `RenderActor` does for
-  a run, and reuses the indicator and layer across runs so the pipelines
-  compile once.
+  `IndicatorActor` owns the `GPUContext` on its own `RenderExecutor`, the way
+  `RenderActor` does for a run, and reuses the indicator and its target across
+  runs so the pipelines compile once.
 - **Viewport geometry** (`ViewportGeometry`, `DisplayLimits`) — the cell size,
   `cols`/`rows` for a window, the ten-window board width, the centred or
   right-pinned start origin, the twin grid's shared horizon row, the zoom
@@ -199,13 +238,14 @@ frame must finish before the next one is written.
   intra-encoder barriers only order dispatches within the compute pass.
 - The residency set is Metal 4's only residency mechanism; buffers must be
   added and the set committed before use. A `CAMetalLayer`'s own
-  `residencySet` must be added to the queue as well.
-- **The `CAMetalLayer` is shared across actors.** `makeLayerSink(layer:)`
-  receives the main thread's view backing layer and uses it on the render
+  `residencySet` must be added to the queue as well, which
+  `MetalLayerTarget.attach(to:)` does for its layer.
+- **The `CAMetalLayer` is shared across actors.** `MetalLayerTarget` receives
+  the main thread's view backing layer and uses it on the render
   thread, so `Core/Render` declares `CAMetalLayer` `@unchecked Sendable` to make
-  that hand-off expressible. The layer's `device`, `pixelFormat`, and
+  that hand-off expressible. The layer's `pixelFormat`, `contentsScale`, and
   `drawableSize` are set before the render thread starts; the render thread
-  only acquires and presents drawables.
+  only attaches the device, acquires drawables, and presents them.
 
 ## Remaining work
 
@@ -227,7 +267,7 @@ frame must finish before the next one is written.
 - **The reveal's floor was measured at 0.25× on one machine.** A full frame at
   the floor grid (2880 × 1600 from a 720 × 400 base: one step, `fit` over
   4.6 M cells, span compaction, draw, GPU wait) takes 2.7 ms, and a pre-fitted
-  grid draws in 1.6 ms. The drawable is allocated at the floor size from the
+  grid draws in 1.6 ms. The surface is allocated at the floor size from the
   first frame, so the clear and draw cost is the floor cost even at 1×; only
   the grid's fit and compaction are smaller earlier. The span buffer's worst
   case is 16 B per cell (~74 MB). Re-measure on the target display; if 60 Hz
@@ -238,11 +278,16 @@ frame must finish before the next one is written.
   outlasts the intro, the window holds the line until the choice lands. A
   longer intro covers more of that wait, but delays every exchange where the
   model finishes sooner.
-- **The on-screen pipeline serializes every frame.** `MetalSimulation.commit`,
-  `LayerSink`'s layer commit, and `CollapseRenderer.render` all wait for the
-  GPU, because their buffers are shared across frames and the frame slots only
+- **The on-screen pipeline serializes every frame.** `FrameSubmitter.submit`
+  waits for the GPU, because the simulation's and the renderers' buffers are
+  shared across frames and the frame slots only
   rotate the command allocators. A deeper pipeline would need a per-slot copy of
   each shared buffer and texture.
+- **The reveal and the intro own one `GPUContext` each.** `RenderActor` and
+  `IndicatorActor` each create a context on their own render thread, so a single
+  target that must serve both phases (a panel with one device buffer, say) has
+  to be driven by one of them. Sharing one context would mean one render thread
+  for both.
 
 ## Testing
 
@@ -254,18 +299,23 @@ both branches away from the horizon, mirrors them cell for cell, refits both
 on a zoom, and keeps the seed row on the horizon once the run outgrows the
 display floor (including across a history-ring growth). `RenderActorTests`
 asserts the actor runs off the main thread,
-delivers GPU-resident frames, advances on a clock tick, restarts, refits on
+delivers GPU-resident frames, advances on each frame the target delivers, and
+that `stopDriving` ends them, restarts, refits on
 zoom, and exposes the twin run's step count. `RevealCameraTests` pins the
 pull-back: it starts at 1×, never zooms in, matches the branches' growth one
 for one, and keeps pulling back below the display floor.
 `RenderTests` pins the pan anchor (`leadColumn`) to each start shape, the
-display floor, the sampling stride, and the twin grid's rows. `LayerTests`
+display floor, the sampling stride, and the twin grid's rows. `CellGridTests`
 reads the rendered
 texture back to check spans are filled with palette colours, that a renderer
-handles a grid resize, and that the sink serializes frames sharing buffers.
+handles a grid resize, that the sink draws into whatever target it is given
+(with a target's own limits and pixel format), that a layer target has no
+surface before its first display-link update, and that the sink serializes
+frames sharing buffers.
 `CollapseTests` checks the rest frame the reveal continues from, the opening
 frame the submission beat lands on, the submission timeline's phases, the seed
 retraction, that a seed reproduces one run, and that the cycle, the submission
-beat, and the retraction reach their renderers. The display-link presentation
+beat, and the retraction reach their renderers, including that the intro draws
+through an offscreen target rather than a layer. The display-link presentation
 needs a screen and is not tested here; the animation's look is accepted by
 visual inspection.

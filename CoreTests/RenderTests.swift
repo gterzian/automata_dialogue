@@ -64,6 +64,20 @@ final class ViewportTests: XCTestCase {
             0.25, accuracy: 1e-3)
         XCTAssertEqual(
             DisplayLimits.pixels(points: 1440, scale: 2).maximumColumns, 2880)
+        // A fixed-resolution surface reports its own elements, so the floor
+        // follows the panel rather than a screen's pixels.
+        let panel = DisplayLimits.elements(columns: 64)
+        XCTAssertEqual(panel.maximumColumns, 64)
+        // A grid half the panel's width can zoom out until one cell is two
+        // elements wide.
+        XCTAssertEqual(
+            ViewportGeometry.zoomFloor(baseCols: 32, baseRows: 18, limits: panel),
+            0.5, accuracy: 1e-3)
+        // A grid already wider than the panel cannot zoom out at all.
+        XCTAssertEqual(
+            ViewportGeometry.zoomFloor(baseCols: 128, baseRows: 72, limits: panel),
+            1, accuracy: 1e-9)
+        XCTAssertEqual(DisplayLimits.elements(columns: 0).maximumColumns, 1)
     }
 
     /// The twin grid is odd so exactly one row sits on the horizon, and both

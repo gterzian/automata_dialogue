@@ -42,9 +42,9 @@ enum SubmissionTimeline {
     }
 }
 
-/// Encodes the submission beat into the indicator's drawable. The same
-/// drawable and display link then play the intro, so the opening dot is one
-/// continuous image rather than a view swap.
+/// Encodes the submission beat into the indicator's surface. The same target's
+/// frame loop then plays the intro, so the opening dot is one continuous image
+/// rather than a view swap.
 @available(macOS 26.0, *)
 final class SubmissionRenderer {
     /// Mirrors the `SubmissionUniforms` struct in `ShaderSource.submission`.
@@ -61,7 +61,7 @@ final class SubmissionRenderer {
     }
 
     private let context: GPUContext
-    private let ring: FrameSlotRing
+    private let submitter: FrameSubmitter
     private let pipeline: any MTLRenderPipelineState
     private let uniforms: any MTLBuffer
     private let table: any MTL4ArgumentTable
@@ -70,7 +70,7 @@ final class SubmissionRenderer {
 
     init(context: GPUContext, pixelFormat: MTLPixelFormat) throws {
         self.context = context
-        self.ring = try FrameSlotRing(device: context.device)
+        self.submitter = try FrameSubmitter(context: context)
 
         let libraryDescriptor = MTL4LibraryDescriptor()
         libraryDescriptor.source = ShaderSource.submission
@@ -148,38 +148,25 @@ final class SubmissionRenderer {
             frame: frame, into: texture, dotScale: dotScale,
             lineHalfThickness: lineHalfThickness, white: white, ink: ink)
 
-        let (_, slot) = ring.borrow()
-        slot.command.beginCommandBuffer(allocator: slot.allocator)
-        slot.command.useResidencySet(context.residency)
-
-        let pass = MTL4RenderPassDescriptor()
-        guard let attachment = pass.colorAttachments[0] else {
-            throw GPUContext.GPUError.resource("submission render pass")
+        try submitter.submit { command in
+            let pass = MTL4RenderPassDescriptor()
+            guard let attachment = pass.colorAttachments[0] else {
+                throw GPUContext.GPUError.resource("submission render pass")
+            }
+            attachment.texture = texture
+            attachment.loadAction = .clear
+            attachment.storeAction = .store
+            attachment.clearColor = MTLClearColor(
+                red: Double(white.r), green: Double(white.g), blue: Double(white.b),
+                alpha: Double(white.a))
+            guard let render = command.makeRenderCommandEncoder(descriptor: pass) else {
+                throw GPUContext.GPUError.resource("submission render encoder")
+            }
+            render.setRenderPipelineState(pipeline)
+            render.setArgumentTable(table, stages: .fragment)
+            render.drawPrimitives(primitiveType: .triangle, vertexStart: 0, vertexCount: 3)
+            render.endEncoding()
         }
-        attachment.texture = texture
-        attachment.loadAction = .clear
-        attachment.storeAction = .store
-        attachment.clearColor = MTLClearColor(
-            red: Double(white.r), green: Double(white.g), blue: Double(white.b),
-            alpha: Double(white.a))
-        guard let render = slot.command.makeRenderCommandEncoder(descriptor: pass) else {
-            throw GPUContext.GPUError.resource("submission render encoder")
-        }
-        render.setRenderPipelineState(pipeline)
-        render.setArgumentTable(table, stages: .fragment)
-        render.drawPrimitives(primitiveType: .triangle, vertexStart: 0, vertexCount: 3)
-        render.endEncoding()
-        slot.command.endCommandBuffer()
-
-        let done = DispatchSemaphore(value: 0)
-        let options = MTL4CommitOptions()
-        options.addFeedbackHandler { _ in
-            slot.allocator.reset()
-            slot.release()
-            done.signal()
-        }
-        context.queue.commit([slot.command], options: options)
-        done.wait()
     }
 
     private func write(

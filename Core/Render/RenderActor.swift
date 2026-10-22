@@ -11,10 +11,10 @@ public enum RunLayout: Sendable, Equatable {
 }
 
 /// Owns the Metal objects for one app and confines them to a dedicated run
-/// loop. The main thread configures a run, advances it, and receives
-/// `RenderFrame`s through a `FrameSink`; no Metal call or `present` runs on the
-/// main thread. `configure` and `advance` are synchronous on the render actor,
-/// so their committed GPU work has completed before they return.
+/// loop. The main thread configures a run, drives it through a `RenderTarget`,
+/// and receives `RenderFrame`s through a `FrameSink`; no Metal call or `present`
+/// runs on the main thread. `configure` and `advance` are synchronous on the
+/// render actor, so their committed GPU work has completed before they return.
 @available(macOS 26.0, *)
 public actor RenderActor {
     public nonisolated let executor = RenderExecutor()
@@ -29,6 +29,8 @@ public actor RenderActor {
     /// Sub-row carry for `.timed` pacing, owned by the render actor so the
     /// clock's non-isolated tick can hand the delta to an isolated advance.
     private var paceRemainder = 0.0
+    /// The target whose frame loop `drive` started.
+    private var driveTarget: (any RenderTarget)?
     /// The reveal camera, applied on each tick so the zoom moves with the
     /// growth instead of in main-actor polling steps.
     private var reveal: RevealSetup?
@@ -117,17 +119,18 @@ public actor RenderActor {
         }
     }
 
-    /// Creates a `LayerSink` over `layer` using the actor's GPU context, so the
-    /// sink's renderer and the simulation share one device, queue, and
+    /// Creates a `CellGridSink` over `target` using the actor's GPU context, so
+    /// the sink's renderer and the simulation share one device, queue, and
     /// residency set.
-    public func makeLayerSink(layer: CAMetalLayer) throws -> LayerSink {
+    public func makeCellGridSink(target: any RenderTarget) throws -> CellGridSink {
         try start()
         guard let context else { throw GPUContext.GPUError.noMetal4Device }
-        return try LayerSink(layer: layer, context: context)
+        return try CellGridSink(target: target, context: context)
     }
 
     /// Ends the current run and releases its sink; the GPU context stays alive.
     public func finishRun() {
+        stopDriving()
         sink?.finish()
         sink = nil
         simulation = nil
@@ -141,13 +144,15 @@ public actor RenderActor {
     /// The pacing of the live driven run; `setPacing` changes it in flight.
     private var pacing: RenderPacing = .fixed(0)
 
-    /// Starts `clock` on the render thread and advances the run by `pacing` on
-    /// each tick. Because this is actor-isolated, the display link is added to
-    /// the render run loop, so ticks and presentation share the Metal thread.
-    public func drive(clock: any FrameClock, pacing: RenderPacing) {
+    /// Starts `target`'s frame loop on the render thread and advances the run by
+    /// `pacing` on each frame. Because this is actor-isolated, the loop is added
+    /// to the render run loop, so frames and presentation share the Metal
+    /// thread.
+    public func drive(target: any RenderTarget, pacing: RenderPacing) {
         paceRemainder = 0
         self.pacing = pacing
-        clock.start { [weak self] delta in
+        driveTarget = target
+        target.start { [weak self] delta in
             guard let self else { return }
             Task { [weak self] in
                 guard let self else { return }
@@ -171,6 +176,8 @@ public actor RenderActor {
         let steps = pacing.steps(for: delta, remainder: &paceRemainder)
         guard steps > 0 else { return }
         if let reveal, let simulation {
+            // Refit without delivering: the frame the target draws is the one
+            // `advance` delivers below, so a tick presents exactly once.
             let target = simulation.steppedRows + steps
             simulation.setZoom(RevealCamera.zoom(
                 steps: target, branchRows: reveal.branchRows))
@@ -178,9 +185,10 @@ public actor RenderActor {
         _ = try advance(by: steps)
     }
 
-    /// Stops a clock started with `drive`.
-    public func stopDriving(clock: any FrameClock) {
-        clock.stop()
+    /// Stops the frame loop `drive` started.
+    public func stopDriving() {
+        driveTarget?.stop()
+        driveTarget = nil
     }
 
     /// Stops the render thread. Status calls must not follow.

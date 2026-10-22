@@ -1,17 +1,18 @@
 import Foundation
 import Metal
 
-/// Encodes a GPU-resident frame into a render target: a `runs` kernel compacts
-/// each non-background run of same-coloured cells into a `Span`, an
-/// `encode_draw` kernel writes the indirect draw arguments on the GPU, and a
-/// render pass clears to the background colour and draws one quad per span.
-/// Draw cost therefore follows the structure, not the grid area. The same code
-/// path serves a `CAMetalLayer` drawable and the offscreen test texture.
+/// Draws a `GPUColorGrid` into a texture: a `runs` kernel compacts each
+/// non-background run of same-coloured cells into a `Span`, an `encode_draw`
+/// kernel writes the indirect draw arguments on the GPU, and a render pass
+/// clears to the background colour and draws one quad per span. Draw cost
+/// therefore follows the structure, not the grid area. The target's texture is
+/// ordinary render input, so a display drawable and a panel's surface draw the
+/// same grid.
 ///
 /// The window refits every display row each frame, so every frame recompacts
 /// the whole grid.
 @available(macOS 26.0, *)
-final class LayerRenderer {
+final class CellGridRenderer {
     /// Mirrors the `Span` struct in `ShaderSource.layer`.
     struct Span {
         var row: UInt32
@@ -52,12 +53,12 @@ final class LayerRenderer {
     private let runsPipeline: any MTLComputePipelineState
     private let encodePipeline: any MTLComputePipelineState
     private let layerPipeline: any MTLRenderPipelineState
-    private let ring: FrameSlotRing
+    private let submitter: FrameSubmitter
     private var buffers: Buffers?
 
     init(context: GPUContext, pixelFormat: MTLPixelFormat) throws {
         self.context = context
-        self.ring = try FrameSlotRing(device: context.device)
+        self.submitter = try FrameSubmitter(context: context)
 
         let libraryDescriptor = MTL4LibraryDescriptor()
         libraryDescriptor.source = ShaderSource.layer
@@ -82,63 +83,48 @@ final class LayerRenderer {
         )
     }
 
-    /// Renders a GPU-resident frame. When `wait` is true the call blocks until
-    /// the GPU finishes (tests).
-    func render(
-        gpu: GPUColorGrid,
-        palette: Palette,
-        into texture: MTLTexture,
-        wait: Bool = false
-    ) throws {
+    /// Draws a GPU-resident grid into `texture` and returns once the GPU has
+    /// finished, so the caller may read the texture back.
+    func render(gpu: GPUColorGrid, palette: Palette, into texture: MTLTexture) throws {
         let buffers = try prepare(cols: gpu.cols, rows: gpu.rows, cells: gpu.buffer)
         writePalette(palette, into: buffers)
         writeUniforms(cols: gpu.cols, rows: gpu.rows, into: buffers)
 
-        let (_, slot) = ring.borrow()
-        slot.command.beginCommandBuffer(allocator: slot.allocator)
-        slot.command.useResidencySet(context.residency)
-        guard let compute = slot.command.makeComputeCommandEncoder() else {
-            throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
-        }
-        encodeRuns(buffers, cols: gpu.cols, rows: gpu.rows, encoder: compute)
-        encodeDraw(buffers, encoder: compute)
-        // Publish the spans and draw arguments to the render encoder that
-        // follows in the same command buffer.
-        compute.barrier(afterStages: .dispatch, beforeQueueStages: .vertex, visibilityOptions: .device)
-        compute.endEncoding()
+        try submitter.submit { command in
+            guard let compute = command.makeComputeCommandEncoder() else {
+                throw GPUContext.GPUError.resource("MTL4ComputeCommandEncoder")
+            }
+            encodeRuns(buffers, cols: gpu.cols, rows: gpu.rows, encoder: compute)
+            encodeDraw(buffers, encoder: compute)
+            // Publish the spans and draw arguments to the render encoder that
+            // follows in the same command buffer.
+            compute.barrier(
+                afterStages: .dispatch, beforeQueueStages: .vertex, visibilityOptions: .device)
+            compute.endEncoding()
 
-        let pass = MTL4RenderPassDescriptor()
-        guard let attachment = pass.colorAttachments[0] else {
-            throw GPUContext.GPUError.resource("render pass color attachment")
+            let pass = MTL4RenderPassDescriptor()
+            guard let attachment = pass.colorAttachments[0] else {
+                throw GPUContext.GPUError.resource("render pass color attachment")
+            }
+            attachment.texture = texture
+            attachment.loadAction = .clear
+            attachment.storeAction = .store
+            let background = palette[0]
+            attachment.clearColor = MTLClearColor(
+                red: Double(background.r),
+                green: Double(background.g),
+                blue: Double(background.b),
+                alpha: Double(background.a)
+            )
+            guard let render = command.makeRenderCommandEncoder(descriptor: pass) else {
+                throw GPUContext.GPUError.resource("MTL4RenderCommandEncoder")
+            }
+            render.setRenderPipelineState(layerPipeline)
+            render.setArgumentTable(buffers.renderTable, stages: .vertex)
+            render.drawPrimitives(
+                primitiveType: .triangle, indirectBuffer: buffers.arguments.gpuAddress)
+            render.endEncoding()
         }
-        attachment.texture = texture
-        attachment.loadAction = .clear
-        attachment.storeAction = .store
-        let background = palette[0]
-        attachment.clearColor = MTLClearColor(
-            red: Double(background.r),
-            green: Double(background.g),
-            blue: Double(background.b),
-            alpha: Double(background.a)
-        )
-        guard let render = slot.command.makeRenderCommandEncoder(descriptor: pass) else {
-            throw GPUContext.GPUError.resource("MTL4RenderCommandEncoder")
-        }
-        render.setRenderPipelineState(layerPipeline)
-        render.setArgumentTable(buffers.renderTable, stages: .vertex)
-        render.drawPrimitives(primitiveType: .triangle, indirectBuffer: buffers.arguments.gpuAddress)
-        render.endEncoding()
-        slot.command.endCommandBuffer()
-
-        let done = wait ? DispatchSemaphore(value: 0) : nil
-        let options = MTL4CommitOptions()
-        options.addFeedbackHandler { _ in
-            slot.allocator.reset()
-            slot.release()
-            done?.signal()
-        }
-        context.queue.commit([slot.command], options: options)
-        done?.wait()
     }
 
     // MARK: - Private

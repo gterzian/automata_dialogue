@@ -4,11 +4,23 @@ import Core
 /// The black drawing page of the carousel. Pointer input fills a `Drawing` in
 /// normalized top-left coordinates; any other source can fill the same value,
 /// so the export and submission paths do not depend on this view.
+///
+/// A tracking area turns bare pointer movement into strokes, so a trackpad
+/// finger draws without pressing the pad. A click-drag draws the same way and
+/// does not start a second stroke.
 @MainActor
 final class DrawingCanvasView: NSView {
     private let pageColor = Palette.standard(stateCount: 2)[1]
     private let inkColor = Palette.standard(stateCount: 2)[0]
     private(set) var drawing: Drawing
+
+    /// True while a stroke is open, so consecutive moves extend one stroke and
+    /// the pointer leaving then re-entering starts a new one instead of a line
+    /// back to the exit point.
+    private var isStrokeOpen = false
+    /// The open stroke's last point, so a duplicated or coalesced event does not
+    /// append the same point twice.
+    private var lastPoint: Drawing.Point?
 
     override init(frame frameRect: NSRect) {
         drawing = Drawing(aspect: Self.aspect(of: frameRect.size))
@@ -28,7 +40,25 @@ final class DrawingCanvasView: NSView {
     /// aspect, so a window resized between runs exports proportionally.
     func clear() {
         drawing.reset(aspect: Self.aspect(of: bounds.size))
+        endStroke()
         needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The tracking area asks for mouse-moved events; the window has to
+        // accept them before AppKit delivers any.
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                owner: self))
     }
 
     override func resetCursorRects() {
@@ -70,14 +100,44 @@ final class DrawingCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        if drawing.isBlank { drawing.reset(aspect: Self.aspect(of: bounds.size)) }
-        drawing.beginStroke(at: normalizedPoint(for: event))
-        needsDisplay = true
+        extendStroke(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        extendStroke(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        drawing.extendStroke(to: normalizedPoint(for: event))
+        extendStroke(with: event)
+    }
+
+    /// A press-drag-release is one stroke. Movement after the release starts a
+    /// new one, so a drag that left the page does not draw a line back onto it.
+    override func mouseUp(with event: NSEvent) {
+        endStroke()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        endStroke()
+    }
+
+    private func extendStroke(with event: NSEvent) {
+        let point = normalizedPoint(for: event)
+        guard point != lastPoint else { return }
+        if isStrokeOpen {
+            drawing.extendStroke(to: point)
+        } else {
+            if drawing.isBlank { drawing.reset(aspect: Self.aspect(of: bounds.size)) }
+            drawing.beginStroke(at: point)
+            isStrokeOpen = true
+        }
+        lastPoint = point
         needsDisplay = true
+    }
+
+    private func endStroke() {
+        isStrokeOpen = false
+        lastPoint = nil
     }
 
     private func normalizedPoint(for event: NSEvent) -> Drawing.Point {

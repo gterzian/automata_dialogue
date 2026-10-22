@@ -3,22 +3,20 @@ import Metal
 import QuartzCore
 
 /// Presents the submission beat and the intro the review window shows while the
-/// model's turn is prepared on a `CAMetalLayer`, driven by a
-/// `DisplayLinkClock`. The submission doubles the input image into two copies
-/// that part vertically, then collapses them onto the intro's opening dot; the
-/// intro then runs its one cycle and rests on the horizon line the reveal's two
-/// branches grow from. The clock freezes there if the model outlasts the intro,
-/// so the window keeps the last presented frame and stops drawing. Both
-/// animations run at 30 fps on a reduced drawable because they share the GPU
-/// with inference.
+/// model's turn is prepared. The submission doubles the input image into two
+/// copies that part vertically, then collapses them onto the intro's opening
+/// dot; the intro then runs its one cycle and rests on the horizon line the
+/// reveal's two branches grow from. The target freezes there if the model
+/// outlasts the intro, so the surface keeps the last presented frame and nothing
+/// is drawn. Both animations run at a reduced rate on a reduced surface because
+/// they share the GPU with inference.
 ///
-/// Like `LayerSink`, it is confined to a render actor's thread and shared with
-/// the clock's non-isolated draw callback, so it is `@unchecked Sendable` and
+/// Like every presenter, it is confined to a render actor's thread and shared
+/// with the target's frame callback, so it is `@unchecked Sendable` and
 /// lock-guards the state the callback reads.
 @available(macOS 26.0, *)
 public final class WorkingIndicator: @unchecked Sendable {
-    public let layer: CAMetalLayer
-    public let clock: DisplayLinkClock
+    public let target: any RenderTarget
 
     private let renderer: CollapseRenderer
     private let submissionRenderer: SubmissionRenderer
@@ -43,28 +41,19 @@ public final class WorkingIndicator: @unchecked Sendable {
     private var error: String?
 
     public init(
-        layer: CAMetalLayer,
+        target: any RenderTarget,
         context: GPUContext,
         white: PaletteColor = Palette.standard(stateCount: 2)[0],
         ink: PaletteColor = Palette.standard(stateCount: 2)[1]
     ) throws {
-        layer.device = context.device
-        self.layer = layer
+        target.attach(to: context)
+        self.target = target
         self.white = white
         self.ink = ink
-        self.clock = DisplayLinkClock(layer: layer)
-        self.renderer = try CollapseRenderer(context: context, pixelFormat: layer.pixelFormat)
+        self.renderer = try CollapseRenderer(
+            context: context, pixelFormat: target.pixelFormat)
         self.submissionRenderer = try SubmissionRenderer(
-            context: context, pixelFormat: layer.pixelFormat)
-        // The model runs while this animates, so 30 fps with the slow radial
-        // motion leaves most of the GPU to inference.
-        clock.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30)
-        // The layer owns the residency of its drawables; the queue must know
-        // about it.
-        context.queue.addResidencySet(layer.residencySet)
-        clock.onDrawable = { [weak self] drawable, timestamp in
-            self?.render(drawable, timestamp: timestamp)
-        }
+            context: context, pixelFormat: target.pixelFormat)
     }
 
     /// Plays the submission beat for `image`, then the intro. A fresh look is
@@ -83,7 +72,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         self.lineHalfThickness = lineHalfThickness
         lock.unlock()
         try submissionRenderer.setImage(image)
-        clock.start { _ in }
+        target.start { [weak self] _ in self?.draw() }
     }
 
     /// Starts (or restarts) the intro from its opening dot without a
@@ -104,7 +93,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
         lock.unlock()
-        clock.start { _ in }
+        target.start { [weak self] _ in self?.draw() }
     }
 
     /// Resumes the settled sequence for its last beat: the horizon line
@@ -118,17 +107,17 @@ public final class WorkingIndicator: @unchecked Sendable {
         finaleInk = seedInk
         settled = false
         lock.unlock()
-        clock.start { _ in }
+        target.start { [weak self] _ in self?.draw() }
     }
 
-    /// Pauses the animation, keeping the clock for a later run.
+    /// Pauses the animation, keeping the target for a later run.
     public func stop() {
-        clock.stop()
+        target.stop()
     }
 
     /// Stops and marks the indicator done; no further frames are drawn.
     public func finish() {
-        clock.stop()
+        target.stop()
         lock.lock()
         finished = true
         lock.unlock()
@@ -143,7 +132,7 @@ public final class WorkingIndicator: @unchecked Sendable {
     }
 
     /// True once the sequence rests on the frame the reveal continues from and
-    /// the clock has stopped, so the window is drawing nothing. The reveal
+    /// the target has stopped delivering, so nothing is being drawn. The reveal
     /// waits on this so its handoff has no jump, and the finale waits on it
     /// again after the retraction.
     public var isSettled: Bool {
@@ -152,12 +141,15 @@ public final class WorkingIndicator: @unchecked Sendable {
         return settled
     }
 
-    private func render(_ drawable: any CAMetalDrawable, timestamp: CFTimeInterval) {
+    private func draw() {
+        // The phase stamps come from the wall clock, so a dropped frame cannot
+        // stretch the animation and a phase starts when it is first drawn.
+        let now = CACurrentMediaTime()
         lock.lock()
         let done = finished
-        if submissionStartedAt == 0 { submissionStartedAt = timestamp }
-        if introStartedAt == 0 { introStartedAt = timestamp }
-        if finaleStartedAt == 0 { finaleStartedAt = timestamp }
+        if submissionStartedAt == 0 { submissionStartedAt = now }
+        if introStartedAt == 0 { introStartedAt = now }
+        if finaleStartedAt == 0 { finaleStartedAt = now }
         let submissionStart = submissionStartedAt
         let introStart = introStartedAt
         let finaleStart = finaleStartedAt
@@ -165,7 +157,9 @@ public final class WorkingIndicator: @unchecked Sendable {
         let lineHalfThickness = lineHalfThickness
         let ink = finaleStart == nil ? self.ink : (finaleInk ?? self.ink)
         lock.unlock()
-        guard !done else { return }
+
+        let playing = finaleStart != nil || submissionStart != nil || introStart != nil
+        guard !done, playing, let surface = target.acquire() else { return }
 
         var resting = false
         do {
@@ -173,18 +167,18 @@ public final class WorkingIndicator: @unchecked Sendable {
                 // The retraction's last frame is the rest frame, so freezing
                 // there cannot jump.
                 let progress = min(
-                    max((timestamp - finaleStart) / ReviewIntro.finaleDuration, 0), 1)
+                    max((now - finaleStart) / ReviewIntro.finaleDuration, 0), 1)
                 let eased = progress * progress * (3 - 2 * progress)
                 let frame = CollapseTimeline.rested(settle: Float(eased), variation: variation)
                 try renderer.render(
-                    into: drawable.texture, frame: frame, white: white, ink: ink,
+                    into: surface.texture, frame: frame, white: white, ink: ink,
                     lineHalfThickness: lineHalfThickness)
                 resting = progress >= 1
             } else if let submissionStart {
-                let elapsed = timestamp - submissionStart
+                let elapsed = now - submissionStart
                 if elapsed < SubmissionIntro.duration {
                     try submissionRenderer.render(
-                        into: drawable.texture,
+                        into: surface.texture,
                         frame: SubmissionTimeline.frame(time: Float(elapsed)),
                         dotScale: variation.dotScale,
                         lineHalfThickness: lineHalfThickness,
@@ -195,21 +189,21 @@ public final class WorkingIndicator: @unchecked Sendable {
                     // switch draws the same image the intro starts from.
                     lock.lock()
                     submissionStartedAt = nil
-                    introStartedAt = timestamp
+                    introStartedAt = now
                     lock.unlock()
                     try renderer.render(
-                        into: drawable.texture,
+                        into: surface.texture,
                         frame: CollapseTimeline.frame(
                             time: Float(ReviewIntro.openingTime), variation: variation),
                         white: white, ink: ink,
                         lineHalfThickness: lineHalfThickness)
                 }
             } else if let introStart {
-                let elapsed = timestamp - introStart
+                let elapsed = now - introStart
                 let introTime = ReviewIntro.openingTime + elapsed
                 let frame = CollapseTimeline.frame(time: Float(introTime), variation: variation)
                 try renderer.render(
-                    into: drawable.texture, frame: frame, white: white, ink: ink,
+                    into: surface.texture, frame: frame, white: white, ink: ink,
                     lineHalfThickness: lineHalfThickness)
                 resting = introTime >= ReviewIntro.duration
             } else {
@@ -221,10 +215,10 @@ public final class WorkingIndicator: @unchecked Sendable {
             lock.unlock()
             return
         }
-        drawable.present()
+        surface.present()
         guard resting else { return }
         // The rest frame is static: stop drawing and leave the GPU to the model.
-        clock.freeze()
+        target.freeze()
         lock.lock()
         settled = true
         lock.unlock()

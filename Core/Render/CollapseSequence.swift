@@ -210,7 +210,7 @@ enum CollapseTimeline {
     }
 }
 
-/// Encodes the intro into a drawable with one full-resolution render pass. The
+/// Encodes the intro into a surface with one full-resolution render pass. The
 /// fragment shader composites the dot, the bursting mass, and the horizon line;
 /// only the uniforms cross the CPU.
 ///
@@ -244,7 +244,7 @@ final class CollapseRenderer {
     }
 
     private let context: GPUContext
-    private let ring: FrameSlotRing
+    private let submitter: FrameSubmitter
     private let pipeline: any MTLRenderPipelineState
     private let uniforms: any MTLBuffer
     private let table: any MTL4ArgumentTable
@@ -252,7 +252,7 @@ final class CollapseRenderer {
 
     init(context: GPUContext, pixelFormat: MTLPixelFormat) throws {
         self.context = context
-        self.ring = try FrameSlotRing(device: context.device)
+        self.submitter = try FrameSubmitter(context: context)
 
         let libraryDescriptor = MTL4LibraryDescriptor()
         libraryDescriptor.source = ShaderSource.collapse
@@ -285,7 +285,7 @@ final class CollapseRenderer {
         context.makeResident([noise])
     }
 
-    /// Renders one frame and blocks until the GPU finishes, so the drawable is
+    /// Renders one frame and blocks until the GPU finishes, so the surface is
     /// complete (tests read the same texture back) and the next frame can
     /// safely rewrite the shared buffer. `lineHalfThickness` is the horizon
     /// row's half-height in screen-height units: the line the cycle ends on and
@@ -301,38 +301,25 @@ final class CollapseRenderer {
             frame: frame, into: texture, white: white, ink: ink,
             lineHalfThickness: lineHalfThickness)
 
-        let (_, slot) = ring.borrow()
-        slot.command.beginCommandBuffer(allocator: slot.allocator)
-        slot.command.useResidencySet(context.residency)
-
-        let pass = MTL4RenderPassDescriptor()
-        guard let attachment = pass.colorAttachments[0] else {
-            throw GPUContext.GPUError.resource("collapse render pass")
+        try submitter.submit { command in
+            let pass = MTL4RenderPassDescriptor()
+            guard let attachment = pass.colorAttachments[0] else {
+                throw GPUContext.GPUError.resource("collapse render pass")
+            }
+            attachment.texture = texture
+            attachment.loadAction = .clear
+            attachment.storeAction = .store
+            attachment.clearColor = MTLClearColor(
+                red: Double(white.r), green: Double(white.g), blue: Double(white.b),
+                alpha: Double(white.a))
+            guard let render = command.makeRenderCommandEncoder(descriptor: pass) else {
+                throw GPUContext.GPUError.resource("collapse render encoder")
+            }
+            render.setRenderPipelineState(pipeline)
+            render.setArgumentTable(table, stages: .fragment)
+            render.drawPrimitives(primitiveType: .triangle, vertexStart: 0, vertexCount: 3)
+            render.endEncoding()
         }
-        attachment.texture = texture
-        attachment.loadAction = .clear
-        attachment.storeAction = .store
-        attachment.clearColor = MTLClearColor(
-            red: Double(white.r), green: Double(white.g), blue: Double(white.b),
-            alpha: Double(white.a))
-        guard let render = slot.command.makeRenderCommandEncoder(descriptor: pass) else {
-            throw GPUContext.GPUError.resource("collapse render encoder")
-        }
-        render.setRenderPipelineState(pipeline)
-        render.setArgumentTable(table, stages: .fragment)
-        render.drawPrimitives(primitiveType: .triangle, vertexStart: 0, vertexCount: 3)
-        render.endEncoding()
-        slot.command.endCommandBuffer()
-
-        let done = DispatchSemaphore(value: 0)
-        let options = MTL4CommitOptions()
-        options.addFeedbackHandler { _ in
-            slot.allocator.reset()
-            slot.release()
-            done.signal()
-        }
-        context.queue.commit([slot.command], options: options)
-        done.wait()
     }
 
     // MARK: - Uniforms and lists

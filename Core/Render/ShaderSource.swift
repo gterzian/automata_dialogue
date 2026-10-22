@@ -4,7 +4,7 @@ import Foundation
 /// Metal 4 compiler. SwiftPM cannot build a `.metallib`, so the source lives in
 /// strings. `simulation` seeds the board and advances it; `layer` compacts the
 /// fitted grid into spans and draws them through a GPU-built indirect draw (see
-/// `LayerRenderer`).
+/// `CellGridRenderer`).
 public enum ShaderSource {
     public static let simulation = """
     #include <metal_stdlib>
@@ -238,7 +238,7 @@ public enum ShaderSource {
     using namespace metal;
 
     // One horizontal run of same-colour, non-background cells (draw cost
-    // follows the structure). Layout mirrors `LayerRenderer.Span`.
+    // follows the structure). Layout mirrors `CellGridRenderer.Span`.
     struct Span {
         uint row;
         uint start;
@@ -412,7 +412,7 @@ public enum ShaderSource {
     /// `CollapseTimeline` owns its timing and `CollapseVariation` its look.
     /// Everything is drawn by one full-screen fragment shader: the layers, the
     /// dot and line, and the grain. No offscreen targets or upsample are needed;
-    /// the shader writes the drawable directly.
+    /// the shader writes the surface directly.
     public static let collapse = """
     #include <metal_stdlib>
     using namespace metal;

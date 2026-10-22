@@ -195,6 +195,28 @@ final class CollapseTests: XCTestCase {
             bytes, width: size, x: size * 7 / 8, y: size * 7 / 8, bgra: [1, 1, 1], "bottom-right white")
     }
 
+    /// The intro draws through whatever target it is given: the target's frame
+    /// loop drives the surface, and no layer is involved. The look itself is
+    /// accepted by inspection.
+    func testIntroDrawsThroughTheTarget() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let size = 64
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: size, height: size, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .shared
+        let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
+        let target = OffscreenTarget(textures: [texture])
+        let indicator = try WorkingIndicator(target: target, context: context)
+        indicator.start(lineHalfThickness: 0.0035)
+        XCTAssertTrue(indicator.target === target)
+        target.tick(0)
+        XCTAssertEqual(target.presentCount, 1)
+        XCTAssertNil(indicator.errorDescription)
+        indicator.finish()
+    }
+
     private func readTexture(_ texture: MTLTexture) -> [UInt8] {
         let bytesPerRow = texture.width * 4
         var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)

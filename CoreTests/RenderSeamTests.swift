@@ -1,28 +1,6 @@
 import XCTest
 @testable import Core
 
-/// A `FrameClock` the test drives by hand. Lives here rather than in `Core`
-/// because its only purpose is to advance a test deterministically.
-private final class ManualClock: FrameClock, @unchecked Sendable {
-    private var tick: (@Sendable (TimeInterval) -> Void)?
-
-    func start(_ tick: @escaping @Sendable (TimeInterval) -> Void) {
-        self.tick = tick
-    }
-
-    func stop() {
-        tick = nil
-    }
-
-    func pump(_ delta: TimeInterval) {
-        tick?(delta)
-    }
-}
-
-private final class DeltaBox: @unchecked Sendable {
-    var deltas: [TimeInterval] = []
-}
-
 /// A `FrameSink` that records the GPU-resident frames the actor delivers and
 /// lets a test wait for the next one.
 private final class RecordingSink: FrameSink, @unchecked Sendable {
@@ -64,18 +42,6 @@ private final class RecordingSink: FrameSink, @unchecked Sendable {
 }
 
 final class FrameSeamTests: XCTestCase {
-    func testManualClockDeliversDeltasUntilStopped() {
-        let clock = ManualClock()
-        let box = DeltaBox()
-        clock.start { box.deltas.append($0) }
-        clock.pump(1.0 / 30)
-        clock.pump(2.0 / 30)
-        clock.stop()
-        clock.pump(3.0 / 30)
-        XCTAssertEqual(box.deltas.count, 2)
-        XCTAssertEqual(box.deltas[1], 2.0 / 30, accuracy: 1e-9)
-    }
-
     func testFixedPacingIgnoresDelta() {
         var remainder = 0.0
         let pacing = RenderPacing.fixed(7)
@@ -146,28 +112,35 @@ final class RenderActorTests: XCTestCase {
         XCTAssertTrue(sink.isFinished)
     }
 
-    /// `drive` starts a clock on the render thread and advances the run on each
-    /// tick. The manual clock lets the test pump ticks and wait for frames.
-    func testDriveDeliversOnEachClockTick() async throws {
+    /// `drive` starts the target's frame loop on the render thread and advances
+    /// the run on each frame. A target with no surface still delivers the frames
+    /// to the sink, so the test pumps the loop and waits for them.
+    func testDriveDeliversOnEachFrame() async throws {
         guard GPUContext.isAvailable else {
             throw XCTSkip("no Metal 4 device")
         }
         let spec = Catalog.spec(id: "E30")!
         let sink = RecordingSink()
-        let clock = ManualClock()
+        let target = OffscreenTarget(textures: [])
         let actor = RenderActor()
         try await actor.configure(spec: spec, cols: 20, rows: 10, sink: sink)
         XCTAssertEqual(sink.frames.count, 1)
         _ = sink.waitForFrame(timeout: 0.01) // consume the seed frame's signal
-        await actor.drive(clock: clock, pacing: .fixed(5))
+        await actor.drive(target: target, pacing: .fixed(5))
 
-        clock.pump(1.0 / 30)
+        target.tick(1.0 / 30)
         _ = sink.waitForFrame(timeout: 0.5)
         XCTAssertEqual(sink.frames.count, 2)
         let error = await actor.lastError
         XCTAssertNil(error)
 
-        await actor.stopDriving(clock: clock)
+        // `stopDriving` stops the target's frame loop, so a later frame
+        // delivers nothing.
+        await actor.stopDriving()
+        target.tick(1.0 / 30)
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(sink.frames.count, 2)
+
         await actor.shutdown()
     }
 

@@ -21,5 +21,5 @@ and the Metal render core. Built by SwiftPM for tests and the CLI.
   system-prompt assembly. See `Agent/README.md`.
 - `Import/` — file and drawing inputs, normalization to the model's square
   input (512 px by default), and the submission raster. See `Import/README.md`.
-- `Render/` — geometry, the frame-sink seam, the submission beat, and the
-  Metal 4 simulation core. See `Render/README.md`.
+- `Render/` — geometry, the render-target and frame-sink seams, the submission
+  beat, and the Metal 4 simulation core. See `Render/README.md`.

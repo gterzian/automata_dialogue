@@ -15,11 +15,13 @@
   answer, and the parsed class per image); `--quiet`
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
-  on-screen path: `RenderActor` + `LayerSink` + `DisplayLinkClock`; see
+  on-screen path: `RenderActor` + `CellGridSink` + a `MetalLayerTarget`; see
   `Core/Render/README.md`). The window opens on the drawing page. Left and
   right arrows move through the carousel: the drawing page, then every image,
   then the drawing page again, so the drawing page is the wrap point at both
-  ends. Draw with the pointer; leaving the page clears it. Return submits the
+  ends. Draw by moving the pointer over the page, so a trackpad finger draws
+  without pressing the pad and a click-drag draws the same way; leaving the page
+  clears it. Return submits the
   current page: the image doubles into two clones that part vertically for two
   seconds, then the doubled screen collapses for half a second onto the dot the
   collapse intro starts from. The submission beat (`SubmissionTimeline`) and
@@ -35,7 +37,7 @@
   branch grows upward and the other downward from the same horizon row. Both
   branches advance together, and the camera zooms out continuously at the
   branches' growth rate so the whole growth stays in view. At the display floor
-  one cell is one drawable element; past it the camera keeps pulling back
+  one cell is one element of the surface; past it the camera keeps pulling back
   by sampling the stored history at a coarser stride, so the seed stays on the
   horizon and the newest rows stay on the outer edges at decreasing resolution
   instead of older rows leaving through the horizon. The history ring grows with

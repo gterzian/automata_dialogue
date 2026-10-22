@@ -6,8 +6,8 @@ import Foundation
 /// The review window simulates a board much wider than the window (the
 /// reference visualizer runs one ten windows wide) and renders only a movable
 /// viewport into it, so the pattern keeps evolving after it leaves the first
-/// window and the view can pan to follow it. The `LayerRenderer` stretches the
-/// small cell grid over the whole drawable.
+/// window and the view can pan to follow it. The render target's surface takes
+/// the small cell grid stretched over it.
 public enum ViewportGeometry {
     /// Cell edge in points. The reference visualizer advances a cell every 4
     /// screen pixels; at the 2× scale a Retina display uses, 2 points is that
@@ -49,8 +49,8 @@ public enum ViewportGeometry {
     /// Display columns for a zoomed window: zooming in shrinks the grid so a
     /// board cell covers more display cells, and zooming out grows it so more
     /// board fits. The grid stops at the display floor, where one cell is one
-    /// drawable element; past it `sourceStride` samples more source cells per
-    /// display cell instead of growing the grid.
+    /// element of the surface; past it `sourceStride` samples more source cells
+    /// per display cell instead of growing the grid.
     public static func zoomedColumns(baseCols: Int, zoom: Double) -> Int {
         max(1, Int((Double(max(1, baseCols)) / zoom).rounded()))
     }
@@ -144,5 +144,14 @@ public struct DisplayLimits: Sendable, Equatable {
         DisplayLimits(
             maximumColumns: max(1, Int((max(1, points) * max(1, scale)).rounded())),
             maximumCells: maximumCells)
+    }
+
+    /// A surface with a fixed element count the caller knows: an LED panel, or
+    /// any fixed-resolution output whose elements are not device pixels.
+    public static func elements(
+        columns: Int,
+        maximumCells: Int = ViewportGeometry.maximumGridCells
+    ) -> DisplayLimits {
+        DisplayLimits(maximumColumns: max(1, columns), maximumCells: maximumCells)
     }
 }

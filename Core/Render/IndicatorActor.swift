@@ -2,9 +2,9 @@ import Foundation
 import QuartzCore
 
 /// Owns the Metal objects for the submission beat and the collapse intro on a
-/// dedicated run loop, the way `RenderActor` does for a run. `playSubmission`
-/// creates the GPU context on the render thread, and the display link, draw,
-/// and `present` all stay off the main thread.
+/// dedicated run loop, the way `RenderActor` does for a run. The GPU context is
+/// created on the render thread, and the target's frame callback, draw, and
+/// present all stay off the main thread.
 @available(macOS 26.0, *)
 public actor IndicatorActor {
     public nonisolated let executor = RenderExecutor()
@@ -18,29 +18,30 @@ public actor IndicatorActor {
 
     public init() {}
 
-    /// Plays the submission beat for `image` on `layer`, then the intro. The
-    /// context, renderer, and clock are reused across runs, so the pipelines
+    /// Plays the submission beat for `image` on `target`, then the intro. The
+    /// context, renderer, and target are reused across runs, so the pipelines
     /// compile once. `lineHalfThickness` is the automaton horizon row's
     /// half-height in screen-height units.
     public func playSubmission(
         _ image: RasterImage,
-        layer: CAMetalLayer,
+        target: any RenderTarget,
         lineHalfThickness: Float
     ) throws {
-        let indicator = try ensureIndicator(layer: layer)
+        let indicator = try ensureIndicator(target: target)
         try indicator.playSubmission(image, lineHalfThickness: lineHalfThickness)
     }
 
-    /// Starts the intro on `layer` without a submission beat, creating the GPU
-    /// context on first use. Reusing the same layer only restarts the clock, so
-    /// the pipeline is not recompiled for every run. `lineHalfThickness` is the
-    /// automaton horizon row's half-height in screen-height units.
-    public func start(layer: CAMetalLayer, lineHalfThickness: Float) throws {
-        let indicator = try ensureIndicator(layer: layer)
+    /// Starts the intro on `target` without a submission beat, creating the GPU
+    /// context on first use. Reusing the same target only restarts its frame
+    /// loop, so the pipeline is not recompiled for every run.
+    /// `lineHalfThickness` is the automaton horizon row's half-height in
+    /// screen-height units.
+    public func start(target: any RenderTarget, lineHalfThickness: Float) throws {
+        let indicator = try ensureIndicator(target: target)
         indicator.start(lineHalfThickness: lineHalfThickness)
     }
 
-    private func ensureIndicator(layer: CAMetalLayer) throws -> WorkingIndicator {
+    private func ensureIndicator(target: any RenderTarget) throws -> WorkingIndicator {
         let context: GPUContext
         if let existing = self.context {
             context = existing
@@ -49,9 +50,9 @@ public actor IndicatorActor {
             self.context = made
             context = made
         }
-        if let indicator, indicator.layer === layer { return indicator }
+        if let indicator, indicator.target === target { return indicator }
         indicator?.finish()
-        let made = try WorkingIndicator(layer: layer, context: context)
+        let made = try WorkingIndicator(target: target, context: context)
         indicator = made
         return made
     }

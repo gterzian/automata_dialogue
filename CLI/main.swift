@@ -82,7 +82,8 @@ func printUsage() -> Never {
         options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
         The window opens on a black drawing page. Left and right arrows move
         through the carousel: the drawing page, then every image, then back to
-        the drawing page. Draw with the pointer; Return submits the drawing or
+        the drawing page. Draw by moving the pointer, so a trackpad finger
+        draws without pressing the pad; Return submits the drawing or
         image as an image, plays the submission beat, then shows the chosen
         automaton's reveal until Return advances to the next page. Leaving the
         drawing page clears it. Closing the window stops the run.
@@ -107,8 +108,8 @@ func printUsage() -> Never {
 /// render core's on-screen path into it. AppKit calls `makeBackingLayer` when
 /// the view first wants a layer.
 final class MetalHostView: NSView {
-    // Read by the render actor through `makeLayerSink(layer:)`; see the
-    // `CAMetalLayer` Sendable note in `Core/Render/LayerSink.swift`.
+    // Read by the render actor through `MetalLayerTarget`; see the
+    // `CAMetalLayer` Sendable note in `Core/Render/MetalLayerTarget.swift`.
     nonisolated let metalLayer = CAMetalLayer()
 
     /// The drawable's texture size. The layer stretches it over the view, so a
@@ -150,14 +151,15 @@ final class MetalHostView: NSView {
 
 /// Presents the input carousel, the submission beat, the collapse intro, then
 /// one automaton, in a single screen-sized window using `Core/Render`'s
-/// on-screen path: a `RenderActor` owns a `LayerSink`, or an `IndicatorActor` a
-/// `WorkingIndicator`, over a `MetalHostView.metalLayer`. `showPage` holds one
-/// carousel page until Return or an arrow; `beginSubmission` doubles the
-/// submitted image and collapses it onto the intro's opening dot while the
-/// model works; `present` swaps the reveal's two mirrored automaton branches
-/// into the same window and suspends until Return or close. The key monitor
-/// calls `submit()` and `navigate(_:)`; `NSApplication.run()` keeps delivering
-/// events while suspended.
+/// on-screen path: a `RenderActor` drives a `CellGridSink`, or an
+/// `IndicatorActor` a `WorkingIndicator`, over a `MetalLayerTarget` whose layer
+/// is `MetalHostView.metalLayer`. `showPage` holds one carousel page until
+/// Return or an arrow; `beginSubmission` doubles the submitted image and
+/// collapses it onto the intro's opening dot while the model works; `present`
+/// swaps the reveal's two mirrored automaton branches into the same window and
+/// suspends until Return or close. The key monitor calls `submit()` and
+/// `navigate(_:)`; `NSApplication.run()` keeps delivering events while
+/// suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// Source rows per second each branch grows. A branch fills half the
@@ -165,12 +167,12 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// speed the same; this is the knob for how long the pull-back takes.
     private static let revealRowsPerSecond = 40.0
 
-    private var zoomFloor = 1.0
     private var window: NSWindow?
     private var host: MetalHostView?
     private var actor: RenderActor?
-    private var sink: LayerSink?
+    private var sink: CellGridSink?
     private var indicator: IndicatorActor?
+    private var indicatorTarget: MetalLayerTarget?
     private var indicatorHost: MetalHostView?
     private var currentPage: InputPage?
     private var canvas: DrawingCanvasView?
@@ -246,22 +248,24 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         // row count.
         let rows = ViewportGeometry.twinRows(
             baseRows: ViewportGeometry.rows(size: contentSize, cols: cols), zoom: 1)
-        // One display cell per element of the surface; a Retina display reports
-        // its pixels and an LED surface its addressable elements.
-        zoomFloor = ViewportGeometry.zoomFloor(
-            baseCols: cols,
-            baseRows: rows,
-            limits: .pixels(points: contentSize.width, scale: window.backingScaleFactor))
+        // One display cell per element the surface resolves; a Retina display
+        // reports its pixels and an LED surface its addressable elements, so the
+        // floor comes from the surface rather than being a constant.
+        let displayLimits = DisplayLimits.pixels(
+            points: contentSize.width, scale: window.backingScaleFactor)
+        let zoomFloor = ViewportGeometry.zoomFloor(
+            baseCols: cols, baseRows: rows, limits: displayLimits)
         // The drawable is allocated once at the widest zoom-out: the camera
         // only changes the grid, and the layer stretches that grid over this
         // fixed target. At the floor each cell is one drawable pixel; earlier
         // the grid is smaller and each cell covers more than one.
-        let floorCols = ViewportGeometry.zoomedColumns(baseCols: cols, zoom: zoomFloor)
-        let floorRows = ViewportGeometry.twinRows(baseRows: rows, zoom: zoomFloor)
         let host = MetalHostView(
             frame: NSRect(origin: .zero, size: contentSize),
-            drawableSize: CGSize(width: floorCols, height: floorRows))
+            drawableSize: CGSize(
+                width: ViewportGeometry.zoomedColumns(baseCols: cols, zoom: zoomFloor),
+                height: ViewportGeometry.twinRows(baseRows: rows, zoom: zoomFloor)))
         host.metalLayer.magnificationFilter = .nearest
+        let target = MetalLayerTarget(layer: host.metalLayer, displayLimits: displayLimits)
 
         // A `.rand` entry draws a fresh row each time it is shown
         // (inventory §1.4).
@@ -272,10 +276,10 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             start: runSpec.board.start,
             injection: runSpec.board.injection)
         let actor = RenderActor()
-        var made: LayerSink?
+        var made: CellGridSink?
         do {
             try await actor.start()
-            let sink = try await actor.makeLayerSink(layer: host.metalLayer)
+            let sink = try await actor.makeCellGridSink(target: target)
             made = sink
             _ = try await actor.configure(
                 spec: runSpec, cols: cols, rows: rows, board: board,
@@ -285,7 +289,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                     branchRows: ViewportGeometry.twinHalfRows(rows: rows)),
                 sink: sink)
             await actor.drive(
-                clock: sink.clock,
+                target: target,
                 pacing: .timed(stepsPerSecond: Self.revealRowsPerSecond))
         } catch {
             print("rate: \(spec.id) failed to render: \(error.localizedDescription)")
@@ -334,13 +338,21 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         let rows = ViewportGeometry.twinRows(
             baseRows: ViewportGeometry.rows(size: contentSize, cols: cols), zoom: 1)
         let lineHalfThickness = 0.5 / Float(max(1, rows))
+        // The model runs while this animates, so 30 fps with the slow radial
+        // motion leaves most of the GPU to inference.
+        let target = indicatorTarget ?? MetalLayerTarget(
+            layer: host.metalLayer,
+            displayLimits: .pixels(
+                points: contentSize.width, scale: window.backingScaleFactor),
+            frameRate: CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30))
+        indicatorTarget = target
         do {
             if let image {
                 try await actor.playSubmission(
-                    image, layer: host.metalLayer, lineHalfThickness: lineHalfThickness)
+                    image, target: target, lineHalfThickness: lineHalfThickness)
             } else {
                 try await actor.start(
-                    layer: host.metalLayer, lineHalfThickness: lineHalfThickness)
+                    target: target, lineHalfThickness: lineHalfThickness)
             }
         } catch {
             print("rate: indicator failed: \(error.localizedDescription)")
@@ -397,7 +409,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// Stops the running automaton, if any. The indicator actor and its GPU
     /// context stay alive for the next run.
     func stopRun() async {
-        if let actor, let sink { await actor.stopDriving(clock: sink.clock) }
+        await actor?.stopDriving()
         await actor?.shutdown()
         actor = nil
         sink = nil
@@ -409,6 +421,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     func shutdownIndicator() async {
         await indicator?.shutdown()
         indicator = nil
+        indicatorTarget = nil
         indicatorHost = nil
     }
 
