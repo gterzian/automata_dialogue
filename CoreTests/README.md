@@ -10,13 +10,12 @@ What must be covered:
   (repetition 29, nesting 28, randomness 40, complexity 14); the listing and the
   catalog ids agree; per-entry follow rates, and which seed rows are a single
   centred cell.
-- **Prompt** — `SystemPrompt.build` embeds every catalog id with its class,
-  describes all four classes, states that complexity requires both an ordered
-  and a disordered part (so a recognizable figure such as the house is
+- **Prompt** — `SystemPrompt.build` embeds every catalog id under its class
+  heading, describes all four classes, states that complexity requires both an
+  ordered and a disordered part (so a recognizable figure such as the house is
   repetition), states the answer format, and stays within the ~4k budget.
 - **Choice** — the parser (`id:` field, markdown, prose fallback, longest-id
-  match, unknown id), the reason's sentence check, and the recent-choice window
-  (limit, exclusion note).
+  match, unknown id) and the recent-choice window (limit, exclusion note).
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
   drawing is a uniform raster while a stroke reaches the raster; aspect-fit
   keeps a wide drawing's shape; a drawing normalizes to a square PNG.

@@ -16,12 +16,13 @@ public enum Catalog {
 
     public static func spec(id: String) -> ProgramSpec? { byID[id] }
 
-    /// One line per entry: `id | class`. The system prompt embeds the flat
-    /// list, so each entry carries its class instead of being grouped. The
-    /// `look` sentence stays in the table for the inventory sync but is not
-    /// submitted, keeping the prefill short.
+    /// The prompt's automata listing, grouped by behavior: a `### <class>`
+    /// heading followed by that class's ids. The class sits next to the ids the
+    /// model chooses from, so a trailing class column cannot be overlooked.
     public static var promptIndexLines: [String] {
-        all.map { "\($0.id) | \($0.behavior.rawValue)" }
+        Behavior.allCases.flatMap { behavior in
+            ["### \(behavior.rawValue)"] + all.filter { $0.behavior == behavior }.map(\.id)
+        }
     }
 
     public static func count(of behavior: Behavior) -> Int {

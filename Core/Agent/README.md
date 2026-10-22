@@ -17,59 +17,57 @@ lines:
 
 ```
 class: <one of repetition, nesting, randomness, complexity>
-id: <one id from the list whose class is the class on the first line>
+id: <one id from the section for that class>
 reason: <one full sentence>
 ```
 
-The `class` line is the answer's self-check: the model commits to a class
-before choosing an id, and the reason must name that same class. The parser
-reads only `id:` and `reason:`; the class line is ignored.
+The `class` line comes first so the model commits to a class before choosing an
+id; the id then comes from that class's section, and the reason names the same
+class. The parser reads only `id:` and `reason:`; the class line is ignored.
 
 `ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
 and otherwise taking the first catalog id anywhere in the text (longest match
-first, so `E90.sparse` beats `E90`). The engine gives **repair turns** when
-needed: one if the first answer names no usable id (unknown, or recently used),
-appended as a correction, and only a second miss ends the run in `.failed`.
-Text beyond the parsed fields is ignored. A bare class name is not a reason: when
-the id is usable but `Choice.hasFullReason` is false, the engine asks once more
-for a sentence with the same id and keeps the first choice if that retry does
-not improve it. The parser is pure, so the MLX engine and the tests share one
-implementation.
+first, so `E90.sparse` beats `E90`). There is no repair pass: an answer with no
+usable id (unknown, or recently used) ends the run in `.failed`, and a terse
+reason is accepted as written. Text beyond the parsed fields is ignored. The
+parser is pure, so the MLX engine and the tests share one implementation.
 
 ## No repeats
 
 The dialogue must not replay the same automaton. The engine carries a
 `ChoiceHistory` of the last 20 chosen ids across runs and, before each run,
-builds the user turn with `ChoiceHistory.userTurn(_:)`, which appends "do not
-choose these ids" to the text. That note rides with the image in the user turn,
-so the system prompt stays a cacheable prefix. The engine treats an excluded id
-the same as an unknown one: it triggers the one repair turn, then records the
-accepted id.
+builds the user turn with `ChoiceHistory.userTurn(_:)`, which appends a note
+that the listed ids were used recently and that an answer using one is invalid.
+That note rides with the image in the user turn, so the system prompt stays a
+cacheable prefix. The engine treats an excluded id the same as an unknown one:
+the run fails without recording a choice.
 
 ## Prompt
 
 `SystemPrompt.build()` joins three parts into one immutable string: the four
-behavior classes described plainly, the flat catalog
-(`Catalog.promptIndexLines`, one line per entry as `id | class`), and the
-answer format. The rubric reserves `complexity` for a picture that contains
-both an ordered and a disordered part (or localized structures inside a
-different texture); a wholly ordered figure, even a recognizable one such as a
-house or a glyph, is `repetition` or `nesting`. Each entry carries its own
-class instead of being grouped, so the model does not have to map a separate
-class table onto a listing. The string is identical on every run, so it is a
-cacheable prefix. The per-entry `look` sentence stays in `Catalog` for the
+behavior classes described plainly, the catalog grouped by class
+(`Catalog.promptIndexLines`, a `### <class>` heading followed by that class's
+ids), and the answer format. The rubric reserves `complexity` for a picture
+that contains both an ordered and a disordered part of different kinds (or
+localized structures inside a different texture); a wholly ordered figure, even
+a recognizable one such as a house or a glyph, is `repetition` or `nesting`.
+Grouping puts the class next to the ids it contains, so the model chooses inside
+the class it decided instead of reading a class column at the end of each line. The string
+is identical on every run, so it is a cacheable prefix; `AgentEngine` prefills
+it once into a KV cache and copies that prefix for each run (see
+`Agent/README.md`). The per-entry `look` sentence stays in `Catalog` for the
 inventory sync but is not submitted: the class is what the model matches, and
-the prompt's ~1k-token budget assumes the listing is `id | class`.
+the prompt budget assumes the listing is grouped ids.
 
 ## Events
 
 `AgentEvent`: `.text` (the model's full answer, batched by the UI), `.metrics`
-(one generation pass's prompt and generation token counts and times, so a repair
-turn shows as a second event), `.choice`, `.finished`, `.failed`. `AgentInput`
-carries `text` and an optional `imageURL`.
+(one generation pass's prefilled and cached prompt token counts and times),
+`.choice`, `.finished`, `.failed`. `AgentInput` carries `text` and an optional
+`imageURL`.
 
 ## Tests
 
 Choice parsing (the `id:` field, markdown, fallback to prose, the longest-id
-match, an unknown id, and the reason's sentence check), the prompt's class
-descriptions and per-entry class lines, and the prompt budget.
+match, and an unknown id), the prompt's class descriptions and the per-class id
+sections, and the prompt budget.

@@ -5,17 +5,6 @@ public struct Choice: Sendable, Hashable, Codable {
     public var id: String
     public var rationale: String
 
-    /// Fewest words a reason needs to count as a sentence rather than a label.
-    /// The prompt asks for a full sentence; this is the mechanical floor that
-    /// rejects a bare class name or a two-word fragment, not a quality judge.
-    public static let minimumReasonWords = 4
-
-    /// True when the model wrote a sentence for its reason. The engine asks
-    /// once more when this is false and keeps the choice if the retry fails.
-    public var hasFullReason: Bool {
-        rationale.split(whereSeparator: \.isWhitespace).count >= Self.minimumReasonWords
-    }
-
     public init(id: String, rationale: String) {
         self.id = id
         self.rationale = rationale
@@ -45,9 +34,9 @@ public struct ChoiceHistory: Sendable, Equatable {
     /// recent ids. The note lives in the user turn, not the system prompt.
     public func userTurn(_ text: String) -> String {
         guard !ids.isEmpty else { return text }
-        let note = "Do not choose these ids, they were used recently: "
+        let note = "Do not choose any of these ids; each was used recently: "
             + ids.joined(separator: ", ")
-            + ". Choose a different automaton of the same class."
+            + ". Pick a different id from the same class. An answer that uses one of them is invalid."
         return text.isEmpty ? note : "\(text)\n\n\(note)"
     }
 }

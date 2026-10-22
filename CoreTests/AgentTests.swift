@@ -9,13 +9,22 @@ final class SystemPromptTests: XCTestCase {
         }
     }
 
-    func testEachEntryCarriesItsClass() {
+    /// The listing groups ids under their class heading, so the class the
+    /// model matched is adjacent to the ids it may choose.
+    func testEachEntryAppearsUnderItsClassHeading() {
         let prompt = SystemPrompt.build()
-        for spec in Catalog.all {
-            XCTAssertTrue(
-                prompt.contains("\(spec.id) | \(spec.behavior.rawValue)"),
-                "prompt is missing the class line for \(spec.id)"
-            )
+        for behavior in Behavior.allCases {
+            XCTAssertTrue(prompt.contains("### \(behavior.rawValue)"), "prompt is missing the \(behavior.rawValue) heading")
+        }
+        var heading: Behavior?
+        for line in Catalog.promptIndexLines {
+            if line.hasPrefix("### ") {
+                heading = Behavior(rawValue: String(line.dropFirst(4)))
+                continue
+            }
+            XCTAssertEqual(
+                Catalog.spec(id: line)?.behavior, heading,
+                "\(line) is listed under the wrong class heading")
         }
     }
 
@@ -41,9 +50,9 @@ final class SystemPromptTests: XCTestCase {
     func testStatesTheAnswerFormat() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains("class: <one of repetition, nesting, randomness, complexity>"))
-        XCTAssertTrue(prompt.contains("id: <one id from the list whose class is the class on the first line>"))
+        XCTAssertTrue(prompt.contains("id: <one id from the section for that class>"))
         XCTAssertTrue(prompt.contains(
-            "reason: <one full sentence, not just the class name: the visible feature you matched, then the class it puts the drawing in>"))
+            "reason: <one full sentence, not just the class name: the visible feature you matched, then the same class>"))
     }
 
     /// The reason must be a sentence about the drawing, not the class name the
@@ -54,6 +63,17 @@ final class SystemPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains(
             "Reply with exactly three lines, starting with `class:` and no other text:"))
         XCTAssertTrue(prompt.contains("one full sentence, not just the class name"))
+    }
+
+    /// The class line comes before the id so the model commits to a class, then
+    /// chooses an id from that class's section; the reason follows and names the
+    /// same class.
+    func testRequiresTheIDToCarryTheClassOnTheFirstLine() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains(
+            "The class heading above your id must be the class on your first line; the answer is wrong when those differ."))
+        XCTAssertTrue(prompt.contains(
+            "the heading above your id must be the same word as the class on your first line and in your reason"))
     }
 
     /// The reason and the chosen id must agree: the observed failure named
@@ -190,19 +210,6 @@ final class ChoiceParserTests: XCTestCase {
         XCTAssertEqual(ChoiceParser.choice(from: "ID: e250")?.id, "E250")
         XCTAssertEqual(ChoiceParser.choice(from: "id: e110")?.id, "E110")
     }
-
-    /// A bare class name or a fragment is not a reason. The engine uses this to
-    /// ask once more for the full sentence the prompt requires.
-    func testReasonCompletenessRejectsLabels() {
-        XCTAssertFalse(Choice(id: "E30", rationale: "randomness").hasFullReason)
-        XCTAssertFalse(Choice(id: "E30", rationale: "Randomness.").hasFullReason)
-        XCTAssertFalse(Choice(id: "E30", rationale: "repetition because stripes").hasFullReason)
-        XCTAssertFalse(Choice(id: "E30", rationale: "").hasFullReason)
-        XCTAssertTrue(Choice(
-            id: "E30",
-            rationale: "The marks scatter with no regular part, so the class is randomness."
-        ).hasFullReason)
-    }
 }
 
 final class ChoiceHistoryTests: XCTestCase {
@@ -225,9 +232,9 @@ final class ChoiceHistoryTests: XCTestCase {
         history.record("E90")
         history.record("E110")
         let turn = history.userTurn("")
-        XCTAssertTrue(turn.contains("Do not choose these ids"))
+        XCTAssertTrue(turn.contains("Do not choose any of these ids"))
         XCTAssertTrue(turn.contains("E90, E110"))
-        XCTAssertTrue(turn.contains("Choose a different automaton of the same class."))
+        XCTAssertTrue(turn.contains("Pick a different id from the same class."))
     }
 
     func testUserTurnKeepsTheSubmittedTextFirst() {

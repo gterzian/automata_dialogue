@@ -51,8 +51,7 @@ public enum AgentEvent: Sendable, Hashable {
     /// The model's full answer, batched by the UI. The CLI prints it as debug
     /// output, so a run that fails to parse still shows what the model said.
     case text(String)
-    /// One generation pass's token counts and times, in run order. A repair
-    /// turn appears as a second event, so the CLI can show what it costs.
+    /// One generation pass's token counts and times.
     case metrics(GenerationMetrics)
     /// The single answer: the catalog entry the model chose.
     case choice(Choice)

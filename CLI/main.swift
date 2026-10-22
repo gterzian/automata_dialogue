@@ -629,7 +629,7 @@ struct RateOutcome: Sendable {
     let seconds: String
     let choice: Choice?
     let failure: String?
-    /// One entry per generation pass; a repair turn adds a second entry.
+    /// The run's generation pass.
     let metrics: [GenerationMetrics]
 }
 
@@ -663,12 +663,13 @@ func runEngine(
     }
     let seconds = String(format: "%.2f", Date().timeIntervalSince(startedAt))
     if verbose {
-        for (index, pass) in metrics.enumerated() {
-            let turn = index == 0 ? "turn 1" : "turn \(index + 1) (repair)"
+        for pass in metrics {
             let promptSeconds = String(format: "%.2f", pass.promptTime)
             let generateSeconds = String(format: "%.2f", pass.generationTime)
+            let cached = pass.cachedPromptTokenCount > 0
+                ? " (\(pass.cachedPromptTokenCount) cached)" : ""
             print(
-                "[debug] \(turn): prompt \(pass.promptTokenCount) tokens / \(promptSeconds)s, generation \(pass.generationTokenCount) tokens / \(generateSeconds)s")
+                "[debug] prompt \(pass.promptTokenCount) tokens\(cached) / \(promptSeconds)s, generation \(pass.generationTokenCount) tokens / \(generateSeconds)s")
         }
         print("[debug] \(name) answer after \(seconds)s:")
         print(response.isEmpty ? "[debug]   (empty response)" : response)
@@ -888,10 +889,15 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
 func runBench(_ setup: RateSetup) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
+    do {
+        try await engine.prepare()
+    } catch {
+        FileHandle.standardError.write(
+            Data("bench: preload failed: \(error.localizedDescription)\n".utf8))
+    }
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     var chosen = 0
-    var repairs = 0
     var promptTokens = 0
     var promptSeconds = 0.0
     var generationTokens = 0
@@ -901,16 +907,15 @@ func runBench(_ setup: RateSetup) async {
             engine: engine, path: path, directory: directory,
             dimension: setup.configuration.imageDimension, verbose: setup.verbose)
         if printRateOutcome(outcome) != nil { chosen += 1 }
-        for (index, pass) in outcome.metrics.enumerated() {
+        for pass in outcome.metrics {
             promptTokens += pass.promptTokenCount
             promptSeconds += pass.promptTime
             generationTokens += pass.generationTokenCount
             generationSeconds += pass.generationTime
-            if index > 0 { repairs += 1 }
         }
     }
     ImageImport.removeSessionDirectory(for: sessionID)
-    print("\n\(chosen)/\(setup.paths.count) chosen, \(repairs) repair turn(s)")
+    print("\n\(chosen)/\(setup.paths.count) chosen")
     print(String(
         format: "prompt: %d tokens / %.2fs (%.1f tok/s)",
         promptTokens, promptSeconds, Double(promptTokens) / max(promptSeconds, 0.001)))
@@ -928,6 +933,12 @@ func runBench(_ setup: RateSetup) async {
 func runClassify(_ setup: RateSetup) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
+    do {
+        try await engine.prepare()
+    } catch {
+        FileHandle.standardError.write(
+            Data("classify: preload failed: \(error.localizedDescription)\n".utf8))
+    }
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     var classified = 0
