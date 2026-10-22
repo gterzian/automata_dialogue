@@ -36,8 +36,12 @@ public final class MetalSimulation {
         var topRows: UInt32
         var centreColumn: Float
         var sourceStride: Float
-        /// Palette entries a cell can hold, which bounds the fit's reduction.
+        /// Palette entries a cell can hold, which bounds the fit's block counts
+        /// and the below-floor average.
         var colors: UInt32
+        /// 1 once a cell covers several source cells, so the fit writes the
+        /// block's average colour instead of a palette index.
+        var toned: UInt32
     }
 
     private struct SeedParams {
@@ -103,6 +107,10 @@ public final class MetalSimulation {
     private let seedBuffer: any MTLBuffer
     private let blockBuffer: any MTLBuffer
     private let headBuffer: any MTLBuffer
+    /// The entry's palette, which the below-floor fit averages over. The grid is
+    /// read as a palette index above the display floor, where a cell is one
+    /// source cell, and as a colour below it.
+    private let paletteBuffer: any MTLBuffer
     private var stepTable: any MTL4ArgumentTable
     private let bumpTable: any MTL4ArgumentTable
     private var fitTable: any MTL4ArgumentTable
@@ -146,15 +154,23 @@ public final class MetalSimulation {
         let halfRows = twin ? ViewportGeometry.twinHalfRows(rows: displayRows) : 0
 
         guard let history = device.makeBuffer(length: max(1, capacity * width), options: .storageModeShared),
-              let colorBuffer = device.makeBuffer(length: max(1, maxCols * maxRows), options: .storageModeShared),
+              // A toned cell is four bytes: below the floor the grid holds
+              // colours, so the buffer is sized for that format either way.
+              let colorBuffer = device.makeBuffer(length: max(1, maxCols * maxRows * 4), options: .storageModeShared),
               let stepBuffer = device.makeBuffer(length: MemoryLayout<StepParams>.stride, options: .storageModeShared),
               let viewBuffer = device.makeBuffer(length: MemoryLayout<ViewParams>.stride, options: .storageModeShared),
               let seedBuffer = device.makeBuffer(length: MemoryLayout<SeedParams>.stride, options: .storageModeShared),
               let blockBuffer = device.makeBuffer(length: max(1, width), options: .storageModeShared),
-              let headBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared) else {
+              let headBuffer = device.makeBuffer(length: MemoryLayout<UInt32>.stride, options: .storageModeShared),
+              let paletteBuffer = device.makeBuffer(
+                length: 16 * MemoryLayout<SIMD4<Float>>.stride, options: .storageModeShared) else {
             throw GPUContext.GPUError.resource("simulation buffers")
         }
-        context.makeResident([history, colorBuffer, stepBuffer, viewBuffer, seedBuffer, blockBuffer, headBuffer])
+        context.makeResident([
+            history, colorBuffer, stepBuffer, viewBuffer, seedBuffer, blockBuffer, headBuffer,
+            paletteBuffer,
+        ])
+        Self.writePalette(spec.display.palette, into: paletteBuffer)
 
         let pipeline: any MTLComputePipelineState
         let rule: UInt32
@@ -193,13 +209,17 @@ public final class MetalSimulation {
         self.seedBuffer = seedBuffer
         self.blockBuffer = blockBuffer
         self.headBuffer = headBuffer
+        self.paletteBuffer = paletteBuffer
         self.stepPipeline = pipeline
         self.submitter = try FrameSubmitter(context: context)
 
-        self.stepTable = try Self.makeTable(device: device, history: history, second: stepBuffer, third: headBuffer)
-        self.bumpTable = try Self.makeTable(device: device, history: headBuffer, second: nil, third: nil)
-        self.fitTable = try Self.makeTable(device: device, history: history, second: colorBuffer, third: viewBuffer)
-        self.seedTable = try Self.makeTable(device: device, history: history, second: seedBuffer, third: blockBuffer)
+        self.stepTable = try Self.makeTable(
+            device: device, addresses: [history, stepBuffer, headBuffer])
+        self.bumpTable = try Self.makeTable(device: device, addresses: [headBuffer])
+        self.fitTable = try Self.makeTable(
+            device: device, addresses: [history, colorBuffer, viewBuffer, paletteBuffer])
+        self.seedTable = try Self.makeTable(
+            device: device, addresses: [history, seedBuffer, blockBuffer])
 
         let startOrigin = ViewportGeometry.initialOrigin(
             boardWidth: width, cols: displayCols, start: runBoard.start,
@@ -221,7 +241,8 @@ public final class MetalSimulation {
             topRows: UInt32(halfRows),
             centreColumn: Float(centreColumn),
             sourceStride: 1,
-            colors: UInt32(spec.stateCount))
+            colors: UInt32(spec.stateCount),
+            toned: 0)
 
         try reseed()
     }
@@ -324,7 +345,10 @@ public final class MetalSimulation {
 
         var head: UInt32 = 0
         memcpy(headBuffer.contents(), &head, MemoryLayout<UInt32>.stride)
-        memset(colorBuffer.contents(), 0, cols * rows)
+        // Clear a whole toned cell per position: the grid holds four-byte colours
+        // once the reveal pulls back below the floor, and the first fit after a
+        // reseed writes every cell anyway.
+        memset(colorBuffer.contents(), 0, cols * rows * 4)
         step = 0
         userPanned = false
         let origin = ViewportGeometry.initialOrigin(
@@ -339,6 +363,7 @@ public final class MetalSimulation {
         viewParams.centreColumn = Float(centreColumn)
         viewParams.sourceStride = 1
         viewParams.topRows = UInt32(twinHalfRows)
+        viewParams.toned = 0
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
 
         try submitter.submit { command in
@@ -364,7 +389,9 @@ public final class MetalSimulation {
     @discardableResult
     public func renderGPU(chunk: Int) throws -> GPUColorGrid {
         try advance(chunk: chunk)
-        return GPUColorGrid(buffer: colorBuffer, cols: cols, rows: rows)
+        return GPUColorGrid(
+            buffer: colorBuffer, cols: cols, rows: rows,
+            content: sourceStride(steps: step) > 1 ? .colors : .paletteIndices)
     }
 
     /// Encodes the step and fit work for `chunk` rows and commits it.
@@ -510,6 +537,7 @@ public final class MetalSimulation {
         viewParams.topRows = UInt32(twinHalfRows)
         viewParams.centreColumn = Float(centreColumn)
         viewParams.sourceStride = Float(stride)
+        viewParams.toned = stride > 1 ? 1 : 0
         memcpy(viewBuffer.contents(), &viewParams, MemoryLayout<ViewParams>.stride)
         encoder.setArgumentTable(fitTable)
         encoder.setComputePipelineState(
@@ -544,11 +572,11 @@ public final class MetalSimulation {
             memcpy(new + row * width, old + (row % capacity) * width, width)
         }
         let newStepTable = try Self.makeTable(
-            device: context.device, history: grown, second: stepBuffer, third: headBuffer)
+            device: context.device, addresses: [grown, stepBuffer, headBuffer])
         let newFitTable = try Self.makeTable(
-            device: context.device, history: grown, second: colorBuffer, third: viewBuffer)
+            device: context.device, addresses: [grown, colorBuffer, viewBuffer, paletteBuffer])
         let newSeedTable = try Self.makeTable(
-            device: context.device, history: grown, second: seedBuffer, third: blockBuffer)
+            device: context.device, addresses: [grown, seedBuffer, blockBuffer])
         context.makeResident([grown])
         context.removeResident(history)
         history = grown
@@ -563,16 +591,25 @@ public final class MetalSimulation {
 
     private static func makeTable(
         device: any MTLDevice,
-        history: any MTLBuffer,
-        second: (any MTLBuffer)?,
-        third: (any MTLBuffer)?
+        addresses: [any MTLBuffer]
     ) throws -> any MTL4ArgumentTable {
         let descriptor = MTL4ArgumentTableDescriptor()
-        descriptor.maxBufferBindCount = 3
+        descriptor.maxBufferBindCount = addresses.count
         let table = try device.makeArgumentTable(descriptor: descriptor)
-        table.setAddress(history.gpuAddress, index: 0)
-        if let second { table.setAddress(second.gpuAddress, index: 1) }
-        if let third { table.setAddress(third.gpuAddress, index: 2) }
+        for (index, buffer) in addresses.enumerated() {
+            table.setAddress(buffer.gpuAddress, index: index)
+        }
         return table
+    }
+
+    /// Uploads the entry's palette in the layout the span draw binds too, so a
+    /// toned cell averages the colours the index frames are drawn with.
+    private static func writePalette(_ palette: Palette, into buffer: any MTLBuffer) {
+        palette.table.withUnsafeBytes { bytes in
+            // SAFETY: `table` holds exactly 16 `SIMD4<Float>`, and the buffer is
+            // allocated at that same length.
+            guard let base = bytes.baseAddress else { return }
+            memcpy(buffer.contents(), base, 16 * MemoryLayout<SIMD4<Float>>.stride)
+        }
     }
 }

@@ -38,12 +38,13 @@
   advance together, and the camera zooms out continuously at the branches'
   growth rate so the whole growth stays in view.
   At the display floor one cell is one element of the surface; past it the
-  camera keeps pulling back by reducing a wider block of the stored history per
-  cell, so the seed stays on the horizon and the newest rows stay on the outer
-  edges at decreasing resolution instead of older rows leaving through the
-  horizon. The history ring grows with the run so no row is dropped. The run
-  starts at 40 source rows per second (`.timed`); each branch fills half the
-  window, so the visible growth speed matches a single run at 20. The
+  camera keeps pulling back by averaging a wider block of the stored history
+  into each cell and drawing that average as tone, so the seed stays on the
+  horizon and the newest rows stay on the outer edges at decreasing resolution
+  instead of older rows leaving through the horizon. The history ring grows with
+  the run so no row is dropped. The run starts at 40 source rows per second
+  (`.timed`); each branch fills half the window, so the visible growth speed
+  matches a single run at 20. The
   window's drawable is allocated at the floor's grid size, and the run simulates
   a board ten windows wide, so the pattern keeps evolving after it leaves the
   first view. An entry whose pattern drifts sideways (see `DisplayHints.follow`)

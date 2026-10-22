@@ -24,8 +24,8 @@ What must be covered:
   frames, and advances on each frame its target delivers; the pacing math;
   (Metal 4 only) the GPU
   seed shapes, a growing run, the window follow, a zoom refit, zoom's grid
-  resize, a display cell below the floor reducing its block rather than
-  sampling one cell of it, and the twin run's mirrored branches, step count,
+  resize, a display cell below the floor keeping its block's average colour,
+  and the twin run's mirrored branches, step count,
   reported horizon
   row, and seed row staying on the horizon past the display floor.
 - **Viewport** — `ViewportGeometry` columns/rows, the ten-window board width,
@@ -36,7 +36,8 @@ What must be covered:
 - **Reveal camera** — `RevealCamera` starts at 1×, never zooms in, matches the
   branches' growth one for one, and keeps pulling back below the display floor.
 - **Cell grid sink** — (Metal 4 only) an offscreen render fills each span with
-  its palette colour, a renderer handles a grid resize, the sink draws into
+  its palette colour, a toned grid is drawn with its cells' own colours, a
+  renderer handles a grid resize, the sink draws into
   whichever `RenderTarget` it is given and takes that target's limits and pixel
   format, a layer target has no surface before its first display-link update,
   and the sink serializes frames that share buffers.

@@ -176,12 +176,11 @@ final class CellGridRenderer {
     }
 
     private func writePalette(_ palette: Palette, into buffers: Buffers) {
-        var colors = [SIMD4<Float>](repeating: .zero, count: 16)
-        for index in 0..<palette.count { colors[index] = palette[index].simd }
-        colors.withUnsafeBytes { bytes in
-            if let base = bytes.baseAddress {
-                memcpy(buffers.palette.contents(), base, 16 * MemoryLayout<SIMD4<Float>>.stride)
-            }
+        palette.table.withUnsafeBytes { bytes in
+            // SAFETY: `table` holds exactly 16 `SIMD4<Float>`, and the buffer is
+            // allocated at that same length.
+            guard let base = bytes.baseAddress else { return }
+            memcpy(buffers.palette.contents(), base, 16 * MemoryLayout<SIMD4<Float>>.stride)
         }
     }
 

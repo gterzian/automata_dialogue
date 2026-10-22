@@ -167,6 +167,54 @@ final class CellGridTests: XCTestCase {
         }
     }
 
+    /// A toned grid — the below-floor minification, whose cells are already
+    /// colours — goes through the tone renderer and shows its cells' colours
+    /// rather than any palette index.
+    func testSinkDrawsATonedGridThroughTheToneRenderer() throws {
+        guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
+        let context = try GPUContext()
+        let spec = Catalog.spec(id: "E90")!
+        let cols = 4
+        let rows = 2
+        let cells = try XCTUnwrap(
+            context.device.makeBuffer(length: cols * rows * 4, options: .storageModeShared))
+        context.makeResident([cells])
+        // A mid tone no palette colour holds, so a span draw cannot produce it,
+        // and a different tone per row, so a flipped image cannot pass.
+        let top: [UInt8] = [120, 130, 140]
+        let bottom: [UInt8] = [140, 130, 120]
+        let bytes = cells.contents().bindMemory(to: UInt8.self, capacity: cols * rows * 4)
+        for cell in 0..<(cols * rows) {
+            let tone = cell < cols ? top : bottom
+            bytes[cell * 4] = tone[0]
+            bytes[cell * 4 + 1] = tone[1]
+            bytes[cell * 4 + 2] = tone[2]
+            bytes[cell * 4 + 3] = 255
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: cols, height: rows, mipmapped: false)
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .shared
+        let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
+        let sink = try CellGridSink(
+            target: OffscreenTarget(textures: [texture]), context: context)
+        sink.deliver(RenderFrame(
+            specID: spec.id,
+            gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows, content: .colors)))
+        XCTAssertNil(sink.errorDescription)
+
+        let drawn = readTexture(texture)
+        assertPixel(
+            drawn, width: cols, x: 0, y: 0,
+            bgra: PaletteColor(120.0 / 255, 130.0 / 255, 140.0 / 255),
+            message: "top-left cell")
+        assertPixel(
+            drawn, width: cols, x: cols - 1, y: rows - 1,
+            bgra: PaletteColor(140.0 / 255, 130.0 / 255, 120.0 / 255),
+            message: "bottom-right cell keeps the grid's row order")
+    }
+
     private func readTexture(_ texture: MTLTexture) -> [UInt8] {
         let bytesPerRow = texture.width * 4
         var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)

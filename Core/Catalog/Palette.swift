@@ -65,4 +65,13 @@ public struct Palette: Sendable, Hashable {
     }
 
     public var count: Int { colors.count }
+
+    /// The 16-entry `float4` table the Metal paths bind — the span draw's colours
+    /// and the below-floor fit's block average — so both read one layout: one row
+    /// per palette index, zero-filled past the last colour.
+    public var table: [SIMD4<Float>] {
+        var rows = [SIMD4<Float>](repeating: .zero, count: 16)
+        for index in 0..<count { rows[index] = self[index].simd }
+        return rows
+    }
 }

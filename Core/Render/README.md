@@ -1,10 +1,11 @@
 # Core/Render
 
-Turns a `ProgramSpec` into a `GPUColorGrid` (one `UInt8` palette index per
-display cell, row-major) that stays on the GPU, and draws it into whatever
+Turns a `ProgramSpec` into a `GPUColorGrid` (row-major; one palette index per
+display cell, or one colour per cell once a cell covers several source cells)
+that stays on the GPU, and draws it into whatever
 surface the frame's **render target** offers. The whole run — seed, step, fit,
-span compaction, draw — is GPU-resident; the CPU only sets the run's parameters
-and never moves cell data.
+compaction, draw — is GPU-resident; the CPU only sets the run's parameters and
+never moves cell data.
 
 ## Compute and render
 
@@ -16,7 +17,8 @@ knows where pixels go:
    the intro's and the beat's frame values. Neither reads or writes a target, a
    texture, or a pixel format.
 2. **Encode** turns that value into draw calls against a surface texture:
-   `CellGridRenderer`, `CollapseRenderer`, `SubmissionRenderer`. A renderer
+   `CellGridRenderer` (palette-index cells), `ToneGridRenderer` (colour cells),
+   `CollapseRenderer`, `SubmissionRenderer`. A renderer
    takes a `MTLTexture` and encodes; it never acquires, presents, or configures
    a surface.
 3. **Target** owns everything else about the destination: the pixel format the
@@ -50,23 +52,30 @@ One frame is a batch of dispatches plus a render pass, with explicit barriers.
    produced; `injection` overwrites the centre cell after each step.
 3. **Clip to the window** (`fit`): each display cell covers the block of source
    cells between its own sample position and the next cell's, so the blocks tile
-   the board. At a sampling stride of 1 a block is one cell; past the display
-   floor a block covers more, and the cell takes the block's most common value.
-   Rows the run has not reached and columns off the board count as background,
-   so a short board grows from the top. `fit_twin`
+   the board. At a sampling stride of 1 a block is one cell and the cell takes
+   its value; past the display floor a block covers more, and the cell takes the
+   block's **average colour** — a vote would erase a sparse pattern and beat
+   against the automaton's own lattice, so the cell keeps every state's share of
+   the block instead of one winner. Rows the run has not reached and columns off
+   the board count as background, so a short board grows from the top. `fit_twin`
    shares one horizon row between an upper branch growing up and a lower branch
    growing down: the seed row sits on the horizon and, as the history fills the
    branch, the newest row sits on its outer edge, so the pair grows away from
-   the horizon and mirrors exactly around it. Every grid cell is
+   the horizon and mirrors exactly around it. The horizon keeps the seed row
+   exactly rather than averaging it, because it is both branches' mirror axis
+   and the frame the intro hands over. Every grid cell is
    written each frame because nothing clears the grid between frames. Zoom
    changes `displayCols`/`displayRows` up to the display floor, where one cell
    is one element of the surface. Past the floor the grid stays there and the
    stride grows, so the fit reduces the whole history into the grid (see
    `ViewportGeometry.sourceStride`).
-4. **Draw** (`CellGridRenderer`): `runs` compacts each same-colour non-background
-   run into a `Span`, `encode_draw` writes the indirect draw arguments on the
-   GPU, and the render pass clears to the background and draws one instanced
-   quad per span. Draw cost follows the structure, not the grid area.
+4. **Draw** (`CellGridRenderer`, `ToneGridRenderer`): above the floor `runs`
+   compacts each same-colour non-background run into a `Span`, `encode_draw`
+   writes the indirect draw arguments on the GPU, and the render pass clears to
+   the background and draws one instanced quad per span, so draw cost follows the
+   structure, not the grid area. A toned grid has no palette index to compact and
+   a 1-bit stipple of its coverage would cost a span per ink cell, so it goes out
+   as one textured quad that samples the cells.
 
 Nothing crosses the CPU between the passes; the pass draws the compute output
 directly. That is why the window simulates a **board much wider than the
@@ -95,10 +104,12 @@ elements instead. Beyond the floor the grid stays at
 the floor size and the fit samples the history at `sourceStride` — one display
 cell per `stride` source cells on each axis — so the seed row stays on the
 horizon, the newest row on the outer edges, and no row is dropped as the whole
-history shrinks into the window. The history ring grows with the run (see
-Remaining work); the color buffer is sized once for the floor grid. The
-renderer's span buffer grows geometrically while the grid grows to the floor, so
-a run reallocates it a handful of times; a `CellGridSink` is created per
+history shrinks into the window. Those cells are colours, so the grid is four
+bytes per cell and sized once for the floor grid; earlier frames use the same
+buffer as one palette index per cell (see `GPUColorGrid.content`). The history
+ring grows with the run (see Remaining work). The renderer's span buffer grows
+geometrically while the grid grows to the floor, so a run reallocates it a
+handful of times; a `CellGridSink` is created per
 presented automaton, so the peak is released on the next Return. The CLI
 exposes no manual zoom, pan, speed, or restart controls: the reveal is one
 fixed animation.
@@ -190,10 +201,11 @@ buffer, so a frame must finish before the next one is written.
   drawable becomes the frame's surface, and presenting it shows the frame. A
   surface backed by something other than a layer implements the same protocol
   and nothing above it changes.
-- **Cell-grid sink** (`CellGridSink`, `CellGridRenderer`) — the sink draws each
-  delivered `GPUColorGrid` into the target's surface, and the renderer
-  compacts the grid into spans and draws them. The window refits every
-  display row each frame, so every frame recompacts the whole grid.
+- **Cell-grid sink** (`CellGridSink`, `CellGridRenderer`, `ToneGridRenderer`) —
+  the sink draws each delivered `GPUColorGrid` into the target's surface; a grid
+  of palette indices is compacted into spans, a grid of colours is drawn as one
+  textured quad. The window refits every display row each frame, so an index
+  frame recompacts the whole grid.
 - **Submission beat** (`ShaderSource.submission`, `SubmissionRenderer`,
   `SubmissionTimeline`, `WorkingIndicator.playSubmission`) — the two-clone part
   and the collapse into the intro's opening dot, on the indicator's target.
@@ -212,7 +224,7 @@ buffer, so a frame must finish before the next one is written.
   that floor may allocate.
 - **Reveal camera** (`RevealCamera`) — the continuous pull-back: the zoom that
   keeps the rows a branch has grown filling its half, never clamped; the fit's
-  block reduction carries the zoom below the display floor.
+  block average carries the zoom below the display floor.
 
 ## Metal 4 gotchas
 
@@ -266,31 +278,33 @@ buffer, so a frame must finish before the next one is written.
   ten-window board the whole board fits and further zoom-out shows background
   on each side; the pattern then shrinks into a centred strip. A longer reveal
   would need a wider board, which grows the history memory with it.
-- **The below-floor fit reduces a block by sampling it.** A display cell takes
-  the most common value of the block of source cells it covers, sampled at up to
-  three stratified positions per axis, so a block larger than 3 × 3 is estimated
-  rather than counted. A feature that covers less than half its block reduces to
-  background — which is why the twin layout's horizon row stays an exact sample:
-  the seed row is the axis the branches mirror around and the frame the intro
-  hands over. Counting the whole block instead would need a summed-area table
-  over the history. The blocks still re-round every frame as the stride moves,
-  so a pattern below the floor re-lays out rather than blurring: it can crawl,
-  just without duplicated rows and drifting edges. The fit outputs palette
-  indices, so no amount of reduction can soften an edge below one display cell.
-  A filtered minification would need colour in the grid (or a palette-aware
-  blend) and a textured draw, which gives up the span draw.
-- **The reveal's floor was measured at 0.25× on one machine.** A full frame at
-  the floor grid (2880 × 1600 from a 720 × 400 base: one step, `fit` over
-  4.6 M cells, span compaction, draw, GPU wait) takes 2.7 ms, and a pre-fitted
-  grid draws in 1.6 ms. The surface is allocated at the floor size from the
-  first frame, so the clear and draw cost is the floor cost even at 1×; only
+- **The below-floor fit estimates a block's colour from nine samples.** A
+  display cell averages the block of source cells it covers, read at up to three
+  stratified positions per axis, so a block larger than 3 × 3 is estimated rather
+  than counted: a feature smaller than its block is under-weighted, and its
+  colour can vary a little between neighbouring cells that cover the same
+  structure. A sparse pattern therefore fades as its cells start to cover more
+  than one source cell — a block holding one ink cell among four reads as a
+  quarter-tone — where an index cell of the same history is solid ink. The
+  horizon row stays an exact sample, because the seed row is the
+  axis the branches mirror around and the frame the intro hands over. Counting
+  the whole block instead would need a summed-area table over the history. The
+  blocks still re-round every frame as the stride moves, so a pattern below the
+  floor re-lays out rather than blurring: it can crawl, but its rows and edges
+  keep their place. A toned cell is one surface element, so no amount of
+  averaging softens an edge below that element.
+- **The reveal's floor was measured at 0.25× on one machine.** At a floor grid
+  of 2880 × 1599 (a 1440 × 800 pt window on a 2× display), an index frame at a
+  stride of 1 refits in 1.3 ms and draws in 0.7 ms, and a toned frame at a
+  stride of 2 refits in 2.1–3.2 ms and draws in 0.6–0.9 ms: the tone path reads
+  the same nine samples but has more cells inside the history to read, and its
+  draw is one quad instead of a span list. The surface is allocated at the floor
+  size from the first frame, so the draw cost is the floor cost even at 1×; only
   the grid's fit and compaction are smaller earlier. The span buffer is 16 B per
   cell, so the 8 M-cell cap is 128 MB at worst; the buffer is sized to the grid
-  the run actually reaches. The 2.7 ms figure is for one read per cell; below
-  the floor the fit reads up to nine, so the fit's share grows once the stride
-  passes 3. Re-measure on the target display; if 60 Hz
-  does not hold there, lower `ViewportGeometry.maximumGridCells` or raise the
-  floor rather than guessing.
+  the run actually reaches. Re-measure on the target display; if 60 Hz does not
+  hold there, lower `ViewportGeometry.maximumGridCells` or raise the floor rather
+  than guessing.
 - **The collapse intro has a fixed length.** It does not track the model's
   actual progress; Metal exposes no per-frame utilization figure. If inference
   outlasts the intro, the window holds the line until the choice lands. A
@@ -313,25 +327,25 @@ When `MTLCreateSystemDefaultDevice()` reports `.metal4`, `MetalTests` checks the
 `seed_row` kernel against every `BoardStart` shape, that a run grows from the
 seed, that a followed pattern scrolls the window at the boundary, that zoom
 resizes the grid without restarting the run, that a display cell below the
-floor reduces its block rather than sampling one cell of it, and that the twin
-layout grows
-both branches away from the horizon, mirrors them cell for cell, refits both
-on a zoom, and keeps the seed row on the horizon once the run outgrows the
-display floor (including across a history-ring growth). `RenderActorTests`
-asserts the actor runs off the main thread,
-delivers GPU-resident frames, advances on each frame the target delivers, and
-that `stopDriving` ends them, restarts, refits on
-zoom, and exposes the twin run's step count. `RevealCameraTests` pins the
+floor keeps the block's average colour instead of a vote, and that the twin
+layout grows both branches away from the horizon, mirrors them cell for cell,
+refits both on a zoom, and keeps the seed row on the horizon once the run
+outgrows the display floor (including across a history-ring growth).
+`RenderActorTests` asserts the actor runs off the main thread, delivers
+GPU-resident frames, advances on each frame the target delivers, and that
+`stopDriving` ends them, restarts, refits on zoom, and exposes the twin run's
+step count. `RevealCameraTests` pins the
 pull-back: it starts at 1×, never zooms in, matches the branches' growth one
 for one, and keeps pulling back below the display floor.
 `RenderTests` pins the pan anchor (`leadColumn`) to each start shape, the
 display floor, the sampling stride, and the twin grid's rows. `CellGridTests`
 reads the rendered
-texture back to check spans are filled with palette colours, that a renderer
-handles a grid resize, that the sink draws into whatever target it is given
-(with a target's own limits and pixel format), that a layer target has no
-surface before its first display-link update, and that the sink serializes
-frames sharing buffers.
+texture back to check spans are filled with palette colours, that a toned grid
+is drawn through the tone renderer with its cells' own colours and its row
+order, that a renderer handles a grid resize, that the sink draws into whatever
+target it is given (with a target's own limits and pixel format), that a layer
+target has no surface before its first display-link update, and that the sink
+serializes frames sharing buffers.
 `CollapseTests` checks the rest frame the reveal continues from, the opening
 frame the submission beat lands on, the submission timeline's phases, the seed
 retraction, that a seed reproduces one run, and that the cycle, the submission

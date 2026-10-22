@@ -38,6 +38,7 @@ public enum ShaderSource {
         float centreColumn;  // board column at the display's centre
         float sourceStride;  // source cells per display cell in each axis
         uint colors;         // palette entries the cells can hold
+        uint toned;          // 1 = a cell covers several source cells; write its colour
     };
 
     // The seed row. `mode` selects the `BoardStart` shape: 0 center cell,
@@ -185,12 +186,10 @@ public enum ShaderSource {
     // A display cell covers the block of source cells between its own sample
     // position and the next cell's, so the blocks tile the board with no gap and
     // no overlap. At stride 1 a block is one cell and the mapping is exact; past
-    // the display floor the stride grows and each block covers more, so the fit
-    // reduces the block to its most common value. A single sample per block
-    // instead drops and duplicates rows and columns, makes a periodic pattern
-    // beat against the sampling lattice, and changes the angle of a diagonal
-    // edge. Rows the run has not reached and columns off the board count as
-    // background, so a short board grows into the grid.
+    // the display floor the stride grows and the block is read at a few evenly
+    // spread points. Rows the run has not reached and columns off the board
+    // count as background, so a short board grows into the grid and a block at
+    // the edge fades toward the page.
     static float column_origin(constant ViewParams& p) {
         return p.centreColumn - float(p.displayCols) * 0.5f * p.sourceStride;
     }
@@ -199,19 +198,25 @@ public enum ShaderSource {
         return int(round(origin + float(index) * stride));
     }
 
+    struct BlockCounts {
+        uint counts[4];
+        uint total;
+    };
+
     // At most three samples per axis, so a long run's stride does not turn the
     // fit into a loop over the whole block: a one- or two-cell block is sampled
-    // exactly, a larger one at the centre of evenly spread sub-blocks. Ties go to
-    // the lower index, which keeps a block that is half background background.
-    static uchar block_value(device const uchar* history, constant ViewParams& p,
-                             int firstRow, int rows, int firstColumn, int columns) {
-        if (rows <= 0 || columns <= 0) { return 0; }
+    // exactly, a larger one at the centre of evenly spread sub-blocks.
+    static BlockCounts block_counts(device const uchar* history, constant ViewParams& p,
+                                    int firstRow, int rows, int firstColumn, int columns) {
+        BlockCounts result;
+        for (uint v = 0; v < 4; ++v) { result.counts[v] = 0; }
+        result.total = 0;
+        if (rows <= 0 || columns <= 0) { return result; }
         // The catalog's automata have two or three states; a palette index above
         // the last one cannot occur.
         uint values = min(p.colors, 4u);
         uint rowTaps = uint(min(rows, 3));
         uint columnTaps = uint(min(columns, 3));
-        uint counts[4] = {0, 0, 0, 0};
         for (uint r = 0; r < rowTaps; ++r) {
             int row = firstRow + int((float(r) + 0.5f) * float(rows) / float(rowTaps));
             for (uint c = 0; c < columnTaps; ++c) {
@@ -222,14 +227,45 @@ public enum ShaderSource {
                     && column >= 0 && column < int(p.boardWidth)) {
                     value = history[uint(row) % p.capacity * p.boardWidth + uint(column)];
                 }
-                counts[min(uint(value), values - 1)] += 1;
+                result.counts[min(uint(value), values - 1)] += 1;
+                result.total += 1;
             }
         }
+        return result;
+    }
+
+    // The block's most common value, for a cell that is one source cell. Ties go
+    // to the lower index, which keeps a block that is half background background.
+    static uchar majority(BlockCounts b, uint values) {
         uint best = 0;
         for (uint v = 1; v < values; ++v) {
-            if (counts[v] > counts[best]) { best = v; }
+            if (b.counts[v] > b.counts[best]) { best = v; }
         }
         return uchar(best);
+    }
+
+    // The block's average palette colour, for a cell that covers several source
+    // cells. Voting would erase a sparse pattern — most of its blocks hold no
+    // ink — and would beat against the automaton's own lattice, so below the
+    // floor the cell keeps every state's share of the block instead of one
+    // winner, and the draw resolves the average as tone.
+    static uchar4 average(BlockCounts b, constant const float4* palette) {
+        float4 sum = float4(0.0);
+        for (uint v = 0; v < 4; ++v) { sum += palette[v] * float(b.counts[v]); }
+        float4 color = clamp(sum / float(max(b.total, 1u)), 0.0f, 1.0f);
+        return uchar4(color * 255.0f + 0.5f);
+    }
+
+    // One display cell in the frame's own format: a palette index above the
+    // floor and the block's average colour below it.
+    static void write_cell(device uchar* colorGrid, constant ViewParams& p, uint slot,
+                           BlockCounts counts, constant const float4* palette) {
+        if (p.toned == 0) {
+            colorGrid[slot] = majority(counts, min(p.colors, 4u));
+            return;
+        }
+        device uchar4* colors = (device uchar4*)colorGrid;
+        colors[slot] = average(counts, palette);
     }
 
     // The board column display cell `x` samples when one cell is one block. The
@@ -246,16 +282,18 @@ public enum ShaderSource {
     kernel void fit(device const uchar* history [[buffer(0)]],
                     device uchar* colorGrid [[buffer(1)]],
                     constant ViewParams& p [[buffer(2)]],
+                    constant float4* palette [[buffer(3)]],
                     uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
         float origin = column_origin(p);
         int firstRow = block_start(0.0f, int(gid.y), p.sourceStride);
         int firstColumn = block_start(origin, int(gid.x), p.sourceStride);
-        colorGrid[gid.y * p.displayCols + gid.x] = block_value(
+        BlockCounts counts = block_counts(
             history, p, firstRow,
             block_start(0.0f, int(gid.y) + 1, p.sourceStride) - firstRow,
             firstColumn,
             block_start(origin, int(gid.x) + 1, p.sourceStride) - firstColumn);
+        write_cell(colorGrid, p, gid.y * p.displayCols + gid.x, counts, palette);
     }
 
     // The reveal's mirrored pair: one shared horizon row at the centre, with
@@ -267,28 +305,35 @@ public enum ShaderSource {
     kernel void fit_twin(device const uchar* history [[buffer(0)]],
                          device uchar* colorGrid [[buffer(1)]],
                          constant ViewParams& p [[buffer(2)]],
+                         constant float4* palette [[buffer(3)]],
                          uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= p.displayCols || gid.y >= p.displayRows) return;
         uint halfRows = p.topRows;
         uint local = gid.y <= halfRows ? (halfRows - gid.y) : (gid.y - halfRows);
+        uint slot = gid.y * p.displayCols + gid.x;
         if (local == 0) {
             // The horizon is the axis both branches mirror around and the frame
             // the intro hands over, so it keeps the seed row exactly rather than
-            // reducing its block to background.
+            // reducing its block.
             uint column = 0;
             uchar value = 0;
             if (sample_column(p, gid.x, column)) { value = history[column]; }
-            colorGrid[gid.y * p.displayCols + gid.x] = value;
+            BlockCounts exact;
+            for (uint v = 0; v < 4; ++v) { exact.counts[v] = 0; }
+            exact.counts[min(uint(value), 3u)] = 1;
+            exact.total = 1;
+            write_cell(colorGrid, p, slot, exact, palette);
             return;
         }
         float origin = column_origin(p);
         int firstRow = block_start(0.0f, int(local), p.sourceStride);
         int firstColumn = block_start(origin, int(gid.x), p.sourceStride);
-        colorGrid[gid.y * p.displayCols + gid.x] = block_value(
+        BlockCounts counts = block_counts(
             history, p, firstRow,
             block_start(0.0f, int(local) + 1, p.sourceStride) - firstRow,
             firstColumn,
             block_start(origin, int(gid.x) + 1, p.sourceStride) - firstColumn);
+        write_cell(colorGrid, p, slot, counts, palette);
     }
     """
 
@@ -377,6 +422,36 @@ public enum ShaderSource {
 
     fragment float4 layer_fragment(LayerVertexOut in [[stage_in]]) {
         return in.color;
+    }
+    """
+
+    /// The below-floor minification: cells that are already colours, drawn as
+    /// one full-surface sample. A toned cell has no palette index to compact
+    /// into a span, and stippling the cell's coverage back into indices would
+    /// cost a span for every ink cell, so the tone grid is sampled directly.
+    public static let tone = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    struct ToneOut {
+        float4 position [[position]];
+        float2 uv;
+    };
+
+    vertex ToneOut tone_vertex(uint vid [[vertex_id]]) {
+        float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+        ToneOut out;
+        out.position = float4(positions[vid], 0.0, 1.0);
+        // The grid's first row is the top of the image, so v runs against the
+        // surface's y.
+        out.uv = float2(positions[vid].x * 0.5 + 0.5, 0.5 - positions[vid].y * 0.5);
+        return out;
+    }
+
+    fragment float4 tone_fragment(ToneOut in [[stage_in]],
+                                  texture2d<float> cells [[texture(0)]]) {
+        constexpr sampler s(filter::linear, address::clamp_to_edge);
+        return cells.sample(s, in.uv);
     }
     """
 

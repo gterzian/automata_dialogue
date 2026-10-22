@@ -10,6 +10,7 @@ import Metal
 public final class CellGridSink: FrameSink, @unchecked Sendable {
     public let target: any RenderTarget
     private let renderer: CellGridRenderer
+    private let toneRenderer: ToneGridRenderer
     private let lock = NSLock()
     private var finished = false
     private var lastError: String?
@@ -18,6 +19,8 @@ public final class CellGridSink: FrameSink, @unchecked Sendable {
         target.attach(to: context)
         self.target = target
         self.renderer = try CellGridRenderer(
+            context: context, pixelFormat: target.pixelFormat)
+        self.toneRenderer = try ToneGridRenderer(
             context: context, pixelFormat: target.pixelFormat)
     }
 
@@ -31,8 +34,13 @@ public final class CellGridSink: FrameSink, @unchecked Sendable {
         guard let spec = Catalog.spec(id: frame.specID) else { return }
         guard let surface = target.acquire() else { return }
         do {
-            try renderer.render(
-                gpu: frame.gpu, palette: spec.display.palette, into: surface.texture)
+            switch frame.gpu.content {
+            case .paletteIndices:
+                try renderer.render(
+                    gpu: frame.gpu, palette: spec.display.palette, into: surface.texture)
+            case .colors:
+                try toneRenderer.render(gpu: frame.gpu, into: surface.texture)
+            }
         } catch {
             lock.lock()
             lastError = error.localizedDescription

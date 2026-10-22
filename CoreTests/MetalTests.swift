@@ -134,11 +134,12 @@ final class MetalTests: XCTestCase {
         XCTAssertEqual(simulation.rows, 16)
     }
 
-    /// Below the display floor a display cell reduces the block of source cells it
-    /// covers instead of sampling one of them: rule 90 turns a full seed row into
-    /// an empty one, so at a stride of two every block is half ink and reduces to
-    /// background, where a single sample of the same block would show the ink.
-    func testFitReducesTheBlockBelowTheFloor() throws {
+    /// Below the display floor a display cell covers the block of source cells
+    /// around it, and the fit gives that cell their average colour. A block that
+    /// is half ink and half background lands between the two palette colours
+    /// instead of voting for one of them, and a block the run has not reached is
+    /// the page's own colour.
+    func testToneAveragesTheBlockBelowTheFloor() throws {
         guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
         let context = try GPUContext()
         let spec = Catalog.spec(id: "E90")!
@@ -148,18 +149,29 @@ final class MetalTests: XCTestCase {
         let simulation = try MetalSimulation(
             spec: spec, cols: cols, rows: rows, context: context, board: board)
 
-        let seed = values(try simulation.renderGPU(chunk: 0))
-        XCTAssertEqual(
-            rowCount(seed, row: 0, cols: cols), cols,
-            "one source cell per display cell shows the full seed row")
+        let seed = try simulation.renderGPU(chunk: 0)
+        XCTAssertEqual(seed.content, .paletteIndices, "one source cell per display cell is exact")
 
         // Eighteen rows over a nine-row span is a sampling stride of exactly two.
+        // Rule 90 turns the full seed row into an empty one, so the top display
+        // row covers one ink row and one background row and nothing else.
         _ = try simulation.renderGPU(chunk: 18)
         XCTAssertEqual(simulation.steppedRows, 18)
-        let reduced = values(try simulation.renderGPU(chunk: 0))
-        XCTAssertEqual(
-            reduced.filter { $0 != 0 }.count, 0,
-            "each block is one ink row and one background row, so it reduces to background")
+        let grid = try simulation.renderGPU(chunk: 0)
+        XCTAssertEqual(grid.content, .colors)
+
+        let palette = spec.display.palette
+        let cells = colors(grid)
+        let half = (palette[0].simd + palette[1].simd) / 2
+        for column in 0..<cols {
+            assertColor(
+                cells[column], near: half,
+                message: "the top row's blocks are half ink, so they keep the blend")
+        }
+        let untouched = cells[(rows - 1) * cols + cols / 2]
+        assertColor(
+            untouched, near: palette[0].simd,
+            message: "a block past the run's rows is the page's colour")
     }
 
     /// The twin layout shares one horizon row and grows away from it in both
@@ -247,7 +259,8 @@ final class MetalTests: XCTestCase {
 
     /// Past the display floor the fit samples the history at a coarser stride
     /// instead of dropping rows: the seed row stays on the horizon and the
-    /// newest row on the outer edges, so the whole growth stays in view.
+    /// newest row on the outer edges, so the whole growth stays in view. The
+    /// horizon keeps the seed row exactly, in the palette's ink colour.
     func testTwinKeepsTheSeedRowBelowTheDisplayFloor() throws {
         guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
         let context = try GPUContext()
@@ -268,19 +281,52 @@ final class MetalTests: XCTestCase {
         _ = try simulation.renderGPU(chunk: 60)
         _ = try simulation.renderGPU(chunk: 100)
         XCTAssertEqual(simulation.steppedRows, 160)
-        let grown = values(try simulation.renderGPU(chunk: 0))
-        let horizon = (0..<simulation.cols).filter {
-            grown[half * simulation.cols + $0] != 0
+        let grid = try simulation.renderGPU(chunk: 0)
+        XCTAssertEqual(grid.content, .colors)
+
+        let palette = spec.display.palette
+        let cells = colors(grid)
+        let horizon = (0..<simulation.cols).filter { column in
+            !isColor(cells[half * simulation.cols + column], near: palette[0].simd)
         }
         XCTAssertEqual(
             horizon, [simulation.cols / 2],
             "the seed cell sits on the horizon at every stride")
+        assertColor(
+            cells[half * simulation.cols + simulation.cols / 2], near: palette[1].simd,
+            message: "the horizon's seed cell is the ink colour")
     }
 
     private func values(_ grid: GPUColorGrid) -> [UInt8] {
         let cells = grid.buffer.contents().bindMemory(
             to: UInt8.self, capacity: grid.cols * grid.rows)
         return Array(UnsafeBufferPointer(start: cells, count: grid.cols * grid.rows))
+    }
+
+    /// A toned grid's cells, one normalised RGBA colour each.
+    private func colors(_ grid: GPUColorGrid) -> [SIMD4<Float>] {
+        let bytes = grid.buffer.contents().bindMemory(
+            to: UInt8.self, capacity: grid.cols * grid.rows * 4)
+        return (0..<(grid.cols * grid.rows)).map { cell in
+            let offset = cell * 4
+            return SIMD4<Float>(
+                Float(bytes[offset]), Float(bytes[offset + 1]),
+                Float(bytes[offset + 2]), Float(bytes[offset + 3])) / 255
+        }
+    }
+
+    private func isColor(_ color: SIMD4<Float>, near expected: SIMD4<Float>) -> Bool {
+        (0..<4).allSatisfy { abs(color[$0] - expected[$0]) <= 2.0 / 255 }
+    }
+
+    private func assertColor(
+        _ color: SIMD4<Float>, near expected: SIMD4<Float>, message: String
+    ) {
+        for channel in 0..<4 {
+            XCTAssertEqual(
+                color[channel], expected[channel], accuracy: 2.0 / 255,
+                "\(message) channel \(channel)")
+        }
     }
 
     private func rowCount(_ cells: [UInt8], row: Int, cols: Int) -> Int {
