@@ -16,8 +16,10 @@ What must be covered:
   repetition), states the answer format in both languages, and stays within the
   ~4k budget.
 - **Choice** — the parser (`id:` field, English and Chinese reasons, full-width
-  colon, markdown, prose fallback, longest-id match, unknown id) and the
-  recent-choice window (limit, exclusion note).
+  colon, markdown, prose fallback, longest-id match, unknown id), the
+  recent-choice window (limit, exclusion note), `AgentDialogue`'s turn and
+  accept/reject rules, `AgentBackend`'s argument parsing, and the reusable
+  prompt prefix (shared tokens, stopped at the first image placeholder).
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
   drawing is a uniform raster while a stroke reaches the raster; aspect-fit
   keeps a wide drawing's shape; a drawing normalizes to a square PNG; reference

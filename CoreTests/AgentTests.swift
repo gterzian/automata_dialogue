@@ -269,3 +269,102 @@ final class ChoiceHistoryTests: XCTestCase {
         XCTAssertTrue(history.userTurn("look").hasPrefix("look\n\n"))
     }
 }
+
+final class AgentBackendTests: XCTestCase {
+    /// `--engine` accepts any casing, so `coreai` and `coreAI` name one backend.
+    func testParsesTheEngineArgumentRegardlessOfCase() {
+        XCTAssertEqual(AgentBackend(argument: "mlx"), .mlx)
+        XCTAssertEqual(AgentBackend(argument: "MLX"), .mlx)
+        XCTAssertEqual(AgentBackend(argument: "coreai"), .coreAI)
+        XCTAssertEqual(AgentBackend(argument: "coreAI"), .coreAI)
+    }
+
+    func testRejectsAnUnknownEngine() {
+        XCTAssertNil(AgentBackend(argument: "onnx"))
+        XCTAssertNil(AgentBackend(argument: ""))
+    }
+
+    /// The argument spelling and the backend names `bench` prints stay stable,
+    /// so a recorded measurement can be matched to its runtime.
+    func testNamesAreStable() {
+        XCTAssertEqual(AgentBackend.allCases.map(\.rawValue), ["mlx", "coreai"])
+        XCTAssertEqual(AgentBackend.allCases.map(\.displayName), ["MLX", "Core AI"])
+    }
+}
+
+final class AgentDialogueTests: XCTestCase {
+    /// The first submission has no earlier choice to avoid, so the user turn is
+    /// the text alone.
+    func testTheFirstTurnExcludesNothing() {
+        let turn = AgentDialogue().turn(for: "look")
+        XCTAssertEqual(turn.prompt, "look")
+        XCTAssertTrue(turn.excluded.isEmpty)
+    }
+
+    /// An accepted choice joins the window, so the next turn carries its id in
+    /// the exclusion note and in the excluded set the answer is checked
+    /// against.
+    func testAnAcceptedChoiceIsExcludedFromTheNextTurn() {
+        var dialogue = AgentDialogue()
+        let first = dialogue.turn(for: "")
+        XCTAssertEqual(dialogue.accept("id: E90\nreason: holes", excluding: first.excluded)?.id, "E90")
+        let next = dialogue.turn(for: "")
+        XCTAssertEqual(next.excluded, ["E90"])
+        XCTAssertTrue(next.prompt.contains("E90"))
+    }
+
+    /// A repeated id is the failure the window exists to prevent: it is
+    /// rejected and does not re-enter the window.
+    func testRejectsAnExcludedID() {
+        var dialogue = AgentDialogue()
+        XCTAssertNil(dialogue.accept("id: E90\nreason: holes", excluding: ["E90"]))
+        XCTAssertTrue(dialogue.turn(for: "").excluded.isEmpty)
+    }
+
+    func testRejectsAnAnswerWithNoCatalogID() {
+        var dialogue = AgentDialogue()
+        XCTAssertNil(dialogue.accept("I cannot decide.", excluding: []))
+    }
+
+    func testResetDropsTheWindow() {
+        var dialogue = AgentDialogue()
+        _ = dialogue.accept("id: E90\nreason: holes", excluding: [])
+        dialogue.reset()
+        XCTAssertTrue(dialogue.turn(for: "").excluded.isEmpty)
+    }
+}
+
+final class PromptPrefixTests: XCTestCase {
+    /// The first run has nothing to reuse.
+    func testTheFirstRunReusesNothing() {
+        XCTAssertEqual(
+            PromptPrefix.reusableLength(of: [1, 2, 3], after: [], imageTokenID: 99), 0)
+    }
+
+    /// The whole prompt is reusable when the run repeats it.
+    func testARepeatedPromptIsReusable() {
+        XCTAssertEqual(
+            PromptPrefix.reusableLength(of: [1, 2, 3], after: [1, 2, 3], imageTokenID: 99), 3)
+    }
+
+    /// Two prompts share the system turn and diverge at the submission.
+    func testTheSharedPrefixEndsAtTheFirstDifference() {
+        XCTAssertEqual(
+            PromptPrefix.reusableLength(of: [1, 2, 7, 8], after: [1, 2, 3, 4], imageTokenID: 99), 2)
+    }
+
+    /// An image's embeddings belong to the run that encoded them, so a
+    /// run-length match that reaches into the image is not reusable.
+    func testReuseStopsAtTheFirstImagePlaceholder() {
+        XCTAssertEqual(
+            PromptPrefix.reusableLength(of: [1, 2, 99, 99], after: [1, 2, 99, 99], imageTokenID: 99), 2)
+        XCTAssertEqual(
+            PromptPrefix.reusableLength(of: [99, 99], after: [99, 99], imageTokenID: 99), 0)
+    }
+
+    /// A divergence before the image wins over the image's own position.
+    func testTheEarlierOfTheDifferenceAndTheImageStopsReuse() {
+        XCTAssertEqual(
+            PromptPrefix.reusableLength(of: [1, 5, 99], after: [1, 2, 99], imageTokenID: 99), 1)
+    }
+}

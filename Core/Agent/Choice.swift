@@ -15,10 +15,9 @@ public struct Choice: Sendable, Hashable, Codable {
     }
 }
 
-/// The engine's recent-choice window, carried across runs. Before each run the
-/// engine builds the user turn with `userTurn(_:)`, so the ids are submitted
-/// with the image and the system prompt stays a cacheable prefix. Older choices
-/// drop off once `limit` is reached.
+/// The recent-choice window, carried across runs by `AgentDialogue` and owned
+/// by the engine that runs this input. Older choices drop off once `limit` is
+/// reached.
 public struct ChoiceHistory: Sendable, Equatable {
     public static let limit = 20
 

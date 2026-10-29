@@ -8,8 +8,9 @@ and the Metal render core. Built by SwiftPM for tests and the CLI.
 - **AppKit-free.** `Core` compiles without AppKit so it stays testable and so
   the render core can run headless. Anything that needs a view or an
   `NSView`-backed layer lives in `CLI`.
-- **No external package dependencies.** The MLX VLM lives in a separate
-  `Agent` target that depends on `Core`, never the reverse.
+- **No external package dependencies.** The two agent backends live in their
+  own targets — `Agent` (MLX) and `AgentCoreAI` (Core AI) — that depend on
+  `Core`, never the reverse.
 - Default actor isolation is `nonisolated` (see `AGENTS.md` for the repo-wide
   concurrency rules).
 

@@ -2,8 +2,8 @@
 
 `rater-cli`, a SwiftPM executable built against `Core`. Commands:
 
-- `rater-cli rate <path|dir>...` — run the real MLX agent over reference
-  drawings and print the chosen id and latency per image, then a summary table.
+- `rater-cli rate <path|dir>...` — run the agent over reference drawings and
+  print the chosen id and latency per image, then a summary table.
   A path may be an image file or a directory, in which case its top-level
   images are rated (so `rate artifacts/` runs every drawing in the folder).
   Each image is normalized to the model's input through `Core/Import` (512×512
@@ -58,20 +58,28 @@
   the window stops the run. The reveal's top-left corner names the chosen id and
   title, its class in English and Chinese, and the model's reason in both
   languages.
-  `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
-  snapshot and never downloads; see `Agent/README.md`.
+  `--engine` picks the runtime: `mlx` (the default) loads a snapshot from
+  `--model <dir>` or `RATER_MODEL_PATH`, and `coreai` loads an exported bundle
+  from `--aimodel <dir>` or `RATER_AIMODEL_PATH`. Neither downloads; see
+  `Agent/README.md` and `AgentCoreAI/README.md`.
 - `rater-cli bench <path|dir>...` — the headless measurement path. Preloads the
   model and the system-prefix KV cache, then runs the agent once per image with
   no window or automaton. Prints each image's prefilled/cached prompt and
   generation token counts and seconds plus batch totals. `rate` is the product
   flow; use `bench` to compare a prompt or model change from a script, since
   `rate` blocks on Return. `--image-size <px>` sets the square input dimension
-  (default 512), so a single command sweeps the vision-token tradeoff.
-- `rater-cli classify <path|dir>...` — the headless accuracy path. Preloads the
-  model and system-prefix cache, runs each image once with no window, clears the
-  no-repeat window between images so the score measures classification and not
-  batch order, and prints `name<TAB>class<TAB>id` plus a class tally, so a
-  labeled reference set can be scored against the model.
+  (default 512), so a single command sweeps the vision-token tradeoff. The
+  debug header names the backend it timed, so timing the same images once per
+  `--engine` compares the two runtimes; the backends differ in what the prefill
+  reuses, so read the cached-token column as well as the seconds.
+- `rater-cli classify <path|dir>...` — the headless accuracy path. Takes the
+  same `--engine` selection as `rate`. Preloads the model and system-prefix
+  cache, runs each image once with no window, clears the no-repeat window
+  between images so the score measures classification and not batch order, and
+  prints `name<TAB>class<TAB>id` plus a class tally. An image beside an
+  `examples.json` manifest also gets its expected class, and the run ends with
+  `class accuracy: n/m`. A backend comparison reads both commands over the same
+  images: `classify` for class agreement, `bench` for prefill and generation.
 - `rater-cli catalog` — print the catalog and the generated index.
 
 `catalog` is AppKit-free. `rate` links AppKit to host the window and drives

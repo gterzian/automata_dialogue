@@ -1,7 +1,21 @@
 # Core/Agent
 
-The pure agent logic: nothing here links MLX. The MLX VLM wrapper
-(`AgentEngine`) is a separate `Agent` target that depends on `Core`.
+The pure agent logic: nothing here links MLX or Core AI. The two runtimes are
+separate targets — `Agent` and `AgentCoreAI` — that depend on `Core`.
+
+## Backends
+
+`AgentRunning` is one input's event stream. `AgentSession` adds the batch
+lifecycle the CLI needs: `prepare()` before the first run, `resetHistory()`
+between independent inputs, and `backend` (`mlx` or `coreAI`). The CLI holds an
+`AgentSession`, so a backend swap is invisible to the review loop.
+
+`AgentDialogue` is the bookkeeping both backends share: `turn(for:)` returns the
+user turn and the ids its answer may not use, and `accept(_:excluding:)` parses
+the answer, rejects a repeated or unknown id, and records the accepted one. Each
+engine owns one and passes its model's answer through it, so the no-repeat
+dialogue behaves the same whichever runtime produced the tokens. It lives here
+because `CoreTests` covers it without either engine.
 
 ## Per-input model
 
@@ -9,6 +23,16 @@ Each submitted input is one self-contained run: system prompt, one user turn
 (image and optional text), then one plain-text answer. The model context holds
 only the current input, so latency is constant and the system prompt is a
 stable cacheable prefix.
+
+## Prefix reuse
+
+The system prompt is identical on every run, so a backend prefills it once and
+reuses it. `PromptPrefix.reusableLength(of:after:imageTokenID:)` is the rule for
+deriving that length from a prompt: the leading tokens two prompts share,
+stopping at the first image placeholder, because an image's embeddings belong to
+the run that encoded them. The MLX backend's KV cache holds exactly the system
+prefix; the Core AI backend applies the rule where its engine keeps a token
+history (see `AgentCoreAI/README.md`).
 
 ## One answer, no tool call
 
@@ -38,13 +62,12 @@ parser is pure, so the MLX engine and the tests share one implementation.
 
 ## No repeats
 
-The dialogue must not replay the same automaton. The engine carries a
-`ChoiceHistory` of the last 20 chosen ids across runs and, before each run,
-builds the user turn with `ChoiceHistory.userTurn(_:)`, which appends a note
-that the listed ids were used recently and that an answer using one is invalid.
-That note rides with the image in the user turn, so the system prompt stays a
-cacheable prefix. The engine treats an excluded id the same as an unknown one:
-the run fails without recording a choice.
+The dialogue must not replay the same automaton. `AgentDialogue` keeps a
+`ChoiceHistory` of the last 20 chosen ids across runs; `AgentDialogue.turn(for:)`
+appends a note listing them and that an answer using one is invalid. That note
+rides with the image in the user turn, so the system prompt stays a cacheable
+prefix. A repeated id is treated like an unknown one: the run fails without
+recording a choice.
 
 ## Prompt
 
@@ -73,5 +96,7 @@ the prompt budget assumes the listing is grouped ids.
 ## Tests
 
 Choice parsing (the `id:` field, markdown, fallback to prose, the longest-id
-match, and an unknown id), the prompt's class descriptions and the per-class id
-sections, and the prompt budget.
+match, and an unknown id), `AgentDialogue`'s window and accept/reject rules,
+`AgentBackend`'s argument parsing, the reusable prompt prefix and where it
+stops, the prompt's class descriptions and the per-class id sections, and the
+prompt budget.

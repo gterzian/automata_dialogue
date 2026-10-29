@@ -33,7 +33,12 @@ public enum AgentEngineError: Error, LocalizedError {
 /// `class:` line and an `id:` line, and `ChoiceParser` reads the chosen entry
 /// out of the text. A reply without a usable catalog id fails the run; there is
 /// no repair pass.
-public actor AgentEngine: AgentRunning {
+///
+/// The Core AI backend (`AgentCoreAI`) is the other `AgentSession`; both hand
+/// their answer to `AgentDialogue`, so the dialogue is the same on either.
+public actor AgentEngine: AgentSession {
+    public nonisolated let backend = AgentBackend.mlx
+
     public struct Configuration: Sendable {
         /// The local Hugging Face snapshot directory to load. Models are never
         /// downloaded: a configuration with no directory fails the run. See
@@ -84,7 +89,7 @@ public actor AgentEngine: AgentRunning {
     private var promptCacheTask: Task<PromptCacheHolder, Error>?
     /// Recent choices, carried across runs. `perform` turns it into the
     /// user-turn exclusion note, so the dialogue never repeats an automaton.
-    private var history = ChoiceHistory()
+    private var dialogue = AgentDialogue()
 
     /// Carries the built system-prompt cache out of `ModelContainer.perform`.
     /// SAFETY: the snapshot is built from a fresh cache inside the container's
@@ -122,7 +127,7 @@ public actor AgentEngine: AgentRunning {
     /// earlier ids. `classify` uses it to measure each image's class
     /// independently of the others.
     public func resetHistory() {
-        history = ChoiceHistory()
+        dialogue.reset()
     }
 
     public nonisolated func run(_ input: AgentInput) -> AsyncThrowingStream<AgentEvent, Error> {
@@ -139,19 +144,16 @@ public actor AgentEngine: AgentRunning {
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async {
         do {
-            let excluded = Set(history.excludedIDs)
-            let prompt = history.userTurn(input.text)
+            let turn = dialogue.turn(for: input.text)
             let cache = try await promptCache()
 
-            let result = try await answer(cache: cache, to: prompt, imageURL: input.imageURL)
+            let result = try await answer(
+                cache: cache, to: turn.prompt, imageURL: input.imageURL)
             let response = result.text
-            let choice = Self.allowed(
-                ChoiceParser.choice(from: response), excluding: excluded)
             if !response.isEmpty { continuation.yield(.text(response)) }
             if let metrics = result.metrics { continuation.yield(.metrics(metrics)) }
 
-            if let choice {
-                history.record(choice.id)
+            if let choice = dialogue.accept(response, excluding: turn.excluded) {
                 continuation.yield(.choice(choice))
                 continuation.yield(.finished)
             } else {
@@ -162,11 +164,6 @@ public actor AgentEngine: AgentRunning {
             continuation.yield(.failed(error.localizedDescription))
             continuation.finish()
         }
-    }
-
-    private nonisolated static func allowed(_ choice: Choice?, excluding excluded: Set<String>) -> Choice? {
-        guard let choice, !excluded.contains(choice.id) else { return nil }
-        return choice
     }
 
     /// One generation pass over `prompt`; returns the full text and, when the

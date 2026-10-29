@@ -1,9 +1,10 @@
 # Agent
 
-The MLX VLM that implements `Core`'s `AgentRunning`. This is the only target
-that links `mlx-swift-lm`, `swift-huggingface`, and `swift-transformers`;
-everything the tests need lives in `Core/Agent` (see its README for the
-per-input model, the answer parsing, and the prompt).
+The MLX backend that implements `Core`'s `AgentSession`. It is the only target
+that links `mlx-swift-lm`, `swift-huggingface`, and `swift-transformers`; the
+Core AI backend is `AgentCoreAI`, and the per-input model, the prompt, the
+answer parsing, and the dialogue both backends share are in `Core/Agent` (see
+its README).
 
 ## Bridges
 
@@ -72,11 +73,12 @@ written.
   The 4B remains the sweet spot. The prompt now asks for a fourth `reason_zh:`
   line, so the figures above no longer describe the current generation cost;
   re-run `classify artifacts/` and `bench artifacts/` before trusting them.
-- Image-only turns and the three-line `class:`/`id:`/`reason:` answer work on the local
-  snapshots. The mixture rubric's soft boundary is a wholly ordered,
-  recognizable figure versus a picture that mixes order and randomness. The
-  expected class of every reference drawing is in `artifacts/README.md`; score
-  the set with `rater-cli classify artifacts/`.
+- Image-only turns and the four-line
+  `class:`/`id:`/`reason:`/`reason_zh:` answer work on the local snapshots. The
+  mixture rubric's soft boundary is a wholly ordered, recognizable figure versus
+  a picture that mixes order and randomness. The expected class of every
+  reference drawing is in `artifacts/README.md`; score the set with
+  `rater-cli classify artifacts/`, whose last line is the class agreement.
 - `AgentEngine` is not covered by `CoreTests`; test answer parsing in `Core`
   against `ChoiceParser` and test the model through the headless
   `rater-cli bench` (or the interactive `rater-cli rate`).

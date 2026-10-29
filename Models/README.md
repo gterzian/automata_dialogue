@@ -1,10 +1,12 @@
 # Models
 
-Local Hugging Face snapshots, loaded through
-`AgentEngine.Configuration.modelDirectory` (see `Agent/README.md`). The
-snapshot directories are git-ignored; only this file is tracked, so the verified
-hashes stay with the repo. The software never downloads a snapshot: it loads a
-directory that is already present, or fails.
+Model weights for the two backends, each loaded from a directory that is
+already present: `Agent` reads a Hugging Face MLX snapshot
+(`AgentEngine.Configuration.modelDirectory`), `AgentCoreAI` an exported Core AI
+bundle (`CoreAIEngine.Configuration.bundleDirectory`); see `Agent/README.md` and
+`AgentCoreAI/README.md`. The directories are git-ignored; only this file is
+tracked, so the verified hashes stay with the repo. The software never
+downloads a model: it loads a directory that is already present, or fails.
 
 ## Verified snapshots
 
@@ -33,13 +35,22 @@ since the engine loads the directory as-is.
 
 ## Running a snapshot
 
-The engine loads a snapshot directory (`--model` or `RATER_MODEL_PATH`) and has
-no downloader, so the directory must already exist or the run fails. The 4B
+The MLX engine loads a snapshot directory (`--model` or `RATER_MODEL_PATH`) and
+has no downloader, so the directory must already exist or the run fails. The 4B
 snapshot (`Models/Qwen3.5-4B-MLX-4bit`) is the recommended one. The engine's
 prompt, answer parsing, and `enable_thinking` context are model-agnostic, and
 mlx-swift-lm registers `gemma4` in its VLM factory, so a Gemma 4 snapshot runs
 through the same path. A relative `--model` path resolves against the current
 directory.
+
+## Core AI bundles
+
+A Core AI bundle is a directory of `.aimodel` assets plus `metadata.json`, made
+outside this software from a checkpoint (`AgentCoreAI/README.md` records the
+export). It sits beside the snapshots under `Models/` and is git-ignored the
+same way. Name it after the checkpoint it was exported from, since the bundle
+is a build artifact of that checkpoint rather than a file whose hash identifies
+it.
 
 ## Remaining work
 

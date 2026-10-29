@@ -1,6 +1,6 @@
 # AGENTS.md — Automata Rater
 
-Automata Rater: a macOS CLI where a local MLX agent chooses one of 111
+Automata Rater: a macOS CLI where a local agent chooses one of 111
 curated cellular automata to display for an input. The catalog and rubric live
 in the two artifacts in `artifacts/`.
 
@@ -30,7 +30,9 @@ diversity: latency is what makes the exchange feel live, and repeating an
 automaton breaks the dialogue outright, while an occasional off-class choice is
 acceptable. So prefer a faster, varied model over a slower, slightly more
 accurate one. Re-run the reference set (`artifacts/example_*.png`) whenever the
-prompt or model changes; see `Agent/README.md`.
+prompt or model changes, and read both numbers when comparing backends:
+`rater-cli classify artifacts/` for class agreement and `rater-cli bench
+artifacts/` for prefill and generation cost. See `Agent/README.md`.
 
 ## Rule Number One
 
@@ -40,8 +42,10 @@ repository.
 ## Rule Number Two: Network
 
 Never make network requests to external hosts without explicit prior approval.
-Use local resources only. (`huggingface.co` is unreachable from the sandbox;
-GitHub has been approved for cloning reference repositories into `/tmp`.)
+Use local resources only, and take approval host by host: GitHub is approved for
+cloning reference repositories into `/tmp`. `huggingface.co` and `pypi.org` do
+answer from this network, so exporting a model is possible — but only after the
+host is approved for it, and nothing downloads by itself.
 
 ## File-system boundaries
 
@@ -117,13 +121,14 @@ change, along with the affected tests, counts, and READMEs.
   permitted` before compiling anything.
 - A documentation-only change needs no build or test; run them when source,
   tests, or `Package.swift` change.
-- To see only warnings from this repo's targets (the `Agent` dependency tree
-  emits its own warnings from `.build/checkouts`):
+- To see only warnings from this repo's targets (the agent dependency trees
+  emit their own warnings from `.build/checkouts`):
   `swift build --disable-sandbox -c release 2>&1 | grep warning: | grep -v .build/checkouts`.
-- The `Agent` target links `mlx-swift-lm` and a large C++/Metal build, so every
-  SwiftPM command builds it. It needs Xcode's Metal toolchain component
-  (`xcodebuild -downloadComponent MetalToolchain`); without it the `metal`
-  shim has no compiler and `Cmlx` fails. The component is mounted under a
+- The `Agent` target links `mlx-swift-lm`'s C++/Metal build and the
+  `AgentCoreAI` target links `coreai-models`'s C++ `xgrammar` bridge, so every
+  SwiftPM command builds both. The MLX one needs Xcode's Metal toolchain
+  component (`xcodebuild -downloadComponent MetalToolchain`); without it the
+  `metal` shim has no compiler and `Cmlx` fails. The component is mounted under a
   path that names the mount, and SwiftPM caches that path in
   `.build/out/Intermediates.noindex/XCBuildData`, so after a boot the build can
   fail with `unable to spawn process …/Metal.xctoolchain/usr/bin/metal (No such
@@ -141,8 +146,8 @@ change, along with the affected tests, counts, and READMEs.
   model once from a normal Terminal, then `rater-cli bench` runs headless here
   (verified with `Models/Qwen3.5-4B-MLX-4bit`). `rate` remains the interactive
   path.
-- Toolchain: Swift 6.4, `swift-tools-version: 6.0`, macOS 26, strict
-  concurrency (`complete`).
+- Toolchain: Swift 6.4, `swift-tools-version: 6.0`, macOS 27 (Core AI's
+  minimum), strict concurrency (`complete`).
 
 ## Product decisions
 
@@ -166,14 +171,18 @@ change, along with the affected tests, counts, and READMEs.
    horizon. The indicator runs at 30 fps on a reduced drawable so it does not
    compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
-4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
-   testable; `Core` holds the prompt-building and answer-parsing logic. There is
-   no model-free fallback agent: the CLI always runs the model. See
+4. **Two inference backends behind one protocol.** `Core` holds the
+   prompt-building, the answer parsing, and the dialogue bookkeeping; `Agent`
+   runs MLX snapshots and `AgentCoreAI` runs exported Core AI bundles, both as
+   `Core`'s `AgentSession`. The CLI selects one with `--engine`, so the same
+   images and the same prompt can be timed on either runtime. There is no
+   model-free fallback agent: the CLI always runs a model. See
    `Core/Agent/README.md`.
-5. **Local models only.** The engine never downloads. It loads a snapshot
-   directory (`--model` or `RATER_MODEL_PATH`) through the directory-only
-   `loadModelContainer`, and a run with no directory fails. See
-   `Agent/README.md`.
+5. **Local models only.** The engines never download. The MLX backend loads a
+   snapshot directory (`--model` or `RATER_MODEL_PATH`) through the
+   directory-only `loadModelContainer`; the Core AI backend loads an exported
+   bundle (`--aimodel` or `RATER_AIMODEL_PATH`). A run with no directory fails.
+   See `Agent/README.md` and `AgentCoreAI/README.md`.
 6. **The review window's automaton runs on the GPU end to end.** The CPU sets
    the run's parameters; the board, the viewport clip, and the draw all stay on
    the GPU with no cell data read back to the CPU. The simulated board is much
@@ -292,3 +301,6 @@ sentence did not earn its place.
 - `uni03C0` window conventions: clone at `/tmp/uni03C0`.
 - `mlx-swift-lm` API: clone at `/tmp/mlx-swift-lm`. Verify API against the
   cloned source; never from memory.
+- Core AI API and the exporter: clone `apple/coreai-models` at
+  `/tmp/coreai-models`. The pinned revision is in `Package.swift`; verify API
+  and bundle layout against that checkout, never from memory.

@@ -1,5 +1,6 @@
 import AppKit
 import Agent
+import AgentCoreAI
 import Core
 import Foundation
 import Metal
@@ -77,9 +78,13 @@ func printUsage() -> Never {
     usage: rater-cli <command> [options]
 
       catalog                         print the catalog and prompt index
-      rate <path|dir> ...               run the MLX agent over reference images
+      rate <path|dir> ...               run the agent over reference images
         a directory contributes its top-level images; the batch cycles
-        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
+        options: [--engine mlx|coreai] [--model <dir>] [--aimodel <dir>]
+                 [--quiet] [--show-prompt] [--image-size <px>]
+        --engine picks the runtime: mlx (default) loads an MLX snapshot from
+        --model or RATER_MODEL_PATH, coreai loads an exported Core AI bundle
+        from --aimodel or RATER_AIMODEL_PATH. Neither downloads.
         The window opens on a black drawing page. Left and right arrows move
         through the carousel: the drawing page, then every image, then back to
         the drawing page. Draw by pressing the pointer down on the page and
@@ -87,16 +92,19 @@ func printUsage() -> Never {
         image as an image, plays the submission beat, then shows the chosen
         automaton's reveal until Return advances to the next page. Leaving the
         drawing page clears it. Closing the window stops the run.
-        (--model default: RATER_MODEL_PATH; downloads are disabled)
       bench <path|dir> ...              time the agent on the images, headless
-        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
+        options: [--engine mlx|coreai] [--model <dir>] [--aimodel <dir>]
+                 [--quiet] [--show-prompt] [--image-size <px>]
         Runs each image once with no window or automaton and prints the prompt
-        and generation cost, so a prompt or model change can be measured from
-        a terminal script.
+        and generation cost, so a prompt, model, or engine change can be
+        measured from a terminal script.
       classify <path|dir> ...           print each image's chosen class, headless
-        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
+        options: [--engine mlx|coreai] [--model <dir>] [--aimodel <dir>]
+                 [--quiet] [--show-prompt] [--image-size <px>]
         Runs each image once with no window and prints `name<TAB>class<TAB>id`
-        plus a class tally, so a labeled reference set can be scored.
+        plus a class tally. An image beside an `examples.json` manifest also
+        gets its expected class, and the run ends with the class agreement, so
+        a labeled reference set scores a backend's accuracy.
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
@@ -576,69 +584,116 @@ func imagePaths(from inputs: [String]) -> [String] {
     return paths
 }
 
-/// Parsed `rate` inputs: the images, the model, and the debug flags.
+/// Parsed `rate` inputs: the images, the selected agent, and the debug flags.
 struct RateSetup: Sendable {
     let paths: [String]
-    let configuration: AgentEngine.Configuration
+    /// The selected backend, ready to run. Every command below sees only
+    /// `AgentSession`, so `--engine` swaps the runtime without touching them.
+    let agent: any AgentSession
+    /// Where the agent's weights live, for the debug header.
+    let modelDescription: String
+    /// The square the input is normalized to before the model sees it.
+    let imageDimension: Int
     let verbose: Bool
     let showPrompt: Bool
 }
 
-/// Validates the `rate` arguments and resolves the model. Exits with usage on
-/// bad input, like the other commands.
+/// Reports a bad argument the way every command does: one line on stderr and
+/// the usage exit code.
+func usageError(_ message: String) -> Never {
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+    exit(2)
+}
+
+/// Validates the `rate` arguments and resolves the requested backend. Exits
+/// with usage on bad input, like the other commands.
 func rateSetup() -> RateSetup {
     let inputs = positional(from: arguments)
     guard !inputs.isEmpty else {
-        FileHandle.standardError.write(Data("rate: provide one or more image paths or directories\n".utf8))
-        exit(2)
+        usageError("rate: provide one or more image paths or directories")
     }
     let paths = imagePaths(from: inputs)
     guard !paths.isEmpty else {
-        FileHandle.standardError.write(Data("rate: no images found\n".utf8))
-        exit(2)
+        usageError("rate: no images found")
     }
     let flags = flags(from: arguments)
-    var configuration = AgentEngine.Configuration.fromEnvironment()
+    let backend = resolveBackend(flags: flags)
+    let dimension = resolveImageDimension(flags: flags)
+    var mlx = AgentEngine.Configuration.fromEnvironment()
+    var coreAI = CoreAIEngine.Configuration.fromEnvironment()
     if let model = flags["model"] {
-        configuration.modelDirectory = URL(
+        mlx.modelDirectory = URL(
             fileURLWithPath: NSString(string: model).expandingTildeInPath, isDirectory: true)
     }
-    if let raw = flags["image-size"] {
-        guard let size = Int(raw), size > 0 else {
-            FileHandle.standardError.write(
-                Data("rate: --image-size must be a positive integer\n".utf8))
-            exit(2)
-        }
-        configuration.imageDimension = size
+    if let bundle = flags["aimodel"] {
+        coreAI.bundleDirectory = URL(
+            fileURLWithPath: NSString(string: bundle).expandingTildeInPath, isDirectory: true)
     }
-    guard let directory = configuration.modelDirectory else {
-        FileHandle.standardError.write(Data(
-            "rate: no local model; pass --model <dir> or set RATER_MODEL_PATH (network downloads are disabled)\n".utf8))
-        exit(2)
+    mlx.imageDimension = dimension
+
+    let agent: any AgentSession
+    let directory: URL
+    let option: String
+    switch backend {
+    case .mlx:
+        agent = AgentEngine(configuration: mlx)
+        option = "--model <dir> or RATER_MODEL_PATH"
+        guard let configured = mlx.modelDirectory else {
+            usageError("rate: no local MLX snapshot; pass \(option) (downloads are disabled)")
+        }
+        directory = configured
+    case .coreAI:
+        agent = CoreAIEngine(configuration: coreAI)
+        option = "--aimodel <dir> or RATER_AIMODEL_PATH"
+        guard let configured = coreAI.bundleDirectory else {
+            usageError("rate: no local Core AI bundle; pass \(option) (downloads are disabled)")
+        }
+        directory = configured
     }
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
           isDirectory.boolValue else {
-        FileHandle.standardError.write(Data("rate: model directory not found: \(directory.path)\n".utf8))
-        exit(2)
+        usageError("rate: \(backend.displayName) model directory not found: \(directory.path)")
     }
     return RateSetup(
         paths: paths,
-        configuration: configuration,
+        agent: agent,
+        modelDescription: "\(backend.displayName) directory \(directory.path)",
+        imageDimension: dimension,
         verbose: flags["quiet"] == nil,
         showPrompt: flags["show-prompt"] != nil
     )
 }
 
-/// The resolved model and prompt size; `--show-prompt` adds the full prompt.
+/// The `--engine` value, defaulting to `RATER_ENGINE` and then to MLX.
+func resolveBackend(flags: [String: String]) -> AgentBackend {
+    let raw = flags["engine"]
+        ?? ProcessInfo.processInfo.environment["RATER_ENGINE"]
+    guard let raw, !raw.isEmpty else { return .mlx }
+    guard let backend = AgentBackend(argument: raw) else {
+        let names = AgentBackend.allCases.map(\.rawValue).joined(separator: "|")
+        usageError("rate: --engine must be one of \(names)")
+    }
+    return backend
+}
+
+/// The square side the input is normalized to; both backends take the same
+/// normalized image, so the comparison measures the runtimes alone.
+func resolveImageDimension(flags: [String: String]) -> Int {
+    guard let raw = flags["image-size"] else { return 512 }
+    guard let size = Int(raw), size > 0 else {
+        usageError("rate: --image-size must be a positive integer")
+    }
+    return size
+}
+
+/// The backend, model, and prompt size; `--show-prompt` adds the full prompt.
 /// Debug output is on unless `--quiet`.
 func printRateDebugHeader(_ setup: RateSetup) {
     guard setup.verbose else { return }
-    if let directory = setup.configuration.modelDirectory {
-        print("[debug] model: directory \(directory.path)")
-    } else {
-        print("[debug] model: none configured (downloads are disabled)")
-    }
+    print("[debug] engine: \(setup.agent.backend.rawValue) ("
+        + "\(setup.agent.backend.displayName))")
+    print("[debug] model: \(setup.modelDescription)")
     let prompt = SystemPrompt.build()
     print("[debug] system prompt: \(prompt.count) chars, ~\(SystemPrompt.estimatedTokenCount(of: prompt)) tokens")
     if setup.showPrompt {
@@ -663,7 +718,7 @@ struct RateOutcome: Sendable {
 /// unused automaton. `startedAt` keeps the reported seconds inclusive of the
 /// caller's normalization/export work.
 func runEngine(
-    engine: AgentEngine,
+    engine: any AgentSession,
     imageURL: URL,
     name: String,
     verbose: Bool,
@@ -710,7 +765,7 @@ func runEngine(
 /// Runs the agent over one image file. The engine carries the recent-choice
 /// window across the batch, so each image is asked to pick an unused automaton.
 func rateOne(
-    engine: AgentEngine,
+    engine: any AgentSession,
     path: String,
     directory: URL,
     dimension: Int,
@@ -736,7 +791,7 @@ func rateOne(
 
 /// Runs the agent over the drawing page's strokes.
 func rateDrawing(
-    engine: AgentEngine,
+    engine: any AgentSession,
     drawing: Drawing,
     directory: URL,
     dimension: Int,
@@ -766,7 +821,7 @@ enum ReviewInput: Sendable {
 
 func rateInput(
     _ input: ReviewInput,
-    engine: AgentEngine,
+    engine: any AgentSession,
     directory: URL,
     dimension: Int,
     verbose: Bool
@@ -835,7 +890,7 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
 @MainActor
 func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     printRateDebugHeader(setup)
-    let engine = AgentEngine(configuration: setup.configuration)
+    let engine = setup.agent
     // Load the weights while the first page is on screen. The first run then
     // pays only prefill and generation, not the snapshot load. A failure is
     // logged but not fatal: the run retries and reports it again.
@@ -883,7 +938,7 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             let turn = Task.detached(priority: .userInitiated) {
                 await rateInput(
                     input, engine: engine, directory: directory,
-                    dimension: setup.configuration.imageDimension, verbose: setup.verbose)
+                    dimension: setup.imageDimension, verbose: setup.verbose)
             }
             let submission = await submissionRaster(for: input)
             await presenter.beginSubmission(submission)
@@ -921,7 +976,7 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
 /// model change, where the interactive Returns of `rate` would block a script.
 func runBench(_ setup: RateSetup) async {
     printRateDebugHeader(setup)
-    let engine = AgentEngine(configuration: setup.configuration)
+    let engine = setup.agent
     do {
         try await engine.prepare()
     } catch {
@@ -932,16 +987,18 @@ func runBench(_ setup: RateSetup) async {
     let directory = ImageImport.sessionDirectory(for: sessionID)
     var chosen = 0
     var promptTokens = 0
+    var cachedTokens = 0
     var promptSeconds = 0.0
     var generationTokens = 0
     var generationSeconds = 0.0
     for path in setup.paths {
         let outcome = await rateOne(
             engine: engine, path: path, directory: directory,
-            dimension: setup.configuration.imageDimension, verbose: setup.verbose)
+            dimension: setup.imageDimension, verbose: setup.verbose)
         if printRateOutcome(outcome) != nil { chosen += 1 }
         for pass in outcome.metrics {
             promptTokens += pass.promptTokenCount
+            cachedTokens += pass.cachedPromptTokenCount
             promptSeconds += pass.promptTime
             generationTokens += pass.generationTokenCount
             generationSeconds += pass.generationTime
@@ -952,6 +1009,9 @@ func runBench(_ setup: RateSetup) async {
     print(String(
         format: "prompt: %d tokens / %.2fs (%.1f tok/s)",
         promptTokens, promptSeconds, Double(promptTokens) / max(promptSeconds, 0.001)))
+    if cachedTokens > 0 {
+        print(String(format: "  of which %d prompt tokens came from the cached prefix", cachedTokens))
+    }
     print(String(
         format: "generation: %d tokens / %.2fs (%.1f tok/s)",
         generationTokens, generationSeconds,
@@ -962,38 +1022,69 @@ func runBench(_ setup: RateSetup) async {
 /// print the chosen behavior class, so a labeled reference set can be scored.
 /// Each image is classified independently (the choice history is cleared), so
 /// the score measures the model, not the order of the batch; `bench` is the
-/// same path with timing and the product's no-repeat window.
+/// same path with timing and the product's no-repeat window. When the images
+/// sit beside an `examples.json` manifest, each line also records the expected
+/// class and the run ends with the class agreement, which is the accuracy a
+/// backend is compared on.
 func runClassify(_ setup: RateSetup) async {
     printRateDebugHeader(setup)
-    let engine = AgentEngine(configuration: setup.configuration)
+    let engine = setup.agent
     do {
         try await engine.prepare()
     } catch {
         FileHandle.standardError.write(
             Data("classify: preload failed: \(error.localizedDescription)\n".utf8))
     }
+    let expected: [String: Behavior]
+    do {
+        expected = try ReferenceLabels.load(forPaths: setup.paths)
+    } catch {
+        FileHandle.standardError.write(Data(
+            "classify: could not read \(ReferenceLabels.manifestName): \(error.localizedDescription)\n".utf8))
+        expected = [:]
+    }
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     var classified = 0
+    var labelled = 0
+    var agreed = 0
     var tally: [Behavior: Int] = [:]
     for path in setup.paths {
         await engine.resetHistory()
         let outcome = await rateOne(
             engine: engine, path: path, directory: directory,
-            dimension: setup.configuration.imageDimension, verbose: false)
+            dimension: setup.imageDimension, verbose: false)
+        let expectation = expected[path]
+        if expectation != nil { labelled += 1 }
         guard let choice = outcome.choice, let spec = Catalog.spec(id: choice.id) else {
-            print("\(outcome.name)\tFAILED\t\(outcome.failure ?? "no catalog id")")
+            print("\(outcome.name)\tFAILED\t\(outcome.failure ?? "no catalog id")"
+                + verdict(expectation, actual: nil))
             continue
         }
         classified += 1
         tally[spec.behavior, default: 0] += 1
-        print("\(outcome.name)\t\(spec.behavior.rawValue)\t\(choice.id)")
+        if expectation == spec.behavior { agreed += 1 }
+        print("\(outcome.name)\t\(spec.behavior.rawValue)\t\(choice.id)"
+            + verdict(expectation, actual: spec.behavior))
     }
     ImageImport.removeSessionDirectory(for: sessionID)
     let summary = Behavior.allCases
         .map { "\($0.rawValue) \(tally[$0, default: 0])" }
         .joined(separator: ", ")
     print("\n\(classified)/\(setup.paths.count) classified: \(summary)")
+    if labelled > 0 {
+        let percent = 100 * Double(agreed) / Double(labelled)
+        print(String(
+            format: "class accuracy: %d/%d (%.0f%%)", agreed, labelled, percent))
+    }
+}
+
+/// The last column of a `classify` line: empty for an unlabelled image, `ok`,
+/// or the class the manifest expects.
+func verdict(_ expected: Behavior?, actual: Behavior?) -> String {
+    guard let expected else { return "" }
+    guard expected != actual else { return "\tok" }
+    return "\texpected \(expected.rawValue)"
 }
 
 /// The windowed review: one screen-sized window, driven by Return and the left
