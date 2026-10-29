@@ -207,19 +207,34 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             view.frame = NSRect(origin: .zero, size: size)
             window.contentView = view
             view.window?.makeFirstResponder(view)
-        case .image(let url):
+        case .image(let url, let behavior):
             let view = NSImageView(frame: NSRect(origin: .zero, size: size))
             view.image = NSImage(contentsOf: url)
             view.imageScaling = .scaleProportionallyUpOrDown
-            // The letterbox is the same page the submission beat draws on.
+            // The reference drawings are drawn on black, so the letterbox is
+            // black too and the page reads as one dark field.
             view.wantsLayer = true
-            view.layer?.backgroundColor = Palette.standard(stateCount: 2)[0].cgColor
-            window.contentView = view
+            view.layer?.backgroundColor = NSColor.black.cgColor
+            window.contentView = labeled(view, size: size, behavior: behavior)
         }
         window.title = page.title
         currentPage = page
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Wraps a page in its overlay when the page has a known class; a page
+    /// with no label (the drawing page, or an image beside no manifest) is
+    /// shown as-is.
+    private func labeled(_ page: NSView, size: NSSize, behavior: Behavior?) -> NSView {
+        guard let behavior else { return page }
+        let overlay = PageOverlayView(
+            .init(
+                heading: "\(behavior.rawValue) · \(behavior.chineseName)",
+                style: .label))
+        let container = LabeledPageView(page: page, overlay: overlay)
+        container.frame = NSRect(origin: .zero, size: size)
+        return container
     }
 
     /// Clears the drawing page once a submitted drawing's turn is over.
@@ -228,8 +243,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     }
 
     /// Swaps the reveal for `spec` into the window and suspends until Return or
-    /// the window closes.
-    func present(_ spec: ProgramSpec) async {
+    /// the window closes. The corner block names the chosen entry and its
+    /// class and repeats the model's English and Chinese reasons.
+    func present(_ spec: ProgramSpec, choice: Choice) async {
         guard !isClosed else { return }
         guard GPUContext.isAvailable else {
             print("rate: no Metal 4 device; skipped \(spec.id)")
@@ -298,6 +314,15 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
 
         window.contentView = host
+        let overlay = PageOverlayView(.init(
+            heading: "\(spec.id) — \(spec.title)",
+            subheading: "\(spec.behavior.rawValue) · \(spec.behavior.chineseName)",
+            english: choice.rationale,
+            chinese: choice.rationaleChinese,
+            style: .detail))
+        let labeledHost = LabeledPageView(page: host, overlay: overlay)
+        labeledHost.frame = NSRect(origin: .zero, size: contentSize)
+        window.contentView = labeledHost
         window.title = "\(spec.id) — \(spec.title)"
         self.actor = actor
         self.sink = made
@@ -824,7 +849,15 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     }
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
-    let pages = InputPage.carousel(for: setup.paths)
+    let labels: [String: Behavior]
+    do {
+        labels = try ReferenceLabels.load(forPaths: setup.paths)
+    } catch {
+        FileHandle.standardError.write(Data(
+            "rate: could not read \(ReferenceLabels.manifestName): \(error.localizedDescription)\n".utf8))
+        labels = [:]
+    }
+    let pages = InputPage.carousel(for: setup.paths, labels: labels)
     var index = 0
     presenter.showPage(pages[index])
     var chosen = 0
@@ -840,7 +873,7 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             let page = pages[index]
             let input: ReviewInput
             switch page {
-            case .image(let url):
+            case .image(let url, _):
                 input = .image(path: url.path)
             case .drawing:
                 input = .drawing(presenter.currentDrawing ?? Drawing())
@@ -861,9 +894,9 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             let outcome = await turn.value
             await presenter.stopThinking()
             shown += 1
-            if let spec = printRateOutcome(outcome) {
+            if let spec = printRateOutcome(outcome), let choice = outcome.choice {
                 chosen += 1
-                await presenter.present(spec)
+                await presenter.present(spec, choice: choice)
             } else {
                 // Put the failed page back up so it is still reviewable.
                 presenter.showPage(page)

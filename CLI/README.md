@@ -17,7 +17,10 @@
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
   on-screen path: `RenderActor` + `CellGridSink` + a `MetalLayerTarget`; see
-  `Core/Render/README.md`). The window opens on the drawing page. Left and
+  `Core/Render/README.md`). The window opens on the drawing page. When an image
+  sits beside an `examples.json` reference manifest, its page shows the class it
+  illustrates in English and Chinese in the top-left corner; the window draws
+  that label and the image the model reads carries no text. Left and
   right arrows move through the carousel: the drawing page, then every image,
   then the drawing page again, so the drawing page is the wrap point at both
   ends. Draw by pressing the pointer down on the page and dragging: the stroke
@@ -52,7 +55,9 @@
   first view. An entry whose pattern drifts sideways (see `DisplayHints.follow`)
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
   controls. Return on the reveal advances to the next carousel page; closing
-  the window stops the run.
+  the window stops the run. The reveal's top-left corner names the chosen id and
+  title, its class in English and Chinese, and the model's reason in both
+  languages.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli bench <path|dir>...` — the headless measurement path. Preloads the

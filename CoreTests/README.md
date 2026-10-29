@@ -13,12 +13,15 @@ What must be covered:
 - **Prompt** — `SystemPrompt.build` embeds every catalog id under its class
   heading, describes all four classes, states that complexity requires both an
   ordered and a disordered part (so a recognizable figure such as the house is
-  repetition), states the answer format, and stays within the ~4k budget.
-- **Choice** — the parser (`id:` field, markdown, prose fallback, longest-id
-  match, unknown id) and the recent-choice window (limit, exclusion note).
+  repetition), states the answer format in both languages, and stays within the
+  ~4k budget.
+- **Choice** — the parser (`id:` field, English and Chinese reasons, full-width
+  colon, markdown, prose fallback, longest-id match, unknown id) and the
+  recent-choice window (limit, exclusion note).
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
   drawing is a uniform raster while a stroke reaches the raster; aspect-fit
-  keeps a wide drawing's shape; a drawing normalizes to a square PNG.
+  keeps a wide drawing's shape; a drawing normalizes to a square PNG; reference
+  labels come from the directory manifest and match the artifact README table.
 - **Render seam** — `RenderActor` runs off the main thread, delivers GPU
   frames, and advances on each frame its target delivers; the pacing math;
   (Metal 4 only) the GPU

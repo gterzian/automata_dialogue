@@ -28,7 +28,7 @@ public enum SystemPrompt {
 
     Do not look for an automaton that resembles the image. Match at the level of behavior: first decide which class of pattern the image shows, then choose an automaton whose behavior has that class. The image is a drawing, not a cellular automaton, so the match is conceptual, not visual. Every entry in the chosen class qualifies; pick the one whose overall character fits the image best. The class heading above your id must be the class on your first line; the answer is wrong when those differ.
 
-    Judge the drawn shapes, not the page: paper background, dotted grids, and UI labels carry no pattern.
+    Judge the drawn shapes, not the page: the page background, dotted grids, and UI labels carry no pattern.
 
     A recognizable subject does not by itself make a picture complexity. A house, a face, a letter, or a glyph drawn with plain regular parts is fully ordered, so it belongs to repetition, or to nesting when the same shape repeats at several scales. Complexity requires both order and randomness in the same picture.
 
@@ -81,17 +81,19 @@ public enum SystemPrompt {
 
     /// The exact reply shape the parser (`ChoiceParser`) understands. The
     /// class line comes first so the model commits to a class before choosing
-    /// an id, and the reason must name that class again. The parser reads only
-    /// the id and reason lines, so the class line cannot break parsing; it is
-    /// the answer's self-check. The reply starts with `class:` so a reason
-    /// sentence cannot become a preamble.
+    /// an id, and the reason must name that class again. The Chinese line is
+    /// the same reason so the review window can show both. The parser reads
+    /// only the id and the two reason lines, so the class line cannot break
+    /// parsing; it is the answer's self-check. The reply starts with `class:`
+    /// so a reason sentence cannot become a preamble.
     public static let answer = """
     ## How to answer
 
-    Reply with exactly three lines, starting with `class:` and no other text:
+    Reply with exactly four lines, starting with `class:` and no other text:
 
     class: <one of repetition, nesting, randomness, complexity>
     id: <one id from the section for that class>
-    reason: <one full sentence, not just the class name: the visible feature you matched, then the same class>
+    reason: <one full English sentence, not just the class name: the visible feature you matched, then the same class>
+    reason_zh: <the same reason in one Simplified Chinese sentence>
     """
 }

@@ -1,20 +1,28 @@
+import Core
 import Foundation
 
 /// One page of the input carousel. The drawing page is first; the carousel
 /// wraps, so it is also the page after the last image and sits at both ends.
 enum InputPage: Equatable {
     case drawing
-    case image(URL)
+    /// An image, plus the class it illustrates when the reference manifest
+    /// beside it says so; an arbitrary image has no label.
+    case image(URL, behavior: Behavior?)
 
     var title: String {
         switch self {
         case .drawing: "Draw"
-        case .image(let url): url.lastPathComponent
+        case .image(let url, _): url.lastPathComponent
         }
     }
 
-    static func carousel(for paths: [String]) -> [InputPage] {
-        [.drawing] + paths.map { .image(URL(fileURLWithPath: $0)) }
+    static func carousel(
+        for paths: [String],
+        labels: [String: Behavior] = [:]
+    ) -> [InputPage] {
+        [.drawing] + paths.map {
+            .image(URL(fileURLWithPath: $0), behavior: labels[$0])
+        }
     }
 }
 

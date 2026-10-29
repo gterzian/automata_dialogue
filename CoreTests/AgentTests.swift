@@ -52,7 +52,9 @@ final class SystemPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("class: <one of repetition, nesting, randomness, complexity>"))
         XCTAssertTrue(prompt.contains("id: <one id from the section for that class>"))
         XCTAssertTrue(prompt.contains(
-            "reason: <one full sentence, not just the class name: the visible feature you matched, then the same class>"))
+            "reason: <one full English sentence, not just the class name: the visible feature you matched, then the same class>"))
+        XCTAssertTrue(prompt.contains(
+            "reason_zh: <the same reason in one Simplified Chinese sentence>"))
     }
 
     /// The reason must be a sentence about the drawing, not the class name the
@@ -61,8 +63,8 @@ final class SystemPromptTests: XCTestCase {
     func testRequiresAFullSentenceReason() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains(
-            "Reply with exactly three lines, starting with `class:` and no other text:"))
-        XCTAssertTrue(prompt.contains("one full sentence, not just the class name"))
+            "Reply with exactly four lines, starting with `class:` and no other text:"))
+        XCTAssertTrue(prompt.contains("one full English sentence, not just the class name"))
     }
 
     /// The class line comes before the id so the model commits to a class, then
@@ -76,14 +78,12 @@ final class SystemPromptTests: XCTestCase {
             "the heading above your id must be the same word as the class on your first line and in your reason"))
     }
 
-    /// The reason and the chosen id must agree: the observed failure named
-    /// randomness in the reason and then replied with a complexity id.
-    func testRequiresTheIDToCarryTheClassTheReasonNames() {
+    /// The review window shows the reason in both languages, so the answer
+    /// carries the same sentence twice, once in English and once in Chinese.
+    func testRequiresAChineseCopyOfTheReason() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains(
-            "The class printed next to your id must be the class you decided; the answer is wrong when those differ."))
-        XCTAssertTrue(prompt.contains(
-            "the class after your id must be the same word as the class your reason names"))
+            "reason_zh: <the same reason in one Simplified Chinese sentence>"))
     }
 
     func testSaysToMatchByBehaviorNotLikeness() {
@@ -160,6 +160,32 @@ final class ChoiceParserTests: XCTestCase {
         let choice = ChoiceParser.choice(from: response)
         XCTAssertEqual(choice?.id, "E90")
         XCTAssertEqual(choice?.rationale, "nested Sierpinski holes match the drawing")
+    }
+
+    func testParsesTheChineseReason() {
+        let response = """
+        class: nesting
+        id: E90
+        reason: nested triangles repeat at several scales
+        reason_zh: 嵌套的三角形在多个尺度上重复
+        """
+        let choice = ChoiceParser.choice(from: response)
+        XCTAssertEqual(choice?.id, "E90")
+        XCTAssertEqual(choice?.rationale, "nested triangles repeat at several scales")
+        XCTAssertEqual(choice?.rationaleChinese, "嵌套的三角形在多个尺度上重复")
+    }
+
+    /// A Chinese-speaking model may write the field with a full-width colon.
+    func testParsesAChineseReasonWithAFullWidthColon() {
+        let response = "id: E90\nreason: holes\nreason_zh：嵌套的孔洞"
+        XCTAssertEqual(ChoiceParser.choice(from: response)?.rationaleChinese, "嵌套的孔洞")
+    }
+
+    /// A missing Chinese line leaves the reason empty rather than failing the
+    /// choice; the window then shows the English sentence alone.
+    func testMissingChineseReasonIsEmpty() {
+        let choice = ChoiceParser.choice(from: "id: E90\nreason: holes")
+        XCTAssertEqual(choice?.rationaleChinese, "")
     }
 
     func testParsesMarkdownEmphasis() {

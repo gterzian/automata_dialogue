@@ -30,6 +30,15 @@ model input keeps the shapes proportional.
 Normalization and raster rendering are called off the main thread by the
 review loop.
 
+## Reference labels
+
+`ReferenceLabels.load(forPaths:)` reads the `examples.json` manifest in an
+image's directory and maps its path to the `Behavior` it illustrates. The CLI
+shows that class in the carousel; the manifest is display metadata, so the
+normalized model input still contains only the drawing. A directory with no
+manifest labels nothing, while a manifest that cannot be decoded throws instead
+of silently dropping every label.
+
 ## Submission raster
 
 The review window plays the submission beat from a `RasterImage`, tightly

@@ -14,6 +14,13 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(Catalog.count(of: .complexity), 14)
     }
 
+    /// The review window labels both the input drawing and the chosen entry
+    /// with the class in English and Chinese, so every class needs both names.
+    func testBehaviorsHaveChineseNames() {
+        XCTAssertEqual(
+            Behavior.allCases.map(\.chineseName), ["重复", "嵌套", "随机", "复杂"])
+    }
+
     /// E62's single-cell triangle looks busy but is a period-3 weave, so it is
     /// repetition, not complexity (see `artifacts/`).
     func testE62IsRepetition() {

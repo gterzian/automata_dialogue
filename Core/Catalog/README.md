@@ -15,8 +15,9 @@ diverge.
 ## Types
 
 - `Behavior` — the four classes: `.repetition`, `.nesting`, `.randomness`,
-  `.complexity`. Every entry carries exactly one; the system prompt lists each
-  entry with its class instead of grouping.
+  `.complexity`. Every entry carries exactly one; the prompt groups the ids
+  under their class heading. `chineseName` is the label the review window shows
+  beside the English name.
 - `GPUProgram` — `.elementary(rule:)`, `.totalistic(code:colors:)`, or
   `.k2r2(code:)` (radius 2, binary, inventory §1.3); selects the step kernel
   and its constants.

@@ -12,18 +12,22 @@ stable cacheable prefix.
 
 ## One answer, no tool call
 
-There is no tool schema and no tool-dispatch round. The prompt asks for three
+There is no tool schema and no tool-dispatch round. The prompt asks for four
 lines:
 
 ```
 class: <one of repetition, nesting, randomness, complexity>
 id: <one id from the section for that class>
-reason: <one full sentence>
+reason: <one full English sentence>
+reason_zh: <the same reason in one Simplified Chinese sentence>
 ```
 
 The `class` line comes first so the model commits to a class before choosing an
 id; the id then comes from that class's section, and the reason names the same
-class. The parser reads only `id:` and `reason:`; the class line is ignored.
+class. The parser reads `id:`, `reason:`, and `reason_zh:`; the class line is
+ignored. The Chinese line repeats the reason for the review window, which shows
+both; an answer that omits it leaves the Chinese line empty and the choice
+still stands.
 
 `ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
 and otherwise taking the first catalog id anywhere in the text (longest match

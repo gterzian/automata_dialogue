@@ -8,6 +8,17 @@ public enum Behavior: String, Sendable, Hashable, CaseIterable, Codable {
     case nesting
     case randomness
     case complexity
+
+    /// The name shown beside the English one in the review window, so the
+    /// class the picture illustrates is legible to a Chinese-speaking user.
+    public var chineseName: String {
+        switch self {
+        case .repetition: "重复"
+        case .nesting: "嵌套"
+        case .randomness: "随机"
+        case .complexity: "复杂"
+        }
+    }
 }
 
 /// Up to 16 colors; index 0 is the background. Colors are

@@ -69,7 +69,9 @@ written.
   prompt, `Qwen3.5-9B-4bit` was not better: it matched 10/14 classes in
   `classify` and 9/14 in the no-repeat dialogue, against the 4B's 11/14 and
   10/14, while its per-run prefill plus generation was about 1.7–2× the 4B's.
-  The 4B remains the sweet spot. Re-check when the prompt or an example changes.
+  The 4B remains the sweet spot. The prompt now asks for a fourth `reason_zh:`
+  line, so the figures above no longer describe the current generation cost;
+  re-run `classify artifacts/` and `bench artifacts/` before trusting them.
 - Image-only turns and the three-line `class:`/`id:`/`reason:` answer work on the local
   snapshots. The mixture rubric's soft boundary is a wholly ordered,
   recognizable figure versus a picture that mixes order and randomness. The

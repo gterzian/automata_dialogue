@@ -4,10 +4,14 @@ import Foundation
 public struct Choice: Sendable, Hashable, Codable {
     public var id: String
     public var rationale: String
+    /// The same reason in Simplified Chinese, shown under the English sentence
+    /// in the review window. Empty when the answer omits the field.
+    public var rationaleChinese: String
 
-    public init(id: String, rationale: String) {
+    public init(id: String, rationale: String, rationaleChinese: String = "") {
         self.id = id
         self.rationale = rationale
+        self.rationaleChinese = rationaleChinese
     }
 }
 
@@ -42,9 +46,9 @@ public struct ChoiceHistory: Sendable, Equatable {
 }
 
 /// Extracts the chosen automaton from the model's plain-text answer. The
-/// prompt (`SystemPrompt`) asks for an `id:` line and a `reason:` line, but a
-/// model may add prose or ignore the format, so the parser first honours an
-/// explicit `id:` field and otherwise falls back to the first catalog id
+/// prompt (`SystemPrompt`) asks for `id:`, `reason:`, and `reason_zh:` lines,
+/// but a model may add prose or ignore the format, so the parser first honours
+/// an explicit `id:` field and otherwise falls back to the first catalog id
 /// mentioned anywhere. Pure and `nonisolated` so the MLX engine and the tests
 /// share one implementation.
 public enum ChoiceParser {
@@ -58,14 +62,20 @@ public enum ChoiceParser {
         guard let id = idField.flatMap({ firstID(in: $0, orderedIDs: orderedIDs) })
             ?? firstID(in: response, orderedIDs: orderedIDs)
         else { return nil }
-        return Choice(id: id, rationale: field(named: "reason", in: response) ?? "")
+        return Choice(
+            id: id,
+            rationale: field(named: "reason", in: response) ?? "",
+            rationaleChinese: field(named: "reason_zh", in: response) ?? "")
     }
 
     /// The text after the first `name:` at the start of a line, ignoring
     /// markdown emphasis around the name.
     private static func field(named name: String, in response: String) -> String? {
         for rawLine in response.split(separator: "\n", omittingEmptySubsequences: false) {
+            // A Chinese-speaking model may use a full-width colon after the
+            // field name, so both forms delimit the value.
             let line = rawLine
+                .replacingOccurrences(of: "：", with: ":")
                 .replacingOccurrences(of: "*", with: "")
                 .replacingOccurrences(of: "`", with: "")
                 .trimmingCharacters(in: .whitespaces)
