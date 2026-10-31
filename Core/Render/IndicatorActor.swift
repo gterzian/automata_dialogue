@@ -18,21 +18,29 @@ public actor IndicatorActor {
 
     public init() {}
 
-    /// Plays the submission beat for `image` on `target`, then the intro. The
-    /// context, renderer, and target are reused across runs, so the pipelines
-    /// compile once. `lineHalfThickness` is the half-height of the row the
-    /// cycle ends on in screen-height units, which the dot and the resting
-    /// hairline are scaled from; `cellHalfHeight` is half the height of the
-    /// cell the retraction lands on.
+    /// Creates the GPU objects and uploads the picture the beat draws, without
+    /// starting anything. The window prepares the beat before it swaps the
+    /// target in, so the shaders compile while the submitted page is still on
+    /// screen. A `nil` image prepares the intro alone.
+    public func prepare(_ image: RasterImage?, target: any RenderTarget) throws {
+        let indicator = try ensureIndicator(target: target)
+        if let image { try indicator.setSubmissionImage(image) }
+    }
+
+    /// Plays the submission beat on the image `prepare` uploaded, then the
+    /// intro. The context, renderer, and target are reused across runs, so the
+    /// pipelines compile once. `lineHalfThickness` is the half-height of the
+    /// row the cycle ends on in screen-height units, which the dot and the
+    /// resting hairline are scaled from; `cellHalfHeight` is half the height of
+    /// the cell the retraction lands on.
     public func playSubmission(
-        _ image: RasterImage,
         target: any RenderTarget,
         lineHalfThickness: Float,
         cellHalfHeight: Float
     ) throws {
         let indicator = try ensureIndicator(target: target)
-        try indicator.playSubmission(
-            image, lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
+        indicator.playSubmission(
+            lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
     }
 
     /// Starts the intro on `target` without a submission beat, creating the GPU

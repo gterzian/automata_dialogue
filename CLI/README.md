@@ -29,19 +29,21 @@
   Return submits the current page: for two seconds the image separates into a
   double exposure — two copies a fraction of its height apart — then the
   doubled screen collapses for half a second onto the dot the collapse intro
-  starts from, rejoining the two copies as it shrinks them. The submission beat
-  (`SubmissionTimeline`) and the intro (`CollapseTimeline`) run while the model
-  works; if the model outlasts them, the window freezes on the intro's rest
-  frame rather than a blank page. Every run draws a fresh variation, so the wait
-  never repeats itself. Once the chosen entry is known, an entry that seeds from
-  a single centred cell retracts the rest frame onto that cell, so the automaton
-  appears to start from the intro's last image; every other entry keeps the
-  line. A `.rand` entry redraws from a fresh row each time. The reveal then
-  grows the chosen entry as two mirrored branches from that line: one branch
-  grows upward and the other downward from the same horizon row. Both branches
-  advance together. The reveal opens on a close-up of the seed, where one cell
-  is eight of the window's base cells, and the camera zooms out from there at
-  the branches' growth rate so the whole growth stays in view.
+  starts from, rejoining the two copies as it shrinks them. The beat's
+  shaders compile and its picture uploads while the submitted page is still on
+  screen, so the swap to the beat never shows an empty frame. The submission
+  beat (`SubmissionTimeline`) and the intro (`CollapseTimeline`) run while the
+  model works; if the model outlasts them, the window freezes on the intro's
+  rest frame rather than a blank page. Every run draws a fresh variation, so
+  the wait never repeats itself. Once the chosen entry is known, an entry that
+  seeds from a single centred cell retracts the rest frame onto that cell, so
+  the automaton appears to start from the intro's last image; every other entry
+  keeps the line. A `.rand` entry redraws from a fresh row each time. The
+  reveal then grows the chosen entry as two mirrored branches from that line:
+  one branch grows upward and the other downward from the same horizon row.
+  Both branches advance together. The reveal opens on a close-up of the seed,
+  where one cell is eight of the window's base cells, and the camera zooms out
+  from there at the branches' growth rate so the whole growth stays in view.
   At the display floor one cell is one element of the surface; past it the
   camera keeps pulling back by averaging a wider block of the stored history
   into each cell and drawing that average as tone, so the seed stays on the
@@ -54,10 +56,15 @@
   a board ten windows wide, so the pattern keeps evolving after it leaves the
   first view. An entry whose pattern drifts sideways (see `DisplayHints.follow`)
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
-  controls. Return on the reveal advances to the next carousel page; closing
-  the window stops the run. The reveal's top-left corner names the chosen id and
-  title, its class in English and Chinese, and the model's reason in both
-  languages.
+  controls. The pull-back ends where its sampling widens the window to the
+  whole board, before the fit would show the page either side of the pattern:
+  the panel disappears, the picture squashes onto the horizon line, and the
+  window advances to the next carousel page as Return would. Return on the
+  reveal still advances early; closing the window stops the run. The reveal's
+  top-left panel puts a thumbnail of the submitted picture beside the model's
+  reasons in both languages, so the reasons read as commentary on the picture,
+  then names the answer below them: "The response is the automaton", the chosen
+  id and title, and its class in English and Chinese.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli bench <path|dir>...` — the headless measurement path. Preloads the
@@ -76,6 +83,24 @@
 
 `catalog` is AppKit-free. `rate` links AppKit to host the window and drives
 `Core/Render`'s on-screen sink.
+
+## Window views
+
+- **A panel's padding belongs in its content, not in a frame.**
+  `NSGlassEffectView` stretches its `contentView` over its own bounds, so a
+  frame set on the content view is discarded on the next layout.
+  `PageOverlayView` therefore draws its padding inside its own bounds and
+  `LabeledPageView` sizes the panel to that view.
+- **A `CAMetalLayer` shows nothing until its first drawable is presented.**
+  Give the layer the page background so a content swap does not flash the
+  window's colour, and prepare the GPU objects the swap depends on first:
+  `AutomatonWindow.beginSubmission` prepares the beat before it swaps it in.
+- **The reveal ends by squashing the page's frame.**
+  `LabeledPageView.collapseOntoHorizon` animates the page view's frame onto the
+  horizon line: AppKit resets a view's backing-layer transform at the next
+  layout, and `layoutPages` keeps the page at the collapsed height for the same
+  reason. The container is painted with the page colour, so the area the
+  picture leaves reads as the same page rather than the window's colour.
 
 ## Remaining work
 

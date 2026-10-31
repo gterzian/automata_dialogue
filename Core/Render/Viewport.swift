@@ -87,6 +87,17 @@ public enum ViewportGeometry {
         return max(1, Double(max(0, steps)) / Double(span))
     }
 
+    /// Source steps at which the sampling widens the window to the whole board.
+    /// The reveal ends the pull-back there, because past it the fit samples
+    /// columns off the board and shows the page either side of the pattern.
+    public static func stepsThatSpanBoard(
+        boardWidth: Int, cols: Int, span: Int
+    ) -> Int {
+        guard cols > 0, span > 0 else { return .max }
+        return max(
+            0, Int((Double(max(1, boardWidth)) * Double(span) / Double(cols)).rounded(.down)))
+    }
+
     /// Source rows from the shared horizon row to each outer edge.
     public static func twinHalfRows(rows: Int) -> Int {
         max(0, (max(1, rows) - 1) / 2)

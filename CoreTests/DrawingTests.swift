@@ -78,6 +78,10 @@ final class DrawingTests: XCTestCase {
         var drawing = Drawing(aspect: 1)
         drawing.beginStroke(at: .init(x: 0.5, y: 0.5))
         let raster = try XCTUnwrap(DrawingImage.raster(drawing, width: 32, height: 32))
+        // The window's thumbnail shows the same pixels through this image.
+        let shown = try XCTUnwrap(raster.cgImage)
+        XCTAssertEqual(shown.width, 32)
+        XCTAssertEqual(shown.height, 32)
         let png = try XCTUnwrap(raster.pngData())
         let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))

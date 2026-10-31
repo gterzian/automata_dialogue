@@ -107,32 +107,28 @@ change, along with the affected tests, counts, and READMEs.
 
 ## Build and test
 
-- **`xcodebuild` does not work in this sandbox.** Build and test with SwiftPM:
-  - `swift build --disable-sandbox -c release` — builds `Core`, `Agent`, and
-    `rater-cli`. **Anything the user runs** is a release build, so the CLI is at
-    `.build/release/rater-cli`.
-  - `swift test --disable-sandbox` — runs the unit tests.
-  SwiftPM's own sandbox cannot apply here, so the flag is required; plain
-  `swift build`/`swift test` fail with `sandbox_apply: Operation not
-  permitted` before compiling anything.
+- **`xcodebuild` does not work in this sandbox.** Build and test with the
+  SwiftPM commands in `README.md` → Setup. **Anything the user runs** is a
+  release build. SwiftPM's own sandbox cannot apply here, so every command
+  passes `--disable-sandbox`; plain `swift build`/`swift test` fail with
+  `sandbox_apply: Operation not permitted` before compiling anything.
 - A documentation-only change needs no build or test; run them when source,
   tests, or `Package.swift` change.
 - To see only warnings from this repo's targets (the `Agent` dependency tree
   emits its own warnings from `.build/checkouts`):
   `swift build --disable-sandbox -c release 2>&1 | grep warning: | grep -v .build/checkouts`.
 - The `Agent` target links `mlx-swift-lm` and a large C++/Metal build, so every
-  SwiftPM command builds it. It needs Xcode's Metal toolchain component
-  (`xcodebuild -downloadComponent MetalToolchain`); without it the `metal`
-  shim has no compiler and `Cmlx` fails. The component is mounted under a
-  path that names the mount, and SwiftPM caches that path in
+  SwiftPM command builds it. It needs Xcode's Metal toolchain component, which
+  `README.md` → Setup installs; without it the `metal` shim has no compiler and
+  `Cmlx` fails. The component is mounted under a path that names the mount, and
+  SwiftPM caches that path in
   `.build/out/Intermediates.noindex/XCBuildData`, so after a boot the build can
   fail with `unable to spawn process …/Metal.xctoolchain/usr/bin/metal (No such
   file or directory)` while `xcrun --find metal` resolves. Delete
   `.build/out/Intermediates.noindex/XCBuildData` and rebuild to pick up the new
-  mount. If the link instead fails with
-  undefined `_mlx_*` symbols, the `mlx-swift` checkout's `mlx-c` submodule is
-  empty; populate it once with `git -C .build/checkouts/mlx-swift submodule
-  update --init Source/Cmlx/mlx-c`.
+  mount. If the link instead fails with undefined `_mlx_*` symbols, the
+  `mlx-swift` checkout's `mlx-c` submodule is empty; populate it as `README.md`
+  → Setup describes.
 - **A model whose Metal kernels are not yet cached must first run outside the
   sandbox.** MLX compiles its Metal kernels on first use and writes
   the frontend module cache under `/var/folders/…/C/com.apple.metalfe`, which
@@ -163,7 +159,10 @@ change, along with the affected tests, counts, and READMEs.
    one display element the camera keeps pulling back by averaging a wider block
    of the history per cell and drawing that average as tone, so the whole growth
    stays in view at decreasing resolution instead of sliding out through the
-   horizon. The indicator runs at 30 fps on a reduced drawable so it does not
+   horizon. The pull-back ends where the window spans the whole board: the
+   picture squashes onto the horizon line and the exchange returns to the input
+   carousel, so the reveal never shows the page either side of the pattern. The
+   indicator runs at 30 fps on a reduced drawable so it does not
    compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
@@ -266,8 +265,8 @@ sentence did not earn its place.
 
 ## End-of-task flow
 
-1. Build and test: `swift build --disable-sandbox -c release` and `swift test
-   --disable-sandbox`; fix warnings and failures.
+1. Build and test with the commands in `README.md` → Setup; fix warnings and
+   failures.
 2. Double-check the work for completeness and accuracy. Search the whole repo,
    not only the files you touched, for dangling references to anything you
    removed or renamed; confirm every call site, test, and doc is updated;

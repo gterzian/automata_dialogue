@@ -126,6 +126,11 @@ final class MetalHostView: NSView {
         wantsLayer = true
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
+        // The layer shows this until its first drawable is presented. Matching
+        // the pages' background keeps a content swap from flashing the
+        // window's colour before the first frame lands.
+        metalLayer.backgroundColor = Palette.standard(stateCount: 2)[0].cgColor
+        metalLayer.isOpaque = true
     }
 
     @available(*, unavailable)
@@ -157,7 +162,8 @@ final class MetalHostView: NSView {
 /// Return or an arrow; `beginSubmission` doubles the submitted image and
 /// collapses it onto the intro's opening dot while the model works; `present`
 /// swaps the reveal's two mirrored automaton branches into the same window and
-/// suspends until Return or close. The key monitor calls `submit()` and
+/// suspends until Return, close, or the end of the pull-back, which squashes
+/// the branches onto the horizon line. The key monitor calls `submit()` and
 /// `navigate(_:)`; `NSApplication.run()` keeps delivering events while
 /// suspended.
 @MainActor
@@ -166,6 +172,11 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// window, so twice the single-run rate keeps the window-relative growth
     /// speed the same; this is the knob for how long the pull-back takes.
     private static let revealRowsPerSecond = 40.0
+    /// Seconds the reveal's picture takes to squash onto its horizon line once
+    /// the pull-back has reached the whole board, and the beat the line holds
+    /// before the next page appears.
+    private static let revealEndCollapseDuration: TimeInterval = 1.0
+    private static let revealEndRestDuration: TimeInterval = 0.35
 
     private var window: NSWindow?
     private var host: MetalHostView?
@@ -242,10 +253,13 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         canvas?.clear()
     }
 
-    /// Swaps the reveal for `spec` into the window and suspends until Return or
-    /// the window closes. The corner block names the chosen entry and its
-    /// class and repeats the model's English and Chinese reasons.
-    func present(_ spec: ProgramSpec, choice: Choice) async {
+    /// Swaps the reveal for `spec` into the window and suspends until Return,
+    /// close, or the end of the pull-back. The corner block shows the submitted
+    /// picture beside the model's English and Chinese reasons, and names the
+    /// chosen entry beneath them. Once the window spans the whole board the
+    /// reveal ends on its own: the block goes, the picture squashes onto the
+    /// horizon line, and the window advances as Return would.
+    func present(_ spec: ProgramSpec, choice: Choice, submitted: RasterImage?) async {
         guard !isClosed else { return }
         guard GPUContext.isAvailable else {
             print("rate: no Metal 4 device; skipped \(spec.id)")
@@ -314,11 +328,19 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
 
         window.contentView = host
+        var input: NSImage?
+        if let picture = submitted?.cgImage {
+            input = NSImage(
+                cgImage: picture,
+                size: NSSize(width: CGFloat(picture.width), height: CGFloat(picture.height)))
+        }
         let overlay = PageOverlayView(.init(
             heading: "\(spec.id) — \(spec.title)",
             subheading: "\(spec.behavior.rawValue) · \(spec.behavior.chineseName)",
             english: choice.rationale,
             chinese: choice.rationaleChinese,
+            caption: "The response is the automaton",
+            input: input,
             style: .detail))
         let labeledHost = LabeledPageView(page: host, overlay: overlay)
         labeledHost.frame = NSRect(origin: .zero, size: contentSize)
@@ -330,8 +352,40 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
+        let ending = Task { await self.endRevealWhenTheBoardFills(
+            actor: actor, page: labeledHost, rows: rows) }
         await waitForEnter()
+        ending.cancel()
         await stopRun()
+    }
+
+    /// Ends the reveal once its pull-back has widened the window to the whole
+    /// board: the panel goes, the picture squashes onto the horizon line, and
+    /// the window advances as Return would, so the exchange never sits with the
+    /// page showing either side of the pattern.
+    private func endRevealWhenTheBoardFills(
+        actor: RenderActor, page: LabeledPageView, rows: Int
+    ) async {
+        while !isClosed, !Task.isCancelled {
+            if await actor.revealSpansBoard { break }
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
+        }
+        guard !isClosed, !Task.isCancelled else { return }
+        await actor.stopDriving()
+        await page.collapseOntoHorizon(
+            lineScale: 1 / CGFloat(max(1, rows)),
+            duration: Self.revealEndCollapseDuration)
+        do {
+            try await Task.sleep(for: .seconds(Self.revealEndRestDuration))
+        } catch {
+            return
+        }
+        guard !isClosed, !Task.isCancelled else { return }
+        submit()
     }
 
     /// The submission beat and intro the review window shows while the model's
@@ -349,9 +403,6 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 contentSize: contentSize, scale: window.backingScaleFactor))
         host.metalLayer.magnificationFilter = .linear
         indicatorHost = host
-        window.contentView = host
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
 
         let actor = indicator ?? IndicatorActor()
         indicator = actor
@@ -378,9 +429,16 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             frameRate: CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30))
         indicatorTarget = target
         do {
-            if let image {
+            // Compile the pipelines and upload the picture before the beat
+            // replaces the page, so the swap lands on the first frame instead
+            // of a blank one.
+            try await actor.prepare(image, target: target)
+            window.contentView = host
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            if image != nil {
                 try await actor.playSubmission(
-                    image, target: target,
+                    target: target,
                     lineHalfThickness: lineHalfThickness,
                     cellHalfHeight: cellHalfHeight)
             } else {
@@ -391,8 +449,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             }
         } catch {
             print("rate: indicator failed: \(error.localizedDescription)")
-            await actor.shutdown()
-            indicator = nil
+            // The target is dropped with the context that failed on it, so the
+            // next run builds a pair that can attach.
+            await shutdownIndicator()
         }
     }
 
@@ -461,7 +520,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     }
 
     /// Resumes the pending page action on Return, or the reveal's wait when the
-    /// automaton is on screen. A Return while the model runs is ignored.
+    /// automaton is on screen, which the reveal's own ending also does. A
+    /// Return while the model runs is ignored.
     func submit() {
         guard !isClosed else { return }
         if let input = inputContinuation {
@@ -896,7 +956,7 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
             shown += 1
             if let spec = printRateOutcome(outcome), let choice = outcome.choice {
                 chosen += 1
-                await presenter.present(spec, choice: choice)
+                await presenter.present(spec, choice: choice, submitted: submission)
             } else {
                 // Put the failed page back up so it is still reviewable.
                 presenter.showPage(page)

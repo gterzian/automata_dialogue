@@ -40,25 +40,29 @@ public struct RasterImage: Sendable, Equatable {
             pixels: Data(bytes: bytes, count: width * height * 4))
     }
 
+    /// The pixels as a `CGImage`, for a view that shows the same picture the
+    /// model reads and for the PNG the caller encodes below.
+    public var cgImage: CGImage? {
+        guard let provider = CGDataProvider(data: pixels as CFData) else { return nil }
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: Self.bitmapInfo),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
+    }
+
     /// PNG data for the model's normalized input. ImageIO is not available on
     /// the GPU path, so the caller encodes here before the run starts.
     public func pngData() -> Data? {
-        let info = Self.bitmapInfo
-        guard let provider = CGDataProvider(data: pixels as CFData),
-              let image = CGImage(
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bitsPerPixel: 32,
-                bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: info),
-                provider: provider,
-                decode: nil,
-                shouldInterpolate: true,
-                intent: .defaultIntent
-              )
-        else { return nil }
+        guard let image = cgImage else { return nil }
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             data, "public.png" as CFString, 1, nil

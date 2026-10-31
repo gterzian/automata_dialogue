@@ -107,6 +107,33 @@ final class ViewportTests: XCTestCase {
             XCTAssertEqual((Double(span) * stride).rounded(), Double(steps))
         }
     }
+
+    /// The reveal ends where its sampling widens the window to the whole board:
+    /// at that step the columns still fit, and one more step would sample past
+    /// the board's edge.
+    func testBoardStepLimitIsWhereTheWindowSpansTheBoard() {
+        // A 1440 × 800 pt window on a 2× display: 2880 floor columns and 797
+        // rows per branch over the ten-window board.
+        let board = 7200
+        let cols = 2880
+        let span = 797
+        let limit = ViewportGeometry.stepsThatSpanBoard(
+            boardWidth: board, cols: cols, span: span)
+        XCTAssertEqual(limit, 1992)
+
+        let stride = ViewportGeometry.sourceStride(steps: limit, span: span)
+        XCTAssertLessThanOrEqual(Double(cols) * stride, Double(board))
+        let beyond = ViewportGeometry.sourceStride(steps: limit + 1, span: span)
+        XCTAssertGreaterThan(Double(cols) * beyond, Double(board))
+
+        // A run whose sampling cannot widen (a one-row twin grid) never ends
+        // this way, and a window that already spans the board ends at once.
+        XCTAssertEqual(
+            ViewportGeometry.stepsThatSpanBoard(boardWidth: board, cols: 0, span: span),
+            .max)
+        XCTAssertEqual(
+            ViewportGeometry.stepsThatSpanBoard(boardWidth: 160, cols: 80, span: 20), 40)
+    }
 }
 
 /// The pan anchor is computed from the `BoardStart` (mirroring the GPU

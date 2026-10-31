@@ -34,6 +34,14 @@ public actor RenderActor {
     /// The reveal camera, applied on each tick so the zoom moves with the
     /// growth instead of in main-actor polling steps.
     private var reveal: RevealSetup?
+    /// Source steps at which the pull-back has widened the window to the whole
+    /// board. Past it the fit samples columns off the board and shows the page
+    /// either side of the pattern, so the run ends here instead. Computed from
+    /// the grid the widest zoom-out reaches, which is where the limit is hit.
+    private var revealSpanLimit: Int?
+    /// Set once the pull-back has reached `revealSpanLimit`. The review window
+    /// ends the reveal on this.
+    public private(set) var revealSpansBoard = false
 
     public init() {}
 
@@ -61,6 +69,7 @@ public actor RenderActor {
         guard let context else { throw GPUContext.GPUError.noMetal4Device }
         finishRun()
         paceRemainder = 0
+        revealSpansBoard = false
         self.sink = sink
         let simulation = try MetalSimulation(
             spec: spec, cols: cols, rows: rows, context: context, board: board,
@@ -68,6 +77,11 @@ public actor RenderActor {
         )
         self.simulation = simulation
         self.reveal = reveal
+        self.revealSpanLimit = reveal.map { _ in
+            Self.spanLimit(
+                cols: cols, rows: rows, layout: layout,
+                boardWidth: (board ?? spec.board).width, minimumZoom: minimumZoom)
+        }
         // The seed frame is already the close-up the camera opens at, so the
         // first tick continues from it instead of jumping scale.
         if let reveal {
@@ -75,6 +89,26 @@ public actor RenderActor {
                 RevealCamera.zoom(steps: 0, branchRows: reveal.branchRows))
         }
         return try deliver(simulation, chunk: 0)
+    }
+
+    /// The steps at which the window's sampling spans `boardWidth`, measured on
+    /// the floor grid. The board is ten windows wide and the floor is at most
+    /// four times wider than the base grid, so the pull-back reaches the floor
+    /// long before it spans the board: the floor grid is the grid it crosses on.
+    private static func spanLimit(
+        cols: Int, rows: Int, layout: RunLayout,
+        boardWidth: Int, minimumZoom: Double
+    ) -> Int {
+        let floor = min(max(minimumZoom, ViewportGeometry.minimumZoomLimit), 1)
+        let floorCols = ViewportGeometry.zoomedColumns(baseCols: cols, zoom: floor)
+        let floorRows = layout == .twin
+            ? ViewportGeometry.twinRows(baseRows: rows, zoom: floor)
+            : ViewportGeometry.zoomedRows(baseRows: rows, zoom: floor)
+        let span = layout == .twin
+            ? ViewportGeometry.twinHalfRows(rows: floorRows)
+            : max(1, floorRows - 1)
+        return ViewportGeometry.stepsThatSpanBoard(
+            boardWidth: boardWidth, cols: floorCols, span: span)
     }
 
     /// Source rows the run has computed.
@@ -119,6 +153,7 @@ public actor RenderActor {
         guard let simulation else { return }
         do {
             try simulation.reseed(seed: UInt64.random(in: .min ... .max))
+            revealSpansBoard = false
             // A restarted run opens where a fresh one does.
             if let reveal {
                 simulation.setZoom(
@@ -146,6 +181,7 @@ public actor RenderActor {
         sink = nil
         simulation = nil
         reveal = nil
+        revealSpanLimit = nil
     }
 
     /// The last error from a driven run, if any. The clock tick cannot throw,
@@ -184,16 +220,40 @@ public actor RenderActor {
     }
 
     private func tick(delta: TimeInterval) throws {
-        let steps = pacing.steps(for: delta, remainder: &paceRemainder)
+        var steps = pacing.steps(for: delta, remainder: &paceRemainder)
         guard steps > 0 else { return }
         if let reveal, let simulation {
+            // The pull-back ends where the window's sampling spans the whole
+            // board.
+            if let limit = revealSpanLimit {
+                let remaining = limit - simulation.steppedRows
+                if remaining <= 0 {
+                    endReveal()
+                    return
+                }
+                steps = min(steps, remaining)
+            }
             // Refit without delivering: the frame the target draws is the one
             // `advance` delivers below, so a tick presents exactly once.
             let target = simulation.steppedRows + steps
             simulation.setZoom(RevealCamera.zoom(
                 steps: target, branchRows: reveal.branchRows))
+            _ = try advance(by: steps)
+            if let limit = revealSpanLimit, simulation.steppedRows >= limit {
+                endReveal()
+            }
+            return
         }
         _ = try advance(by: steps)
+    }
+
+    /// Stops the pull-back once it spans the whole board and reports it, so the
+    /// review window can end the reveal. The last frame it delivered is the
+    /// widest view: the fit never samples past the board's edge.
+    private func endReveal() {
+        guard !revealSpansBoard else { return }
+        revealSpansBoard = true
+        stopDriving()
     }
 
     /// Stops the frame loop `drive` started.

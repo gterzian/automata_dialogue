@@ -60,14 +60,20 @@ public final class WorkingIndicator: @unchecked Sendable {
             context: context, pixelFormat: target.pixelFormat)
     }
 
-    /// Plays the submission beat for `image`, then the intro. A fresh look is
-    /// drawn for this run, so the dot the image collapses onto is the same dot
-    /// the intro starts from. Safe to call after `stop()`.
+    /// Uploads the picture the beat draws, so the caller can prepare it while
+    /// the page being submitted is still on screen. `playSubmission` then
+    /// starts on a ready texture.
+    public func setSubmissionImage(_ image: RasterImage) throws {
+        try submissionRenderer.setImage(image)
+    }
+
+    /// Plays the submission beat on the uploaded image, then the intro. A fresh
+    /// look is drawn for this run, so the dot the image collapses onto is the
+    /// same dot the intro starts from. Safe to call after `stop()`.
     public func playSubmission(
-        _ image: RasterImage,
         lineHalfThickness: Float,
         cellHalfHeight: Float
-    ) throws {
+    ) {
         lock.lock()
         submissionStartedAt = 0
         introStartedAt = nil
@@ -80,7 +86,6 @@ public final class WorkingIndicator: @unchecked Sendable {
         self.lineHalfThickness = lineHalfThickness
         self.cellHalfHeight = cellHalfHeight
         lock.unlock()
-        try submissionRenderer.setImage(image)
         target.start { [weak self] _ in self?.draw() }
     }
 

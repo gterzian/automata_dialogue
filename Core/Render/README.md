@@ -91,7 +91,11 @@ leaves the viewport fixed and lets the growth fill it.
 The reveal's camera is the only zoom. It opens at `RevealCamera.startZoom` — a
 close-up where one cell is eight base cells — and lowers the zoom continuously
 so the rows each branch has grown then always fill its half: `RevealCamera.zoom`
-returns `min(startZoom, branchRows / (steps + 1))` and never stops. The seed
+returns `min(startZoom, branchRows / (steps + 1))`. The pull-back ends where the
+sampling widens the window to the whole simulated board
+(`ViewportGeometry.stepsThatSpanBoard`), so the fit never samples past the
+board's edge; `RenderActor` stops there and the review window ends the reveal
+(see `CLI/README.md`). The seed
 frame is delivered at that same scale, so the hand-off from the intro does not
 jump. A zoom is a grid refit and a
 redraw of the same surface, not a surface resize: the surface is allocated
@@ -280,11 +284,9 @@ buffer, so a frame must finish before the next one is written.
   holds tens to hundreds of MB, and a growth copy after a long run can pause
   the reveal. A cap would have to hold the camera there and let the oldest rows
   leave as before.
-- **The board bounds the horizontal zoom-out.** The fit's stride widens the
-  visible source window on both axes, so once the window spans more than the
-  ten-window board the whole board fits and further zoom-out shows background
-  on each side; the pattern then shrinks into a centred strip. A longer reveal
-  would need a wider board, which grows the history memory with it.
+- **The board bounds the reveal.** The pull-back ends once the window's
+  sampling spans the ten-window board, so a longer reveal would need a wider
+  board, which grows the history memory with it.
 - **The below-floor fit estimates a block's colour from nine samples.** A
   display cell averages the block of source cells it covers, read at up to three
   stratified positions per axis, so a block larger than 3 × 3 is estimated rather
@@ -341,12 +343,14 @@ outgrows the display floor (including across a history-ring growth).
 `RenderActorTests` asserts the actor runs off the main thread, delivers
 GPU-resident frames, advances on each frame the target delivers, that
 `stopDriving` ends them, restarts, refits on zoom, exposes the twin run's step
-count, and delivers the first frame of a reveal at the camera's close-up.
+count, delivers the first frame of a reveal at the camera's close-up, and ends
+the pull-back once the sampled window spans the whole board.
 `RevealCameraTests` pins the camera: it opens at the close-up, holds it while
 the branch has room, never zooms in, then matches the branches' growth one for
 one and keeps pulling back below the display floor. `RenderTests` pins the pan
 anchor (`leadColumn`) to each start shape, the display floor, the sampling
-stride, and the twin grid's rows. `CellGridTests`
+stride, the step count at which the window spans the board, and the twin grid's
+rows. `CellGridTests`
 reads the rendered
 texture back to check spans are filled with palette colours, that a toned grid
 is drawn through the tone renderer with its cells' own colours and its row

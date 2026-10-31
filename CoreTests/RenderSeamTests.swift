@@ -144,6 +144,46 @@ final class RenderActorTests: XCTestCase {
         await actor.shutdown()
     }
 
+    /// A driven reveal ends its pull-back once the sampled window spans the
+    /// whole board, and stops rather than showing the page either side of the
+    /// pattern: the last frame is the widest view the board allows.
+    func testRevealEndsWhenTheWindowSpansTheWholeBoard() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let sink = RecordingSink()
+        let target = OffscreenTarget(textures: [])
+        let actor = RenderActor()
+        // 20 columns and 10 rows per branch over a 40-column board: the window
+        // spans the board at a sampling stride of 2, which is 20 source steps.
+        let board = Board(width: 40, height: 16, start: .center)
+        _ = try await actor.configure(
+            spec: spec, cols: 20, rows: 21, board: board, layout: .twin,
+            reveal: RevealSetup(
+                branchRows: ViewportGeometry.twinHalfRows(rows: 21)),
+            sink: sink)
+        _ = sink.waitForFrame(timeout: 0.01)
+        await actor.drive(target: target, pacing: .fixed(100))
+
+        target.tick(1.0 / 30)
+        _ = sink.waitForFrame(timeout: 0.5)
+        let steps = await actor.steppedRows
+        let spansBoard = await actor.revealSpansBoard
+        XCTAssertEqual(steps, 20)
+        XCTAssertTrue(spansBoard)
+        let error = await actor.lastError
+        XCTAssertNil(error)
+
+        // The ended reveal stays put: a later tick delivers no new frame.
+        let delivered = sink.frames.count
+        target.tick(1.0 / 30)
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(sink.frames.count, delivered)
+
+        await actor.shutdown()
+    }
+
     /// `restart` returns to frame 0 and, for a `.rand` entry, draws a new seed
     /// row. The sink keeps receiving frames.
     func testRestartDeliversASeedFrame() async throws {
