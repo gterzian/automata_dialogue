@@ -160,8 +160,9 @@ change, along with the affected tests, counts, and READMEs.
    of the history per cell and drawing that average as tone, so the whole growth
    stays in view at decreasing resolution instead of sliding out through the
    horizon. The pull-back ends where the window spans the whole board: the
-   picture squashes onto the horizon line and the exchange returns to the input
-   carousel, so the reveal never shows the page either side of the pattern. The
+   picture is eaten back onto the horizon line and closed into its point, and
+   the exchange returns to the input carousel, so the reveal never shows the
+   page either side of the pattern. The
    indicator runs at 30 fps on a reduced drawable so it does not
    compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
@@ -266,7 +267,9 @@ sentence did not earn its place.
 ## End-of-task flow
 
 1. Build and test with the commands in `README.md` → Setup; fix warnings and
-   failures.
+   failures. The task is not finished until the release build
+   (`swift build --disable-sandbox -c release`) has succeeded, because that is
+   the binary the user runs.
 2. Double-check the work for completeness and accuracy. Search the whole repo,
    not only the files you touched, for dangling references to anything you
    removed or renamed; confirm every call site, test, and doc is updated;

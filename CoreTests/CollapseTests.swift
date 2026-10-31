@@ -211,8 +211,16 @@ final class CollapseTests: XCTestCase {
         let indicator = try WorkingIndicator(target: target, context: context)
         indicator.start(lineHalfThickness: 0.0035, cellHalfHeight: 0.014)
         XCTAssertTrue(indicator.target === target)
+        // The window swaps the indicator's layer in only after a presented frame
+        // has reached it: the first present lands at the next update, so the
+        // second one proves it, and a swap before that shows a bare layer.
+        XCTAssertFalse(indicator.hasPresentedFrame)
         target.tick(0)
         XCTAssertEqual(target.presentCount, 1)
+        XCTAssertFalse(indicator.hasPresentedFrame)
+        target.tick(0)
+        XCTAssertEqual(target.presentCount, 2)
+        XCTAssertTrue(indicator.hasPresentedFrame)
         XCTAssertNil(indicator.errorDescription)
         indicator.finish()
     }

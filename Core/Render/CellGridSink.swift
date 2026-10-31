@@ -13,6 +13,7 @@ public final class CellGridSink: FrameSink, @unchecked Sendable {
     private let toneRenderer: ToneGridRenderer
     private let lock = NSLock()
     private var finished = false
+    private var presentedFrames = 0
     private var lastError: String?
 
     public init(target: any RenderTarget, context: GPUContext) throws {
@@ -37,9 +38,12 @@ public final class CellGridSink: FrameSink, @unchecked Sendable {
             switch frame.gpu.content {
             case .paletteIndices:
                 try renderer.render(
-                    gpu: frame.gpu, palette: spec.display.palette, into: surface.texture)
+                    gpu: frame.gpu, palette: spec.display.palette,
+                    mask: frame.mask, into: surface.texture)
             case .colors:
-                try toneRenderer.render(gpu: frame.gpu, into: surface.texture)
+                try toneRenderer.render(
+                    gpu: frame.gpu, mask: frame.mask,
+                    background: spec.display.palette[0], into: surface.texture)
             }
         } catch {
             lock.lock()
@@ -48,6 +52,19 @@ public final class CellGridSink: FrameSink, @unchecked Sendable {
             return
         }
         surface.present()
+        lock.lock()
+        presentedFrames += 1
+        lock.unlock()
+    }
+
+    /// True once a presented frame has reached the layer. Presenting only makes
+    /// a drawable the layer's contents at the next display update, so the second
+    /// present proves the first landed; the window waits on this before it
+    /// swaps the layer in, and a swap sooner would show a bare layer.
+    public var hasPresentedFrame: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return presentedFrames >= 2
     }
 
     public func finish() {

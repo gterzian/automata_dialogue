@@ -43,6 +43,10 @@ public final class WorkingIndicator: @unchecked Sendable {
     /// matches the entry's first frame.
     private var finaleInk: PaletteColor?
     private var error: String?
+    /// Presenting makes a drawable the layer's contents at the next display
+    /// update, so the second present proves the first landed. The window waits
+    /// for that before it swaps the layer in.
+    private var presentedFrames = 0
 
     public init(
         target: any RenderTarget,
@@ -81,6 +85,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         finaleInk = nil
         finished = false
         settled = false
+        presentedFrames = 0
         error = nil
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
@@ -103,6 +108,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         finaleInk = nil
         finished = false
         settled = false
+        presentedFrames = 0
         error = nil
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
@@ -136,6 +142,16 @@ public final class WorkingIndicator: @unchecked Sendable {
         lock.lock()
         finished = true
         lock.unlock()
+    }
+
+    /// True once a presented frame has reached the layer. Presenting only makes
+    /// a drawable the layer's contents at the next display update, so the second
+    /// present proves the first landed; the window waits on this before it
+    /// swaps the layer in.
+    public var hasPresentedFrame: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return presentedFrames >= 2
     }
 
     /// The most recent render failure, if any. The display link has no place to
@@ -234,6 +250,9 @@ public final class WorkingIndicator: @unchecked Sendable {
             return
         }
         surface.present()
+        lock.lock()
+        presentedFrames += 1
+        lock.unlock()
         guard resting else { return }
         // The rest frame is static: stop drawing and leave the GPU to the model.
         target.freeze()

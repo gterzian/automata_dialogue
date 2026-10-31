@@ -31,7 +31,8 @@
   doubled screen collapses for half a second onto the dot the collapse intro
   starts from, rejoining the two copies as it shrinks them. The beat's
   shaders compile and its picture uploads while the submitted page is still on
-  screen, so the swap to the beat never shows an empty frame. The submission
+  screen, and the window swaps to the beat only after its first frame has been
+  presented, so a submission never shows a blank page. The submission
   beat (`SubmissionTimeline`) and the intro (`CollapseTimeline`) run while the
   model works; if the model outlasts them, the window freezes on the intro's
   rest frame rather than a blank page. Every run draws a fresh variation, so
@@ -58,13 +59,15 @@
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
   controls. The pull-back ends where its sampling widens the window to the
   whole board, before the fit would show the page either side of the pattern:
-  the panel disappears, the picture squashes onto the horizon line, and the
-  window advances to the next carousel page as Return would. Return on the
+  the panel disappears and the picture is eaten back onto the horizon line, in
+  place and with a wandering edge, the line closes into its centre point, and
+  the window advances to the next carousel page as Return would. Return on the
   reveal still advances early; closing the window stops the run. The reveal's
   top-left panel puts a thumbnail of the submitted picture beside the model's
   reasons in both languages, so the reasons read as commentary on the picture,
   then names the answer below them: "The response is the automaton", the chosen
-  id and title, and its class in English and Chinese.
+  id and title, and its class in English and Chinese. The × in the panel's
+  top-right corner closes it, leaving the automaton alone.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli bench <path|dir>...` — the headless measurement path. Preloads the
@@ -90,17 +93,20 @@
   `NSGlassEffectView` stretches its `contentView` over its own bounds, so a
   frame set on the content view is discarded on the next layout.
   `PageOverlayView` therefore draws its padding inside its own bounds and
-  `LabeledPageView` sizes the panel to that view.
-- **A `CAMetalLayer` shows nothing until its first drawable is presented.**
-  Give the layer the page background so a content swap does not flash the
-  window's colour, and prepare the GPU objects the swap depends on first:
-  `AutomatonWindow.beginSubmission` prepares the beat before it swaps it in.
-- **The reveal ends by squashing the page's frame.**
-  `LabeledPageView.collapseOntoHorizon` animates the page view's frame onto the
-  horizon line: AppKit resets a view's backing-layer transform at the next
-  layout, and `layoutPages` keeps the page at the collapsed height for the same
-  reason. The container is painted with the page colour, so the area the
-  picture leaves reads as the same page rather than the window's colour.
+  `LabeledPageView` sizes the panel to that view. The close button is a sibling
+  placed in the panel's top-right corner, so `PageOverlayView.closeReserve` must
+  keep that corner of the reason row clear of text.
+- **A `CAMetalLayer` shows nothing until a presented frame reaches it.**
+  Give the layer the page background, and swap a layer in only after that: a
+  present only lands at the next display update, so `hasPresentedFrame` waits
+  for the second one. `CellGridSink` and `WorkingIndicator` report it, and
+  `AutomatonWindow` waits on it before every content swap.
+- **The reveal's ending hides cells; it never rescales the picture.**
+  `RenderFrame.mask` travels to both draw paths, and each one draws the page
+  where the mask hides a cell: the tone shader returns the background, the span
+  shader discards. `RenderActor` animates the mask from `RevealTimeline` on the
+  clock's own ticks after the pull-back stops, so the ending costs one refit and
+  draw per frame and none of it is CPU-driven.
 
 ## Remaining work
 

@@ -67,16 +67,16 @@ struct CollapseVariation {
     }
 }
 
-/// The draw sequence behind `CollapseVariation.seeded`, so a run is
-/// reproducible from its seed.
-private struct SplitMix64 {
+/// The draw sequence behind `CollapseVariation.seeded` and
+/// `RevealVariation.seeded`, so a run is reproducible from its seed.
+struct SplitMix64 {
     private var state: UInt64
 
     init(seed: UInt64) {
         state = seed
     }
 
-    private mutating func next() -> UInt64 {
+    mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15
         var z = state
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9

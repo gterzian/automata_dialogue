@@ -87,6 +87,13 @@ public actor IndicatorActor {
         indicator?.collapseOntoSeedCell(seedInk: seedInk)
     }
 
+    /// True once a frame has been presented. The window waits on this before it
+    /// swaps the indicator's layer in, so the swap shows the animation's first
+    /// image rather than a bare layer. No indicator means nothing to wait for.
+    public var hasPresentedFrame: Bool {
+        indicator?.hasPresentedFrame ?? true
+    }
+
     /// True once the visible sequence rests on the frame the reveal continues
     /// from and has stopped drawing. No indicator means nothing is left to wait
     /// for.

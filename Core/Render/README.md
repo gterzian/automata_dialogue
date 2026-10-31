@@ -94,8 +94,11 @@ so the rows each branch has grown then always fill its half: `RevealCamera.zoom`
 returns `min(startZoom, branchRows / (steps + 1))`. The pull-back ends where the
 sampling widens the window to the whole simulated board
 (`ViewportGeometry.stepsThatSpanBoard`), so the fit never samples past the
-board's edge; `RenderActor` stops there and the review window ends the reveal
-(see `CLI/README.md`). The seed
+board's edge. `RenderActor` stops stepping there and plays the ending on the
+clock's own ticks: the frame's `RevealMask` closes from the whole picture onto
+the horizon row and then onto its centre point, and both draw paths draw the
+page where the mask hides a cell, so the picture is eaten in place rather than
+rescaled (see `CLI/README.md`). The seed
 frame is delivered at that same scale, so the hand-off from the intro does not
 jump. A zoom is a grid refit and a
 redraw of the same surface, not a surface resize: the surface is allocated
@@ -208,14 +211,25 @@ buffer, so a frame must finish before the next one is written.
   computed from), the frame loop, the surface the frame draws into, and
   presenting it. `MetalLayerTarget` is the on-screen implementation: its frame
   loop is a `CAMetalDisplayLink` (`preferredFrameLatency = 1`) whose update's
-  drawable becomes the frame's surface, and presenting it shows the frame. A
+  drawable becomes the frame's surface, and presenting it shows the frame. The
+  link delivers updates for a layer that is not in a window yet, so a presenter
+  can draw before the window swaps the layer in; the sink and the indicator
+  report when a presented frame has reached the layer (`hasPresentedFrame`,
+  which needs two presents because the first lands at the next update) and the
+  window waits for it, since a swap onto a layer with nothing presented shows
+  nothing. A
   surface backed by something other than a layer implements the same protocol
   and nothing above it changes.
 - **Cell-grid sink** (`CellGridSink`, `CellGridRenderer`, `ToneGridRenderer`) —
   the sink draws each delivered `GPUColorGrid` into the target's surface; a grid
   of palette indices is compacted into spans, a grid of colours is drawn as one
   textured quad. The window refits every display row each frame, so an index
-  frame recompacts the whole grid.
+  frame recompacts the whole grid. Both paths take the frame's `RevealMask` and
+  draw the page where it hides a cell.
+- **Reveal ending** (`RevealEnding`, `RevealMask`, `RevealTimeline`,
+  `RevealVariation`, `RenderActor.advanceEnding`) — the wipe that eats the
+  stopped picture back onto the horizon row and closes the line into its point,
+  with a seeded wander on its edges so no two runs eat the picture alike.
 - **Submission beat** (`ShaderSource.submission`, `SubmissionRenderer`,
   `SubmissionTimeline`, `WorkingIndicator.playSubmission`) — the two-clone part
   and the collapse into the intro's opening dot, on the indicator's target.
@@ -287,6 +301,14 @@ buffer, so a frame must finish before the next one is written.
 - **The board bounds the reveal.** The pull-back ends once the window's
   sampling spans the ten-window board, so a longer reveal would need a wider
   board, which grows the history memory with it.
+- **A toned grid's texture view requires a 16-byte row stride.**
+  `MTLBuffer.makeTexture` asserts that `bytesPerRow` is a multiple of 16 rather
+  than returning nil (verified: 4- and 8-byte rows trap, 16-byte rows work), so
+  `ToneGridRenderer`'s view over a toned grid needs `cols % 4 == 0`. A
+  screen-sized window usually gives that, but a window width whose floor grid
+  is not a multiple of four columns traps. Rounding the floor's column count up
+  to a multiple of four would fix it, at the cost of up to three background
+  columns at the right edge.
 - **The below-floor fit estimates a block's colour from nine samples.** A
   display cell averages the block of source cells it covers, read at up to three
   stratified positions per axis, so a block larger than 3 × 3 is estimated rather
@@ -343,8 +365,9 @@ outgrows the display floor (including across a history-ring growth).
 `RenderActorTests` asserts the actor runs off the main thread, delivers
 GPU-resident frames, advances on each frame the target delivers, that
 `stopDriving` ends them, restarts, refits on zoom, exposes the twin run's step
-count, delivers the first frame of a reveal at the camera's close-up, and ends
-the pull-back once the sampled window spans the whole board.
+count, delivers the first frame of a reveal at the camera's close-up, ends the
+pull-back once the sampled window spans the whole board, and plays the ending to
+its settled point.
 `RevealCameraTests` pins the camera: it opens at the close-up, holds it while
 the branch has room, never zooms in, then matches the branches' growth one for
 one and keeps pulling back below the display floor. `RenderTests` pins the pan
@@ -356,12 +379,18 @@ texture back to check spans are filled with palette colours, that a toned grid
 is drawn through the tone renderer with its cells' own colours and its row
 order, that a renderer handles a grid resize, that the sink draws into whatever
 target it is given (with a target's own limits and pixel format), that a layer
-target has no surface before its first display-link update, and that the sink
+target has no surface before its first display-link update, that a sink reports
+its first presented frame, and that the sink
 serializes frames sharing buffers.
 `CollapseTests` checks the rest frame the reveal continues from, the opening
 frame the submission beat lands on, the submission timeline's phases, the seed
 retraction, that a seed reproduces one run, and that the cycle, the submission
 beat, and the retraction reach their renderers, including that the intro draws
-through an offscreen target rather than a layer. The display-link presentation
-needs a screen and is not tested here; the animation's look is accepted by
+through an offscreen target rather than a layer and reports its first presented
+frame. `RevealEndingTests` pins the other animation's workflow: the mask starts
+on the untouched picture, eats it back to the horizon line, closes the line into
+its centre point and rests there; the upper edge leads the lower one; a seed
+reproduces one ending; and both draw paths draw the page where the mask hides a
+cell. The display-link presentation
+needs a screen and is not tested here; the animations' looks are accepted by
 visual inspection.

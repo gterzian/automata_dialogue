@@ -353,7 +353,27 @@ public enum ShaderSource {
     struct LayerUniforms {
         uint cols;
         uint rows;
+        float left;
+        float top;
+        float right;
+        float bottom;
+        float wobble;
+        float phase;
     };
+
+    // The ending's wipe hides a cell where it meets a wandering edge, so the
+    // picture is eaten by a line that is not perfectly straight. The phase is
+    // seeded per run; a full mask has zero wobble and hides nothing.
+    static float edge_offset(float x, float wobble, float phase) {
+        return wobble * (0.6f * sin(x * 17.0f + phase)
+                         + 0.4f * sin(x * 31.0f - phase * 1.7f));
+    }
+
+    static bool masked_out(constant LayerUniforms& u, float2 uv) {
+        if (uv.x < u.left || uv.x > u.right) { return true; }
+        float edge = edge_offset(uv.x, u.wobble, u.phase);
+        return uv.y < u.top + edge || uv.y > u.bottom - edge;
+    }
 
     // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
     struct DrawArguments {
@@ -401,6 +421,7 @@ public enum ShaderSource {
     struct LayerVertexOut {
         float4 position [[position]];
         float4 color;
+        float2 uv;
     };
 
     // One instance per span; six vertices form the quad. Row 0 is the top edge.
@@ -417,10 +438,15 @@ public enum ShaderSource {
         LayerVertexOut out;
         out.position = float4(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
         out.color = palette[s.color];
+        out.uv = float2(x, y);
         return out;
     }
 
-    fragment float4 layer_fragment(LayerVertexOut in [[stage_in]]) {
+    // The pass clears to the page, so a masked span is dropped rather than
+    // drawn in the background colour.
+    fragment float4 layer_fragment(LayerVertexOut in [[stage_in]],
+                                   constant LayerUniforms& u [[buffer(1)]]) {
+        if (masked_out(u, in.uv)) { discard_fragment(); }
         return in.color;
     }
     """
@@ -438,6 +464,24 @@ public enum ShaderSource {
         float2 uv;
     };
 
+    struct ToneUniforms {
+        float4 background;
+        float left;
+        float top;
+        float right;
+        float bottom;
+        float wobble;
+        float phase;
+    };
+
+    // The ending's wipe hides a cell where it meets a wandering edge, so the
+    // picture is eaten by a line that is not perfectly straight. The phase is
+    // seeded per run; a full mask has zero wobble and hides nothing.
+    static float edge_offset(float x, float wobble, float phase) {
+        return wobble * (0.6f * sin(x * 17.0f + phase)
+                         + 0.4f * sin(x * 31.0f - phase * 1.7f));
+    }
+
     vertex ToneOut tone_vertex(uint vid [[vertex_id]]) {
         float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
         ToneOut out;
@@ -448,8 +492,16 @@ public enum ShaderSource {
         return out;
     }
 
+    // A masked cell draws the page, so the picture is eaten in place instead of
+    // being rescaled into the band the mask leaves.
     fragment float4 tone_fragment(ToneOut in [[stage_in]],
-                                  texture2d<float> cells [[texture(0)]]) {
+                                  texture2d<float> cells [[texture(0)]],
+                                  constant ToneUniforms& u [[buffer(0)]]) {
+        float edge = edge_offset(in.uv.x, u.wobble, u.phase);
+        if (in.uv.x < u.left || in.uv.x > u.right
+            || in.uv.y < u.top + edge || in.uv.y > u.bottom - edge) {
+            return u.background;
+        }
         constexpr sampler s(filter::linear, address::clamp_to_edge);
         return cells.sample(s, in.uv);
     }

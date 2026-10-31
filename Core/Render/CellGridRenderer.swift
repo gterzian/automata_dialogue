@@ -24,6 +24,12 @@ final class CellGridRenderer {
     private struct LayerUniforms {
         var cols: UInt32
         var rows: UInt32
+        var left: Float
+        var top: Float
+        var right: Float
+        var bottom: Float
+        var wobble: Float
+        var phase: Float
     }
 
     private struct DrawArguments {
@@ -84,11 +90,17 @@ final class CellGridRenderer {
     }
 
     /// Draws a GPU-resident grid into `texture` and returns once the GPU has
-    /// finished, so the caller may read the texture back.
-    func render(gpu: GPUColorGrid, palette: Palette, into texture: MTLTexture) throws {
+    /// finished, so the caller may read the texture back. `mask` is what the
+    /// reveal's ending leaves visible; `.full` draws the whole picture.
+    func render(
+        gpu: GPUColorGrid,
+        palette: Palette,
+        mask: RevealMask = .full,
+        into texture: MTLTexture
+    ) throws {
         let buffers = try prepare(cols: gpu.cols, rows: gpu.rows, cells: gpu.buffer)
         writePalette(palette, into: buffers)
-        writeUniforms(cols: gpu.cols, rows: gpu.rows, into: buffers)
+        writeUniforms(cols: gpu.cols, rows: gpu.rows, mask: mask, into: buffers)
 
         try submitter.submit { command in
             guard let compute = command.makeComputeCommandEncoder() else {
@@ -120,7 +132,7 @@ final class CellGridRenderer {
                 throw GPUContext.GPUError.resource("MTL4RenderCommandEncoder")
             }
             render.setRenderPipelineState(layerPipeline)
-            render.setArgumentTable(buffers.renderTable, stages: .vertex)
+            render.setArgumentTable(buffers.renderTable, stages: [.vertex, .fragment])
             render.drawPrimitives(
                 primitiveType: .triangle, indirectBuffer: buffers.arguments.gpuAddress)
             render.endEncoding()
@@ -184,8 +196,13 @@ final class CellGridRenderer {
         }
     }
 
-    private func writeUniforms(cols: Int, rows: Int, into buffers: Buffers) {
-        var uniforms = LayerUniforms(cols: UInt32(cols), rows: UInt32(rows))
+    private func writeUniforms(
+        cols: Int, rows: Int, mask: RevealMask, into buffers: Buffers
+    ) {
+        var uniforms = LayerUniforms(
+            cols: UInt32(cols), rows: UInt32(rows),
+            left: mask.left, top: mask.top, right: mask.right, bottom: mask.bottom,
+            wobble: mask.wobble, phase: mask.phase)
         memcpy(buffers.uniforms.contents(), &uniforms, MemoryLayout<LayerUniforms>.stride)
     }
 

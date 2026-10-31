@@ -145,8 +145,8 @@ final class RenderActorTests: XCTestCase {
     }
 
     /// A driven reveal ends its pull-back once the sampled window spans the
-    /// whole board, and stops rather than showing the page either side of the
-    /// pattern: the last frame is the widest view the board allows.
+    /// whole board, then eats the picture back onto the horizon and closes it
+    /// into its point; the review advances only once that has settled.
     func testRevealEndsWhenTheWindowSpansTheWholeBoard() async throws {
         guard GPUContext.isAvailable else {
             throw XCTSkip("no Metal 4 device")
@@ -169,13 +169,35 @@ final class RenderActorTests: XCTestCase {
         target.tick(1.0 / 30)
         _ = sink.waitForFrame(timeout: 0.5)
         let steps = await actor.steppedRows
-        let spansBoard = await actor.revealSpansBoard
+        let collapsing = await actor.revealEnding
         XCTAssertEqual(steps, 20)
-        XCTAssertTrue(spansBoard)
+        XCTAssertEqual(collapsing, .collapsing)
+        XCTAssertEqual(sink.frames.last?.gpu.content, .colors)
         let error = await actor.lastError
         XCTAssertNil(error)
 
-        // The ended reveal stays put: a later tick delivers no new frame.
+        // The ending's frames are the same grid behind a mask that closes as it
+        // plays, so the picture is eaten rather than rescaled.
+        let revealed = sink.frames.count
+        for _ in 0..<100 {
+            target.tick(1.0 / 30)
+            _ = sink.waitForFrame(timeout: 0.5)
+            if await actor.revealEnding == .settled { break }
+        }
+        let settled = await actor.revealEnding
+        XCTAssertEqual(settled, .settled)
+        XCTAssertGreaterThan(sink.frames.count, revealed)
+        let last = try XCTUnwrap(sink.frames.last)
+        // The mask ends as the horizon line and then its centre point: the line
+        // spans `RevealTimeline.lineRows` grid rows, the point as many columns.
+        XCTAssertEqual(
+            last.mask.bottom - last.mask.top, RevealTimeline.lineRows / 21, accuracy: 0.01)
+        XCTAssertEqual(
+            last.mask.right - last.mask.left, RevealTimeline.lineRows / 20, accuracy: 0.01)
+        XCTAssertEqual((last.mask.left + last.mask.right) / 2, 0.5, accuracy: 0.01)
+        XCTAssertEqual((last.mask.top + last.mask.bottom) / 2, 0.5, accuracy: 0.01)
+
+        // A settled ending stops the loop, so a later tick delivers nothing.
         let delivered = sink.frames.count
         target.tick(1.0 / 30)
         try await Task.sleep(for: .milliseconds(20))

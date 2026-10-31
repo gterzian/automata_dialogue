@@ -8,10 +8,22 @@ import Metal
 /// textured quad instead and the surface samples the cells directly.
 @available(macOS 26.0, *)
 final class ToneGridRenderer {
+    /// Mirrors the `ToneUniforms` struct in `ShaderSource.tone`.
+    private struct Uniforms {
+        var background: SIMD4<Float>
+        var left: Float
+        var top: Float
+        var right: Float
+        var bottom: Float
+        var wobble: Float
+        var phase: Float
+    }
+
     private let context: GPUContext
     private let pipeline: any MTLRenderPipelineState
     private let submitter: FrameSubmitter
     private let table: any MTL4ArgumentTable
+    private let uniforms: any MTLBuffer
     /// The texture view over the grid the last frame drew, so a run at a steady
     /// grid size does not build one per frame.
     private var cells: (texture: any MTLTexture, cols: Int, rows: Int, buffer: any MTLBuffer)?
@@ -49,15 +61,36 @@ final class ToneGridRenderer {
         }
 
         let tableDescriptor = MTL4ArgumentTableDescriptor()
+        tableDescriptor.maxBufferBindCount = 1
         tableDescriptor.maxTextureBindCount = 1
         self.table = try context.device.makeArgumentTable(descriptor: tableDescriptor)
+        guard let uniformBuffer = context.device.makeBuffer(
+            length: MemoryLayout<Uniforms>.stride, options: .storageModeShared
+        ) else {
+            throw GPUContext.GPUError.resource("tone uniforms")
+        }
+        self.uniforms = uniformBuffer
+        table.setAddress(uniformBuffer.gpuAddress, index: 0)
+        context.makeResident([uniformBuffer])
     }
 
     /// Draws the grid into `surface` and returns once the GPU has finished, so
-    /// the caller may read the surface back.
-    func render(gpu: GPUColorGrid, into surface: MTLTexture) throws {
+    /// the caller may read the surface back. `mask` is what the reveal's ending
+    /// leaves visible; `.full` draws the whole picture, and a masked cell draws
+    /// the page, so the picture is eaten in place rather than rescaled.
+    func render(
+        gpu: GPUColorGrid,
+        mask: RevealMask = .full,
+        background: PaletteColor,
+        into surface: MTLTexture
+    ) throws {
         let texture = try cellsTexture(for: gpu)
         table.setTexture(texture.gpuResourceID, index: 0)
+        var uniforms = Uniforms(
+            background: background.simd,
+            left: mask.left, top: mask.top, right: mask.right, bottom: mask.bottom,
+            wobble: mask.wobble, phase: mask.phase)
+        memcpy(self.uniforms.contents(), &uniforms, MemoryLayout<Uniforms>.stride)
 
         try submitter.submit { command in
             let pass = MTL4RenderPassDescriptor()

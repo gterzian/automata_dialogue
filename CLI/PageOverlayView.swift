@@ -1,5 +1,4 @@
 import AppKit
-import Core
 
 /// The text the review window draws over a page: the class an input drawing
 /// illustrates, or the submitted picture beside the model's reasons and the
@@ -39,6 +38,12 @@ final class PageOverlayView: NSView {
     /// inside this view instead of being left to the panel's layout.
     static let glassPadding: CGFloat = 14
     static let glassCornerRadius: CGFloat = 18
+    /// The close button's box in the panel's top-right corner. The reason row
+    /// keeps `closeReserve` clear at its right edge so the button never covers
+    /// a sentence.
+    static let closeSize: CGFloat = 20
+    static let closeInset: CGFloat = 8
+    static var closeReserve: CGFloat { closeSize + 2 * closeInset }
 
     private static let maximumTextWidth: CGFloat = 620
     private static let thumbnailSide: CGFloat = 92
@@ -128,9 +133,9 @@ final class PageOverlayView: NSView {
             // commentary on the input; the footer below names the answer.
             let reason = reasonText()
             let hasThumbnail = content.input != nil
-            let reasonWidth = hasThumbnail
+            let reasonWidth = (hasThumbnail
                 ? width - Self.thumbnailSide - Self.thumbnailGap
-                : width
+                : width) - Self.closeReserve
             let reasonX = hasThumbnail
                 ? padding + Self.thumbnailSide + Self.thumbnailGap
                 : padding
@@ -295,10 +300,8 @@ final class LabeledPageView: NSView {
     private let page: NSView
     private let overlay: PageOverlayView
     private let glass: NSGlassEffectView?
-    /// The page's height as a fraction of the container's. The reveal's ending
-    /// lowers it to the horizon line and `layoutPages` keeps it there, because
-    /// AppKit re-lays a view's frame out from this container's layout.
-    private var pageHeightFraction: CGFloat = 1
+    /// Dismisses the panel from inside its top-right corner.
+    private let closeButton: NSButton?
 
     init(page: NSView, overlay: PageOverlayView) {
         self.page = page
@@ -309,17 +312,27 @@ final class LabeledPageView: NSView {
             panel.cornerRadius = PageOverlayView.glassCornerRadius
             panel.style = .regular
             self.glass = panel
+            let button = NSButton()
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.image = NSImage(
+                systemSymbolName: "xmark", accessibilityDescription: "Close")
+            button.contentTintColor = .secondaryLabelColor
+            button.imageScaling = .scaleProportionallyDown
+            self.closeButton = button
         } else {
             self.glass = nil
+            self.closeButton = nil
         }
         super.init(frame: page.frame)
         wantsLayer = true
-        // The page fills this view, but the reveal's ending squashes the page
-        // layer and leaves the page showing around it rather than the window's
-        // own colour.
-        layer?.backgroundColor = Palette.standard(stateCount: 2)[0].cgColor
         addSubview(page)
         addSubview(glass ?? overlay)
+        if let closeButton {
+            closeButton.target = self
+            closeButton.action = #selector(closePanel)
+            addSubview(closeButton)
+        }
         layoutPages()
     }
 
@@ -339,7 +352,7 @@ final class LabeledPageView: NSView {
     }
 
     private func layoutPages() {
-        page.frame = pageRect(fraction: pageHeightFraction)
+        page.frame = bounds
         let size = overlay.measuredSize(inPage: bounds.size)
         let origin = NSPoint(x: PageOverlayView.inset, y: PageOverlayView.inset)
         if let glass {
@@ -347,39 +360,24 @@ final class LabeledPageView: NSView {
             // The panel stretches its content view over its bounds; the overlay
             // draws the panel's padding inside that frame.
             overlay.frame = NSRect(origin: .zero, size: size)
+            closeButton?.frame = NSRect(
+                x: glass.frame.maxX - PageOverlayView.closeInset - PageOverlayView.closeSize,
+                y: glass.frame.minY + PageOverlayView.closeInset,
+                width: PageOverlayView.closeSize,
+                height: PageOverlayView.closeSize)
         } else {
             overlay.frame = NSRect(origin: origin, size: size)
         }
     }
 
-    /// The page's frame for `fraction`, centred on the container's horizon row.
-    private func pageRect(fraction: CGFloat) -> NSRect {
-        let height = bounds.height * fraction
-        return NSRect(
-            x: bounds.minX, y: bounds.midY - height / 2,
-            width: bounds.width, height: height)
+    /// Removes the reveal's text block (and its close button) once the ending
+    /// takes the page over or the reader dismisses it.
+    func hideOverlay() {
+        (glass ?? overlay).isHidden = true
+        closeButton?.isHidden = true
     }
 
-    /// Ends the reveal: the panel disappears and the page squashes onto its
-    /// horizon row, the container's vertical centre, so the whole picture
-    /// finishes as one line. `lineScale` is that line as a fraction of the
-    /// page's height. Returns once the squash has finished.
-    func collapseOntoHorizon(lineScale: CGFloat, duration: TimeInterval) async {
-        (glass ?? overlay).isHidden = true
-        pageHeightFraction = lineScale
-        // The page's backing layer is AppKit's, so the squash animates the
-        // view's frame: the layer stretches the presented picture to the
-        // smaller bounds, and the container's page colour shows around it.
-        NSAnimationContext.beginGrouping()
-        let context = NSAnimationContext.current
-        context.duration = duration
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        page.animator().frame = pageRect(fraction: lineScale)
-        NSAnimationContext.endGrouping()
-        do {
-            try await Task.sleep(for: .seconds(duration))
-        } catch {
-            return
-        }
+    @objc private func closePanel() {
+        hideOverlay()
     }
 }

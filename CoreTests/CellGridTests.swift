@@ -199,10 +199,15 @@ final class CellGridTests: XCTestCase {
         let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
         let sink = try CellGridSink(
             target: OffscreenTarget(textures: [texture]), context: context)
-        sink.deliver(RenderFrame(
+        XCTAssertFalse(sink.hasPresentedFrame)
+        let frame = RenderFrame(
             specID: spec.id,
-            gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows, content: .colors)))
+            gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows, content: .colors))
+        sink.deliver(frame)
         XCTAssertNil(sink.errorDescription)
+        XCTAssertFalse(sink.hasPresentedFrame, "a present lands at the next update")
+        sink.deliver(frame)
+        XCTAssertTrue(sink.hasPresentedFrame, "the window waits on this before swapping the layer in")
 
         let drawn = readTexture(texture)
         assertPixel(

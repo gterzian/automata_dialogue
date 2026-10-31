@@ -42,9 +42,13 @@ public struct RenderFrame: Sendable {
     public let specID: String
     /// The simulation's GPU color buffer.
     public let gpu: GPUColorGrid
+    /// What the frame leaves visible. `.full` draws the whole picture; the
+    /// reveal's ending uses it to eat the picture back onto the horizon.
+    public let mask: RevealMask
 
-    public init(specID: String, gpu: GPUColorGrid) {
+    public init(specID: String, gpu: GPUColorGrid, mask: RevealMask = .full) {
         self.specID = specID
         self.gpu = gpu
+        self.mask = mask
     }
 }

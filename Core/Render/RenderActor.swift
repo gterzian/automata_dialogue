@@ -39,9 +39,13 @@ public actor RenderActor {
     /// either side of the pattern, so the run ends here instead. Computed from
     /// the grid the widest zoom-out reaches, which is where the limit is hit.
     private var revealSpanLimit: Int?
-    /// Set once the pull-back has reached `revealSpanLimit`. The review window
-    /// ends the reveal on this.
-    public private(set) var revealSpansBoard = false
+    /// Where the reveal is: the pull-back plays, then the ending eats the
+    /// picture back onto the horizon and closes it into its point, and the
+    /// review window advances on `settled`.
+    public private(set) var revealEnding: RevealEndPhase = .playing
+    /// Seconds into the ending's timeline while it plays.
+    private var endingTime: TimeInterval = 0
+    private var endingVariation: RevealVariation?
 
     public init() {}
 
@@ -69,7 +73,7 @@ public actor RenderActor {
         guard let context else { throw GPUContext.GPUError.noMetal4Device }
         finishRun()
         paceRemainder = 0
-        revealSpansBoard = false
+        revealEnding = .playing
         self.sink = sink
         let simulation = try MetalSimulation(
             spec: spec, cols: cols, rows: rows, context: context, board: board,
@@ -153,7 +157,9 @@ public actor RenderActor {
         guard let simulation else { return }
         do {
             try simulation.reseed(seed: UInt64.random(in: .min ... .max))
-            revealSpansBoard = false
+            revealEnding = .playing
+            endingTime = 0
+            endingVariation = nil
             // A restarted run opens where a fresh one does.
             if let reveal {
                 simulation.setZoom(
@@ -182,6 +188,8 @@ public actor RenderActor {
         simulation = nil
         reveal = nil
         revealSpanLimit = nil
+        revealEnding = .playing
+        endingVariation = nil
     }
 
     /// The last error from a driven run, if any. The clock tick cannot throw,
@@ -220,6 +228,12 @@ public actor RenderActor {
     }
 
     private func tick(delta: TimeInterval) throws {
+        // The ending animates on the clock's delta alone; the run is frozen, so
+        // it does not step and a paced run's zero-step tick still advances it.
+        if endingVariation != nil {
+            try advanceEnding(by: delta)
+            return
+        }
         var steps = pacing.steps(for: delta, remainder: &paceRemainder)
         guard steps > 0 else { return }
         if let reveal, let simulation {
@@ -228,7 +242,7 @@ public actor RenderActor {
             if let limit = revealSpanLimit {
                 let remaining = limit - simulation.steppedRows
                 if remaining <= 0 {
-                    endReveal()
+                    beginEnding()
                     return
                 }
                 steps = min(steps, remaining)
@@ -240,19 +254,35 @@ public actor RenderActor {
                 steps: target, branchRows: reveal.branchRows))
             _ = try advance(by: steps)
             if let limit = revealSpanLimit, simulation.steppedRows >= limit {
-                endReveal()
+                beginEnding()
             }
             return
         }
         _ = try advance(by: steps)
     }
 
-    /// Stops the pull-back once it spans the whole board and reports it, so the
-    /// review window can end the reveal. The last frame it delivered is the
-    /// widest view: the fit never samples past the board's edge.
-    private func endReveal() {
-        guard !revealSpansBoard else { return }
-        revealSpansBoard = true
+    /// Starts the ending once the pull-back spans the whole board: the picture
+    /// is eaten back onto the horizon and the line closes into its point. The
+    /// last frame it delivered is the widest view, so the fit never samples past
+    /// the board's edge.
+    private func beginEnding() {
+        guard revealEnding == .playing else { return }
+        revealEnding = .collapsing
+        endingTime = 0
+        endingVariation = .seeded(UInt64.random(in: .min ... .max))
+    }
+
+    /// Draws one frame of the ending, frozen on the run's last grid, and settles
+    /// once the point has held for its rest beat.
+    private func advanceEnding(by delta: TimeInterval) throws {
+        guard let simulation, let variation = endingVariation else { return }
+        endingTime += delta
+        let frame = RevealTimeline.frame(
+            time: Float(endingTime), rows: simulation.rows, cols: simulation.cols,
+            variation: variation)
+        _ = try deliver(simulation, chunk: 0, mask: frame.mask)
+        guard frame.resting else { return }
+        revealEnding = .settled
         stopDriving()
     }
 
@@ -283,9 +313,11 @@ public actor RenderActor {
 
     // MARK: - Private
 
-    private func deliver(_ simulation: MetalSimulation, chunk: Int) throws -> RenderFrame {
+    private func deliver(
+        _ simulation: MetalSimulation, chunk: Int, mask: RevealMask = .full
+    ) throws -> RenderFrame {
         let gpu = try simulation.renderGPU(chunk: chunk)
-        let frame = RenderFrame(specID: simulation.spec.id, gpu: gpu)
+        let frame = RenderFrame(specID: simulation.spec.id, gpu: gpu, mask: mask)
         sink?.deliver(frame)
         return frame
     }

@@ -126,8 +126,12 @@ final class MetalHostView: NSView {
         wantsLayer = true
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
-        // The layer shows this until its first drawable is presented. Matching
-        // the pages' background keeps a content swap from flashing the
+        // The first frame can be drawn before the view enters a window, so the
+        // drawable has its size from the start; AppKit's contents scale is still
+        // re-applied when the view enters the window.
+        metalLayer.drawableSize = targetDrawableSize
+        // The layer shows its background until its first drawable is presented.
+        // Matching the pages' background keeps a content swap from flashing the
         // window's colour before the first frame lands.
         metalLayer.backgroundColor = Palette.standard(stateCount: 2)[0].cgColor
         metalLayer.isOpaque = true
@@ -162,8 +166,9 @@ final class MetalHostView: NSView {
 /// Return or an arrow; `beginSubmission` doubles the submitted image and
 /// collapses it onto the intro's opening dot while the model works; `present`
 /// swaps the reveal's two mirrored automaton branches into the same window and
-/// suspends until Return, close, or the end of the pull-back, which squashes
-/// the branches onto the horizon line. The key monitor calls `submit()` and
+/// suspends until Return, close, or the end of the pull-back, which eats the
+/// picture back onto the horizon and closes it into its point. The key monitor
+/// calls `submit()` and
 /// `navigate(_:)`; `NSApplication.run()` keeps delivering events while
 /// suspended.
 @MainActor
@@ -172,11 +177,6 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// window, so twice the single-run rate keeps the window-relative growth
     /// speed the same; this is the knob for how long the pull-back takes.
     private static let revealRowsPerSecond = 40.0
-    /// Seconds the reveal's picture takes to squash onto its horizon line once
-    /// the pull-back has reached the whole board, and the beat the line holds
-    /// before the next page appears.
-    private static let revealEndCollapseDuration: TimeInterval = 1.0
-    private static let revealEndRestDuration: TimeInterval = 0.35
 
     private var window: NSWindow?
     private var host: MetalHostView?
@@ -257,8 +257,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// close, or the end of the pull-back. The corner block shows the submitted
     /// picture beside the model's English and Chinese reasons, and names the
     /// chosen entry beneath them. Once the window spans the whole board the
-    /// reveal ends on its own: the block goes, the picture squashes onto the
-    /// horizon line, and the window advances as Return would.
+    /// reveal ends on its own: the panel goes, the picture is eaten back onto
+    /// the horizon and closed into its point, and the window advances as Return
+    /// would.
     func present(_ spec: ProgramSpec, choice: Choice, submitted: RasterImage?) async {
         guard !isClosed else { return }
         guard GPUContext.isAvailable else {
@@ -327,7 +328,6 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             return
         }
 
-        window.contentView = host
         var input: NSImage?
         if let picture = submitted?.cgImage {
             input = NSImage(
@@ -344,6 +344,10 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             style: .detail))
         let labeledHost = LabeledPageView(page: host, overlay: overlay)
         labeledHost.frame = NSRect(origin: .zero, size: contentSize)
+        // The seed frame is delivered before the clock runs; the wait covers the
+        // first frames that reach the layer, so the swap shows the automaton
+        // rather than a bare layer.
+        await waitForFirstFrame { made?.hasPresentedFrame ?? true }
         window.contentView = labeledHost
         window.title = "\(spec.id) — \(spec.title)"
         self.actor = actor
@@ -353,21 +357,23 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
 
         let ending = Task { await self.endRevealWhenTheBoardFills(
-            actor: actor, page: labeledHost, rows: rows) }
+            actor: actor, page: labeledHost) }
         await waitForEnter()
         ending.cancel()
         await stopRun()
     }
 
     /// Ends the reveal once its pull-back has widened the window to the whole
-    /// board: the panel goes, the picture squashes onto the horizon line, and
-    /// the window advances as Return would, so the exchange never sits with the
-    /// page showing either side of the pattern.
+    /// board: the panel goes, and the run's ending eats the picture back onto
+    /// the horizon and closes it into its point. The window then advances as
+    /// Return would, so the exchange never sits with the page either side of the
+    /// pattern. The wait is bounded after the ending starts, so a display link
+    /// that stopped delivering cannot hold the turn up.
     private func endRevealWhenTheBoardFills(
-        actor: RenderActor, page: LabeledPageView, rows: Int
+        actor: RenderActor, page: LabeledPageView
     ) async {
         while !isClosed, !Task.isCancelled {
-            if await actor.revealSpansBoard { break }
+            if await actor.revealEnding != .playing { break }
             do {
                 try await Task.sleep(for: .milliseconds(50))
             } catch {
@@ -375,14 +381,16 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             }
         }
         guard !isClosed, !Task.isCancelled else { return }
-        await actor.stopDriving()
-        await page.collapseOntoHorizon(
-            lineScale: 1 / CGFloat(max(1, rows)),
-            duration: Self.revealEndCollapseDuration)
-        do {
-            try await Task.sleep(for: .seconds(Self.revealEndRestDuration))
-        } catch {
-            return
+        page.hideOverlay()
+        var waited: TimeInterval = 0
+        while !isClosed, !Task.isCancelled, waited < RevealEnding.duration + 2 {
+            if await actor.revealEnding == .settled { break }
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
+            waited += 0.05
         }
         guard !isClosed, !Task.isCancelled else { return }
         submit()
@@ -429,13 +437,10 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             frameRate: CAFrameRateRange(minimum: 30, maximum: 30, preferred: 30))
         indicatorTarget = target
         do {
-            // Compile the pipelines and upload the picture before the beat
-            // replaces the page, so the swap lands on the first frame instead
-            // of a blank one.
+            // Compile the pipelines and upload the picture while the submitted
+            // page is still on screen, then wait for the beat's first frames to
+            // reach its layer before swapping it in.
             try await actor.prepare(image, target: target)
-            window.contentView = host
-            NSApp.activate()
-            window.makeKeyAndOrderFront(nil)
             if image != nil {
                 try await actor.playSubmission(
                     target: target,
@@ -447,11 +452,33 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                     lineHalfThickness: lineHalfThickness,
                     cellHalfHeight: cellHalfHeight)
             }
+            // The beat's first frame is presented before the layer is swapped
+            // in, or the swap shows the layer's bare background.
+            await waitForFirstFrame { await actor.hasPresentedFrame }
+            window.contentView = host
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
         } catch {
             print("rate: indicator failed: \(error.localizedDescription)")
             // The target is dropped with the context that failed on it, so the
             // next run builds a pair that can attach.
             await shutdownIndicator()
+        }
+    }
+
+    /// Waits, bounded, for a target's first frames to reach its layer: a content
+    /// swap onto a layer with nothing on it shows the layer's background, and a
+    /// display link that stopped delivering must not hold the page up.
+    private func waitForFirstFrame(
+        _ presented: @MainActor () async -> Bool
+    ) async {
+        for _ in 0..<30 {
+            if await presented() { return }
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                return
+            }
         }
     }
 
