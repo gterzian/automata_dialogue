@@ -69,13 +69,18 @@ written.
   prompt, `Qwen3.5-9B-4bit` was not better: it matched 10/14 classes in
   `classify` and 9/14 in the no-repeat dialogue, against the 4B's 11/14 and
   10/14, while its per-run prefill plus generation was about 1.7–2× the 4B's.
-  The 4B remains the sweet spot. The prompt now asks for a fourth `reason_zh:`
-  line, so the figures above no longer describe the current generation cost;
-  re-run `classify artifacts/` and `bench artifacts/` before trusting them.
-- Image-only turns and the three-line `class:`/`id:`/`reason:` answer work on the local
-  snapshots. The mixture rubric's soft boundary is a wholly ordered,
-  recognizable figure versus a picture that mixes order and randomness. The
-  expected class of every reference drawing is in `artifacts/README.md`; score
+  The 4B remains the sweet spot. Re-measured on the current four-line answer
+  with `bench artifacts/`, both snapshots chose 14/14 distinct ids: the 4B
+  agreed with the reference class on 11/14 at 5.2–6.9 s per image (prompt
+  4,665 tokens / 44 s, generation 983 tokens / 41 s), and the 9B on 12/14 at
+  6.0–14.8 s per image (4,616 tokens / 61 s, 963 tokens / 65 s). The 9B's two
+  reason sentences are as specific as the 4B's on this set, but its run grows
+  slower toward the end of the batch, so the 4B stays the faster product model.
+- Image-only turns and the four-line `class:`/`id:`/`reason:`/`reason_zh:`
+  answer work on the local snapshots. The mixture rubric's soft boundary is a
+  wholly ordered, recognizable figure versus a picture that mixes order and
+  randomness. The expected class of every reference drawing is in
+  `artifacts/README.md`; score
   the set with `rater-cli classify artifacts/`.
 - `AgentEngine` is not covered by `CoreTests`; test answer parsing in `Core`
   against `ChoiceParser` and test the model through the headless

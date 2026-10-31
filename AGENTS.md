@@ -284,9 +284,10 @@ sentence did not earn its place.
    invariant dictates, with an operational test.
 5. Review the work against Rule Number One (actions relate to a coding task in
    this repository).
-6. Suggest a commit message for `git diff HEAD` (run `git diff --stat HEAD`
-   and read `git diff HEAD` first). Never include a `Signed-off-by` trailer;
-   it is added automatically.
+6. Suggest a commit message for the accumulated change: run `git diff --stat
+   HEAD`, read `git diff HEAD`, and describe everything it holds, including
+   work from earlier turns that is still uncommitted — never only the last
+   edit. Never include a `Signed-off-by` trailer; it is added automatically.
 
 ## Reference sources
 

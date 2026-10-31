@@ -104,6 +104,15 @@ func printUsage() -> Never {
 
 // MARK: - Metal window
 
+/// The review window: no title bar, no buttons, no resize edge, so the content
+/// view is the whole window. A borderless window is not key by default, and the
+/// key monitor only sees events sent to the key window, so it would not receive
+/// Return or the arrows without these overrides.
+final class ReviewWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 /// A view backed by a `CAMetalLayer`, so an `AutomatonWindow` can present the
 /// render core's on-screen path into it. AppKit calls `makeBackingLayer` when
 /// the view first wants a layer.
@@ -205,7 +214,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         guard !isClosed else { return }
         let window = ensureWindow()
         if currentPage == .drawing, page != .drawing { canvas?.clear() }
-        let size = window.contentLayoutRect.size
+        let size = drawableContentSize(of: window)
         switch page {
         case .drawing:
             let view: DrawingCanvasView
@@ -269,7 +278,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         await collapseIntro(onto: spec)
         await stopThinking()
         let window = ensureWindow()
-        let contentSize = window.contentLayoutRect.size
+        let contentSize = drawableContentSize(of: window)
         // The drawable holds one texel per display cell; the layer stretches that
         // small grid over the whole window. The run simulates a board much wider
         // than the window so a drifting pattern keeps going after it leaves the
@@ -335,11 +344,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 size: NSSize(width: CGFloat(picture.width), height: CGFloat(picture.height)))
         }
         let overlay = PageOverlayView(.init(
-            heading: "\(spec.id) — \(spec.title)",
-            subheading: "\(spec.behavior.rawValue) · \(spec.behavior.chineseName)",
+            heading: spec.id,
             english: choice.rationale,
             chinese: choice.rationaleChinese,
-            caption: "The response is the automaton",
             input: input,
             style: .detail))
         let labeledHost = LabeledPageView(page: host, overlay: overlay)
@@ -404,7 +411,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     func beginSubmission(_ image: RasterImage?) async {
         guard !isClosed, GPUContext.isAvailable else { return }
         let window = ensureWindow()
-        let contentSize = window.contentLayoutRect.size
+        let contentSize = drawableContentSize(of: window)
         let host = indicatorHost ?? MetalHostView(
             frame: NSRect(origin: .zero, size: contentSize),
             drawableSize: indicatorDrawableSize(
@@ -602,24 +609,32 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         return CGSize(width: width, height: height)
     }
 
-    /// Opens the screen-sized window, or returns the open one.
+    /// Opens the screen-sized window, or returns the open one. It has no title
+    /// bar and no buttons: the content view is the whole window, so every point
+    /// of the frame shows a page. The app menu's Quit (Cmd-Q) ends the review.
     private func ensureWindow() -> NSWindow {
         if let window { return window }
         let frame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let window = NSWindow(
+        let window = ReviewWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         window.title = "Automata Rater"
+        window.hasShadow = true
         window.delegate = self
         // This type holds the window; let ARC release it, not AppKit.
         window.isReleasedWhenClosed = false
         window.setFrame(frame, display: true)
         self.window = window
         return window
+    }
+
+    /// The window's drawable area: its content view is the whole window.
+    private func drawableContentSize(of window: NSWindow) -> NSSize {
+        window.contentView?.bounds.size ?? window.frame.size
     }
 
     func windowWillClose(_ notification: Notification) {

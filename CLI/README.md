@@ -17,7 +17,9 @@
   keeps only the summary lines, and `--show-prompt` adds the full system
   prompt. `rate` always opens a screen-sized Metal window (the `Core/Render`
   on-screen path: `RenderActor` + `CellGridSink` + a `MetalLayerTarget`; see
-  `Core/Render/README.md`). The window opens on the drawing page. When an image
+  `Core/Render/README.md`). The window has no title bar or buttons, so every
+  point of it shows a page; Cmd-Q (the app menu's Quit) ends the review. It
+  opens on the drawing page. When an image
   sits beside an `examples.json` reference manifest, its page shows the class it
   illustrates in English and Chinese in the top-left corner; the window draws
   that label and the image the model reads carries no text. Left and
@@ -63,11 +65,11 @@
   place and with a wandering edge, the line closes into its centre point, and
   the window advances to the next carousel page as Return would. Return on the
   reveal still advances early; closing the window stops the run. The reveal's
-  top-left panel puts a thumbnail of the submitted picture beside the model's
-  reasons in both languages, so the reasons read as commentary on the picture,
-  then names the answer below them: "The response is the automaton", the chosen
-  id and title, and its class in English and Chinese. The × in the panel's
-  top-right corner closes it, leaving the automaton alone.
+  top-left panel shows a thumbnail of the submitted picture beside the model's
+  own answer — the chosen id, then its English and Chinese reasons — so every
+  word in the panel comes from the model and the reasons read as commentary on
+  the picture. The × in the panel's top-right corner closes it, leaving the
+  automaton alone.
   `--model <dir>` (or `RATER_MODEL_PATH`) is required: the engine loads a local
   snapshot and never downloads; see `Agent/README.md`.
 - `rater-cli bench <path|dir>...` — the headless measurement path. Preloads the
@@ -101,6 +103,12 @@
   present only lands at the next display update, so `hasPresentedFrame` waits
   for the second one. `CellGridSink` and `WorkingIndicator` report it, and
   `AutomatonWindow` waits on it before every content swap.
+- **A borderless window is not key by default.** The key monitor only sees
+  events sent to the key window, so a borderless review window would never get
+  Return or the arrows; `ReviewWindow` overrides `canBecomeKey` and
+  `canBecomeMain` for that reason. Its content view is the whole window, so the
+  drawable geometry comes from the content view's bounds, not
+  `contentLayoutRect`.
 - **The reveal's ending hides cells; it never rescales the picture.**
   `RenderFrame.mask` travels to both draw paths, and each one draws the page
   where the mask hides a cell: the tone shader returns the background, the span

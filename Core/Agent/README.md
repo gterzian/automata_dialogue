@@ -25,9 +25,13 @@ reason_zh: <the same reason in one Simplified Chinese sentence>
 The `class` line comes first so the model commits to a class before choosing an
 id; the id then comes from that class's section, and the reason names the same
 class. The parser reads `id:`, `reason:`, and `reason_zh:`; the class line is
-ignored. The Chinese line repeats the reason for the review window, which shows
-both; an answer that omits it leaves the Chinese line empty and the choice
-still stands.
+ignored. The review window shows the id field above the two reasons, so the
+reason does not repeat the id; an answer that omits the Chinese line leaves it
+empty and the choice still stands. Keep the id out of the reason and do not add
+an example sentence for it: an example is copied verbatim, including its id (the
+4B named the example's `E54` while choosing other ids), and both models drop an
+id-in-sentence requirement unpredictably. With the plain format both reference
+snapshots chose 14/14 distinct ids (see `Agent/README.md`).
 
 `ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
 and otherwise taking the first catalog id anywhere in the text (longest match

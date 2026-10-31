@@ -19,13 +19,12 @@ final class PageOverlayView: NSView {
     }
 
     struct Content {
-        var heading: String
+        /// The label style's class, or the detail style's chosen id: the
+        /// model's own answer field, shown above its two reasons.
+        var heading: String?
         var subheading: String?
         var english: String?
         var chinese: String?
-        /// Names what `heading` is, so the footer reads as the answer rather
-        /// than as more commentary on the picture.
-        var caption: String?
         /// The picture the reasons describe, drawn beside them.
         var input: NSImage?
         var style: Style
@@ -49,7 +48,6 @@ final class PageOverlayView: NSView {
     private static let thumbnailSide: CGFloat = 92
     private static let thumbnailGap: CGFloat = 16
     private static let thumbnailCornerRadius: CGFloat = 10
-    private static let footerGap: CGFloat = 16
 
     private let content: Content
 
@@ -129,38 +127,32 @@ final class PageOverlayView: NSView {
             bottom = y
 
         case .detail:
-            // The picture and the reasons share a row, so the reasons read as
-            // commentary on the input; the footer below names the answer.
-            let reason = reasonText()
+            // The panel is the picture and the model's answer: its id field,
+            // then the English and Chinese reasons, all written by the model.
             let hasThumbnail = content.input != nil
-            let reasonWidth = (hasThumbnail
-                ? width - Self.thumbnailSide - Self.thumbnailGap
-                : width) - Self.closeReserve
-            let reasonX = hasThumbnail
+            let columnX = hasThumbnail
                 ? padding + Self.thumbnailSide + Self.thumbnailGap
                 : padding
-            let reasonPiece = place(reason, x: reasonX, y: padding, width: reasonWidth)
-            if !reason.string.isEmpty {
-                pieces.append(reasonPiece)
+            let columnWidth = (hasThumbnail
+                ? width - Self.thumbnailSide - Self.thumbnailGap
+                : width) - Self.closeReserve
+            var y = padding
+            for (text, gap) in [
+                (headingText(), CGFloat(0)),
+                (reasonText(), 6),
+            ] {
+                guard !text.string.isEmpty else { continue }
+                y += gap
+                let piece = place(text, x: columnX, y: y, width: columnWidth)
+                pieces.append(piece)
+                y = piece.rect.maxY
             }
             if hasThumbnail {
                 thumbnail = NSRect(
                     x: padding, y: padding,
                     width: Self.thumbnailSide, height: Self.thumbnailSide)
             }
-            var y = max(reasonPiece.rect.maxY, thumbnail.maxY) + Self.footerGap
-            for (text, gap) in [
-                (captionText(), CGFloat(0)),
-                (headingText(), 2),
-                (subheadingText(), 3),
-            ] {
-                guard !text.string.isEmpty else { continue }
-                y += gap
-                let piece = place(text, x: padding, y: y, width: width)
-                pieces.append(piece)
-                y = piece.rect.maxY
-            }
-            bottom = y
+            bottom = max(y, thumbnail.maxY)
         }
 
         return Layout(
@@ -200,11 +192,14 @@ final class PageOverlayView: NSView {
     }
 
     private func headingText() -> NSAttributedString {
-        let size: CGFloat = content.style == .label ? 16 : 15
+        guard let heading = content.heading, !heading.isEmpty else {
+            return NSAttributedString()
+        }
+        let font = content.style == .label
+            ? NSFont.systemFont(ofSize: 16, weight: .medium)
+            : NSFont.systemFont(ofSize: 14, weight: .semibold)
         return NSAttributedString(
-            string: content.heading,
-            attributes: attributes(
-                font: .systemFont(ofSize: size, weight: .medium), color: textColor))
+            string: heading, attributes: attributes(font: font, color: textColor))
     }
 
     private func subheadingText() -> NSAttributedString {
@@ -216,17 +211,6 @@ final class PageOverlayView: NSView {
             attributes: attributes(
                 font: .systemFont(ofSize: 12, weight: .medium),
                 color: textColor.withAlphaComponent(0.9)))
-    }
-
-    private func captionText() -> NSAttributedString {
-        guard let caption = content.caption, !caption.isEmpty else {
-            return NSAttributedString()
-        }
-        return NSAttributedString(
-            string: caption,
-            attributes: attributes(
-                font: .systemFont(ofSize: 11),
-                color: textColor.withAlphaComponent(0.7)))
     }
 
     private func reasonText() -> NSAttributedString {
