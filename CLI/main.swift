@@ -176,8 +176,9 @@ final class MetalHostView: NSView {
 /// Return or an arrow; `beginSubmission` doubles the submitted image and
 /// collapses it onto the intro's opening dot while the model works; `present`
 /// swaps the reveal's two mirrored automaton branches into the same window and
-/// suspends until Return, close, or the end of the pull-back, which eats the
-/// picture back onto the horizon and closes it into its point. The key monitor
+/// suspends until Return, close, or the end of the pull-back, which swells the
+/// picture, falls it into its point, and opens the black hole the ending rests
+/// on. The key monitor
 /// calls `submit()` and
 /// `navigate(_:)`; `NSApplication.run()` keeps delivering events while
 /// suspended.
@@ -287,9 +288,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// close, or the end of the pull-back. The corner block shows the submitted
     /// picture beside the chosen entry's id and class and the model's English
     /// and Chinese reasons. Once the window spans the whole board the
-    /// reveal ends on its own: the panel goes, the picture is eaten back onto
-    /// the horizon and closed into its point, and the window advances as Return
-    /// would.
+    /// reveal ends on its own: the panel goes, the picture takes its last
+    /// breath and falls into its point, the horizon opens, and the window
+    /// advances as Return would.
     func present(_ spec: ProgramSpec, choice: Choice, submitted: RasterImage?) async {
         guard !isClosed else { return }
         guard GPUContext.isAvailable else {
@@ -397,8 +398,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     }
 
     /// Ends the reveal once its pull-back has widened the window to the whole
-    /// board: the panel goes, and the run's ending eats the picture back onto
-    /// the horizon and closes it into its point. The window then advances as
+    /// board: the panel goes, and the run's ending swells the picture, falls it
+    /// into its point, and opens the horizon. The window then advances as
     /// Return would, so the exchange never sits with the page either side of the
     /// pattern. The wait is bounded after the ending starts, so a display link
     /// that stopped delivering cannot hold the turn up.
@@ -1009,15 +1010,23 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
 func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
-    // Load the weights while the first page is on screen. The first run then
-    // pays only prefill and generation, not the snapshot load. A failure is
-    // logged but not fatal: the run retries and reports it again.
+    // Load the weights and warm the vision path while the first page is on
+    // screen. The first run then pays only prefill and generation, not the
+    // snapshot load or the kernel compilation. A failure is logged but not
+    // fatal: the run retries and reports it again.
     Task {
         do {
             try await engine.prepare()
         } catch {
             FileHandle.standardError.write(
                 Data("rate: model preload failed: \(error.localizedDescription)\n".utf8))
+            return
+        }
+        do {
+            try await engine.warmImage()
+        } catch {
+            FileHandle.standardError.write(
+                Data("rate: image warmup failed: \(error.localizedDescription)\n".utf8))
         }
     }
     let sessionID = UUID()

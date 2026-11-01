@@ -24,12 +24,10 @@ final class CellGridRenderer {
     private struct LayerUniforms {
         var cols: UInt32
         var rows: UInt32
-        var left: Float
-        var top: Float
-        var right: Float
-        var bottom: Float
+        var scale: Float
         var wobble: Float
         var phase: Float
+        var time: Float
     }
 
     private struct DrawArguments {
@@ -90,8 +88,9 @@ final class CellGridRenderer {
     }
 
     /// Draws a GPU-resident grid into `texture` and returns once the GPU has
-    /// finished, so the caller may read the texture back. `mask` is what the
-    /// reveal's ending leaves visible; `.full` draws the whole picture.
+    /// finished, so the caller may read the texture back. `mask` is the reveal's
+    /// ending; `.full` draws the whole picture, and the ending hides the cells
+    /// outside its falling limb so the page shows there.
     func render(
         gpu: GPUColorGrid,
         palette: Palette,
@@ -201,8 +200,8 @@ final class CellGridRenderer {
     ) {
         var uniforms = LayerUniforms(
             cols: UInt32(cols), rows: UInt32(rows),
-            left: mask.left, top: mask.top, right: mask.right, bottom: mask.bottom,
-            wobble: mask.wobble, phase: mask.phase)
+            scale: mask.scale, wobble: mask.wobble, phase: mask.phase,
+            time: mask.time)
         memcpy(buffers.uniforms.contents(), &uniforms, MemoryLayout<LayerUniforms>.stride)
     }
 

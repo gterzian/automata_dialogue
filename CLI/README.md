@@ -20,7 +20,10 @@
   `Core/Render/README.md`). The window has no title bar, so its content view is
   the whole window and every point of it shows a page; the window's close
   control in its top-right corner closes it, and Cmd-Q (the app menu's Quit)
-  ends the review. It opens on the drawing page. When an image
+  ends the review. It opens on the drawing page. At launch it loads the model
+  and runs one minimal image turn at up to 256 px in the background, so the
+  vision and decode kernels are compiled before the first submission. When an
+  image
   sits beside an `examples.json` reference manifest, its page shows the class it
   illustrates in English and Chinese in the top-left corner; the window draws
   that label and the image the model reads carries no text. Left and
@@ -65,9 +68,9 @@
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
   controls. The pull-back ends where its sampling widens the window to the
   whole board, before the fit would show the page either side of the pattern:
-  the panel disappears and the picture is eaten back onto the horizon line, in
-  place and with a wandering edge, the line closes into its centre point, and
-  the window advances to the next carousel page as Return would. Return on the
+  the panel disappears, the circle closes around the picture — its limb
+  eroding — until only a single ink dot remains. The window then advances to
+  the next carousel page as Return would. Return on the
   reveal still advances early; closing the window stops the run. The reveal's
   top-left panel puts a thumbnail of the submitted picture beside the chosen
   entry's id and its class in English and Chinese, then the model's English and
@@ -118,12 +121,12 @@
   `canBecomeMain` for that reason. Its content view is the whole window, so the
   drawable geometry comes from the content view's bounds, not
   `contentLayoutRect`.
-- **The reveal's ending hides cells; it never rescales the picture.**
-  `RenderFrame.mask` travels to both draw paths, and each one draws the page
-  where the mask hides a cell: the tone shader returns the background, the span
-  shader discards. `RenderActor` animates the mask from `RevealTimeline` on the
-  clock's own ticks after the pull-back stops, so the ending costs one refit and
-  draw per frame and none of it is CPU-driven.
+- **The reveal's ending samples the picture as one image.**
+  `RenderFrame.mask` travels to both draw paths: the tone path samples the
+  toned grid through the ending's scale and eroding circle, and the span path
+  hides every cell outside that circle. `RenderActor` drives the mask from
+  `RevealTimeline` on the clock's own ticks after the pull-back stops, so the
+  ending costs one refit and draw per frame and none of it is CPU-driven.
 
 ## Remaining work
 

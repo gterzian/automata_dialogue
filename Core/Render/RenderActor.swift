@@ -39,9 +39,8 @@ public actor RenderActor {
     /// either side of the pattern, so the run ends here instead. Computed from
     /// the grid the widest zoom-out reaches, which is where the limit is hit.
     private var revealSpanLimit: Int?
-    /// Where the reveal is: the pull-back plays, then the ending eats the
-    /// picture back onto the horizon and closes it into its point, and the
-    /// review window advances on `settled`.
+    /// Where the reveal is: the pull-back plays, then the ending closes the
+    /// picture into its dot; the review window advances on `settled`.
     public private(set) var revealEnding: RevealEndPhase = .playing
     /// Seconds into the ending's timeline while it plays.
     private var endingTime: TimeInterval = 0
@@ -268,10 +267,10 @@ public actor RenderActor {
         _ = try advance(by: steps)
     }
 
-    /// Starts the ending once the pull-back spans the whole board: the picture
-    /// is eaten back onto the horizon and the line closes into its point. The
-    /// last frame it delivered is the widest view, so the fit never samples past
-    /// the board's edge.
+    /// Starts the ending once the pull-back spans the whole board: the circle
+    /// closes the picture through its organic edge and holds the dot. The last
+    /// frame it delivered is the widest view, so the fit never samples past the
+    /// board's edge.
     private func beginEnding() {
         guard revealEnding == .playing else { return }
         revealEnding = .collapsing
@@ -280,13 +279,12 @@ public actor RenderActor {
     }
 
     /// Draws one frame of the ending, frozen on the run's last grid, and settles
-    /// once the point has held for its rest beat.
+    /// once the horizon has held for its rest beat.
     private func advanceEnding(by delta: TimeInterval) throws {
         guard let simulation, let variation = endingVariation else { return }
         endingTime += delta
         let frame = RevealTimeline.frame(
-            time: Float(endingTime), rows: simulation.rows, cols: simulation.cols,
-            variation: variation)
+            time: Float(endingTime), variation: variation)
         _ = try deliver(simulation, chunk: 0, mask: frame.mask)
         guard frame.resting else { return }
         revealEnding = .settled

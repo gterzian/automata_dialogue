@@ -144,7 +144,7 @@ final class CellGridTests: XCTestCase {
         // span, counter, uniform, and palette buffers.
         let sink = try CellGridSink(
             target: OffscreenTarget(textures: textures), context: context)
-        for (grid, texture) in zip(grids, textures) {
+        for grid in grids {
             // The CPU rewrites the one shared cell buffer each frame, exactly as
             // the simulation's `fit` does in the live pipeline.
             grid.withUnsafeBufferPointer { source in

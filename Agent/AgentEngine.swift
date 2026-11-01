@@ -11,6 +11,7 @@ public enum AgentEngineError: Error, LocalizedError {
     case noModelDirectory
     case noCacheableSystemPrefix
     case systemPromptCacheMismatch
+    case warmupImageFailed
 
     public var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ public enum AgentEngineError: Error, LocalizedError {
             "The model's chat template does not expose a cacheable system-prompt prefix."
         case .systemPromptCacheMismatch:
             "The system-prompt cache did not cover the prefilled system tokens."
+        case .warmupImageFailed:
+            "Could not create the image that warms the model at launch."
         }
     }
 }
@@ -118,6 +121,26 @@ public actor AgentEngine: AgentRunning {
         _ = try await promptCache()
     }
 
+    /// Runs one minimal image turn so the vision encoder and the decode
+    /// kernels are compiled and the image KV-cache path is exercised before
+    /// the first review submission. The image is at most 256 px square (the
+    /// smallest square the Qwen preprocessor accepts), and the turn generates
+    /// one token. Its answer is discarded and the choice history is not
+    /// touched. `rate` calls it after `prepare()`; a failure is logged and left
+    /// to the first real run to report again.
+    public func warmImage() async throws {
+        let cache = try await promptCache()
+        let dimension = max(1, min(256, configuration.imageDimension))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rater-warmup-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Self.writeWarmupImage(to: url, dimension: dimension)
+        _ = try await answer(
+            cache: cache, to: "", imageURL: url,
+            parameters: GenerateParameters(maxTokens: 1, temperature: 0),
+            imageDimension: dimension)
+    }
+
     /// Drops the recent-choice window, so the next run is not asked to avoid
     /// earlier ids. `classify` uses it to measure each image's class
     /// independently of the others.
@@ -143,7 +166,10 @@ public actor AgentEngine: AgentRunning {
             let prompt = history.userTurn(input.text)
             let cache = try await promptCache()
 
-            let result = try await answer(cache: cache, to: prompt, imageURL: input.imageURL)
+            let result = try await answer(
+                cache: cache, to: prompt, imageURL: input.imageURL,
+                parameters: generateParameters,
+                imageDimension: configuration.imageDimension)
             let response = result.text
             let choice = Self.allowed(
                 ChoiceParser.choice(from: response), excluding: excluded)
@@ -175,10 +201,11 @@ public actor AgentEngine: AgentRunning {
     private func answer(
         cache: PromptCacheHolder,
         to prompt: String,
-        imageURL: URL?
+        imageURL: URL?,
+        parameters: GenerateParameters,
+        imageDimension: Int
     ) async throws -> (text: String, metrics: GenerationMetrics?) {
         let container = try await modelContainer()
-        let parameters = generateParameters
         let cacheCopy = cache.snapshot.cache.map { $0.copy() }
         let prefixTokenCount = cacheCopy.map(\.offset).max() ?? 0
         let image = imageURL.map { UserInput.Image.url($0) }
@@ -186,8 +213,8 @@ public actor AgentEngine: AgentRunning {
             chat: [.user(prompt, images: image.map { [$0] } ?? [])],
             processing: UserInput.Processing(
                 resize: CGSize(
-                    width: configuration.imageDimension,
-                    height: configuration.imageDimension)),
+                    width: imageDimension,
+                    height: imageDimension)),
             additionalContext: Self.answerContext)
         let stream = try await container.perform(
             nonSendable: (userInput, cacheCopy, cache.snapshot.state)
@@ -291,6 +318,18 @@ public actor AgentEngine: AgentRunning {
             throw AgentEngineError.noCacheableSystemPrefix
         }
         return Array(fullTokens.dropLast(userTokens.count))
+    }
+
+    /// Writes a solid page as the warmup image. `RasterImage` encodes the same
+    /// PNG form the review path hands the model.
+    private nonisolated static func writeWarmupImage(to url: URL, dimension: Int) throws {
+        let side = max(1, dimension)
+        let pixels = Data(repeating: 255, count: side * side * 4)
+        let raster = RasterImage(width: side, height: side, pixels: pixels)
+        guard let png = raster.pngData() else {
+            throw AgentEngineError.warmupImageFailed
+        }
+        try png.write(to: url, options: .atomic)
     }
 
     @discardableResult

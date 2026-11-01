@@ -3,66 +3,62 @@ import XCTest
 @testable import Core
 
 /// The reveal's ending: the mask the driven run animates, and that both draw
-/// paths apply it. The look of the wipe itself is accepted by visual inspection.
+/// paths apply it. The look of the fall itself is accepted by visual inspection.
 final class RevealEndingTests: XCTestCase {
-    /// The mask starts on the untouched picture, eats it back to the horizon
-    /// line, closes the line into its centre point, and rests there.
-    func testMaskEatsThePictureBackToItsPoint() {
-        let variation = RevealVariation(wobble: 0.04, phase: 1.2, lag: 0.1)
-        let rows = 400
-        let cols = 720
-        let wipe = Float(RevealEnding.wipeDuration)
-        let line = Float(RevealEnding.lineDuration)
+    /// The timeline starts on the untouched picture, accelerates the circle
+    /// closed onto the single dot, and holds it for the rest beat.
+    func testTheCircleClosesIntoTheDot() {
+        let variation = RevealVariation(wobble: 0.06, phase: 1.2, grain: 0.03)
+        let collapse = Float(RevealEnding.collapseDuration)
+        let total = Float(RevealEnding.duration)
 
-        let start = RevealTimeline.frame(
-            time: 0, rows: rows, cols: cols, variation: variation)
-        XCTAssertEqual(start.mask.left, 0, "the ended pull-back still shows the whole picture")
-        XCTAssertEqual(start.mask.top, 0)
-        XCTAssertEqual(start.mask.right, 1)
-        XCTAssertEqual(start.mask.bottom, 1)
-        XCTAssertEqual(start.mask.wobble, 0, "the edge has not started wandering")
+        let start = RevealTimeline.frame(time: 0, variation: variation)
+        XCTAssertEqual(start.mask.scale, 1, "the pull-back's last frame still shows the picture")
+        XCTAssertEqual(start.mask.fall, 0)
+        XCTAssertEqual(start.mask.wobble, 0, "the limb has not started eroding")
+        XCTAssertEqual(start.mask.grain, 0, "the grain fades in with the ending")
         XCTAssertFalse(start.resting)
 
-        let wiping = RevealTimeline.frame(
-            time: wipe / 2, rows: rows, cols: cols, variation: variation)
-        XCTAssertGreaterThan(wiping.mask.top, 0, "the top edge has eaten into the picture")
-        XCTAssertLessThan(wiping.mask.bottom, 1)
-        XCTAssertGreaterThan(wiping.mask.wobble, 0, "the edge wanders while it eats")
-        XCTAssertEqual(wiping.mask.left, 0, accuracy: 1e-6)
-        XCTAssertEqual(wiping.mask.right, 1, accuracy: 1e-6)
+        let falling = RevealTimeline.frame(time: collapse / 2, variation: variation)
+        XCTAssertEqual(falling.mask.fall, 0.5, accuracy: 1e-4)
+        XCTAssertLessThan(falling.mask.scale, 1, "the picture has started to close")
+        XCTAssertGreaterThan(falling.mask.scale, RevealTimeline.dotScale)
+        XCTAssertGreaterThan(falling.mask.wobble, 0, "the limb erodes as the circle closes")
 
-        let horizon = RevealTimeline.frame(
-            time: wipe, rows: rows, cols: cols, variation: variation)
-        let lineHalf = RevealTimeline.lineRows / Float(rows) / 2
-        XCTAssertEqual(horizon.mask.top, 0.5 - lineHalf, accuracy: 1e-4)
-        XCTAssertEqual(horizon.mask.bottom, 0.5 + lineHalf, accuracy: 1e-4)
-        XCTAssertEqual(horizon.mask.left, 0, accuracy: 1e-6)
-        XCTAssertEqual(horizon.mask.right, 1, accuracy: 1e-6)
-        XCTAssertFalse(horizon.resting)
+        let dot = RevealTimeline.frame(time: collapse, variation: variation)
+        XCTAssertEqual(dot.mask.scale, RevealTimeline.dotScale, accuracy: 1e-6)
+        XCTAssertEqual(dot.mask.fall, 1, accuracy: 1e-4)
 
-        let point = RevealTimeline.frame(
-            time: wipe + line, rows: rows, cols: cols, variation: variation)
-        let pointHalf = RevealTimeline.lineRows / Float(cols) / 2
-        XCTAssertEqual(point.mask.left, 0.5 - pointHalf, accuracy: 1e-4)
-        XCTAssertEqual(point.mask.right, 0.5 + pointHalf, accuracy: 1e-4)
-        XCTAssertEqual(point.mask.top, 0.5 - lineHalf, accuracy: 1e-4)
-        XCTAssertFalse(point.resting, "the point holds for its rest beat")
-
-        let rested = RevealTimeline.frame(
-            time: Float(RevealEnding.duration) + 10, rows: rows, cols: cols,
-            variation: variation)
+        let rested = RevealTimeline.frame(time: total, variation: variation)
         XCTAssertTrue(rested.resting)
-        XCTAssertEqual(rested.mask, point.mask, "the point holds its last frame")
+        XCTAssertEqual(rested.mask.scale, RevealTimeline.dotScale, accuracy: 1e-6)
+
+        let later = RevealTimeline.frame(time: total + 10, variation: variation)
+        XCTAssertEqual(later.mask, rested.mask, "the dot holds its last frame")
+        XCTAssertTrue(later.resting)
     }
 
-    /// The upper edge leads and the lower one trails by the run's lag, so the
-    /// picture is eaten from the top down.
-    func testUpperEdgeLeadsTheLowerOne() {
-        let variation = RevealVariation(wobble: 0.03, phase: 0.4, lag: 0.15)
-        let frame = RevealTimeline.frame(
-            time: 0.12, rows: 200, cols: 300, variation: variation)
-        XCTAssertGreaterThan(frame.mask.top, 0, "the top edge has started")
-        XCTAssertEqual(frame.mask.bottom, 1, accuracy: 1e-6, "the bottom edge waits")
+    /// The fall accelerates: an equal slice of the collapse takes more of the
+    /// picture's remaining scale than the slice before it.
+    func testTheFallAccelerates() {
+        let variation = RevealVariation(wobble: 0.05, phase: 0.4, grain: 0.03)
+        let collapse = Float(RevealEnding.collapseDuration)
+        let quarter = collapse / 4
+
+        let scale = (0..<5).map { step in
+            RevealTimeline.frame(
+                time: Float(step) * quarter, variation: variation
+            ).mask.scale
+        }
+        let firstDrop = scale[0] - scale[1]
+        let secondDrop = scale[1] - scale[2]
+        let thirdDrop = scale[2] - scale[3]
+        XCTAssertGreaterThan(firstDrop, 0)
+        XCTAssertLessThan(firstDrop, secondDrop)
+        XCTAssertLessThan(secondDrop, thirdDrop, "the fall takes more picture as it goes")
+        XCTAssertGreaterThan(scale[1], 0.9, "the fall starts slowly")
+        XCTAssertEqual(scale[4], RevealTimeline.dotScale, accuracy: 1e-6,
+                       "the picture closes into the dot")
     }
 
     /// One seed always reproduces one ending, and two seeds differ.
@@ -72,11 +68,11 @@ final class RevealEndingTests: XCTestCase {
         let other = RevealVariation.seeded(8)
         XCTAssertNotEqual(first.wobble, other.wobble)
         XCTAssertNotEqual(first.phase, other.phase)
-        XCTAssertNotEqual(first.lag, other.lag)
+        XCTAssertNotEqual(first.grain, other.grain)
     }
 
     /// A toned grid — the below-floor picture the ending runs on — draws the
-    /// page where the mask hides it and the grid where it does not.
+    /// page outside the falling limb and the sampled grid inside it.
     func testTheMaskHidesTonedCells() throws {
         guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
         let context = try GPUContext()
@@ -99,20 +95,23 @@ final class RevealEndingTests: XCTestCase {
         descriptor.storageMode = .shared
         let texture = try XCTUnwrap(context.device.makeTexture(descriptor: descriptor))
         let background = Palette.standard(stateCount: 2)[0]
+        let ink = Palette.standard(stateCount: 2)[1]
 
         try renderer.render(
             gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows, content: .colors),
-            mask: RevealMask(left: 0, top: 0.5, right: 1, bottom: 1, wobble: 0, phase: 0),
+            mask: RevealMask(scale: 0.35),
             background: background,
+            ink: ink,
             into: texture)
 
         let drawn = readTexture(texture)
-        assertBackground(drawn, width: cols, x: 2, y: 1, background, "eaten top")
-        assertNotBackground(drawn, width: cols, x: 2, y: 2, background, "kept bottom")
+        assertNotBackground(drawn, width: cols, x: cols / 2, y: rows / 2, background, "kept centre")
+        assertBackground(drawn, width: cols, x: 0, y: 0, background, "eaten corner")
     }
 
-    /// The span path — the above-floor picture — drops a masked cell, so the
-    /// pass's page colour shows instead.
+    /// The span path — the above-floor picture — drops a cell outside the
+    /// falling limb, so the pass's page colour shows instead; a full mask keeps
+    /// every cell.
     func testTheMaskHidesSpans() throws {
         guard GPUContext.isAvailable else { throw XCTSkip("no Metal 4 device") }
         let context = try GPUContext()
@@ -135,12 +134,18 @@ final class RevealEndingTests: XCTestCase {
         try renderer.render(
             gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows),
             palette: palette,
-            mask: RevealMask(left: 0, top: 0, right: 1, bottom: 0.5, wobble: 0, phase: 0),
             into: texture)
+        let full = readTexture(texture)
+        assertNotBackground(full, width: cols, x: 0, y: 0, palette[0], "full mask keeps corners")
 
+        try renderer.render(
+            gpu: GPUColorGrid(buffer: cells, cols: cols, rows: rows),
+            palette: palette,
+            mask: RevealMask(scale: 0.35),
+            into: texture)
         let drawn = readTexture(texture)
-        assertNotBackground(drawn, width: cols, x: 2, y: 1, palette[0], "kept top")
-        assertBackground(drawn, width: cols, x: 2, y: 2, palette[0], "eaten bottom")
+        assertNotBackground(drawn, width: cols, x: cols / 2, y: rows / 2, palette[0], "kept centre")
+        assertBackground(drawn, width: cols, x: 0, y: 0, palette[0], "eaten corner")
     }
 
     private func readTexture(_ texture: MTLTexture) -> [UInt8] {

@@ -39,6 +39,9 @@ What must be covered:
   branch has room, then matches the branches' growth one for one and keeps
   pulling back below the display floor; the review window's first frame is
   already at that close-up.
+- **Reveal ending** — the timeline starts on the untouched picture, accelerates
+  the circle closed onto the single ink dot and rests there; a seed reproduces
+  one ending; both draw paths hide cells outside the circle.
 - **Cell grid sink** — (Metal 4 only) an offscreen render fills each span with
   its palette colour, a toned grid is drawn with its cells' own colours, a
   renderer handles a grid resize, the sink draws into

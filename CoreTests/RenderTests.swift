@@ -7,6 +7,9 @@ final class ViewportTests: XCTestCase {
         XCTAssertEqual(ViewportGeometry.columns(size: size), 800)
         XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 800), 500)
         XCTAssertEqual(ViewportGeometry.rows(size: size, cols: 161), 101)
+        XCTAssertEqual(
+            ViewportGeometry.columns(size: CGSize(width: 1599, height: 1000)), 800,
+            "an odd point width rounds up to an even column count")
     }
 
     /// The simulated board is much wider than the viewport, so the pattern can
@@ -37,7 +40,9 @@ final class ViewportTests: XCTestCase {
         XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 4), 200)
         XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 800, zoom: 0.5), 1600)
         XCTAssertEqual(ViewportGeometry.zoomedRows(baseRows: 500, zoom: 2), 250)
-        XCTAssertEqual(ViewportGeometry.zoomedColumns(baseCols: 1, zoom: 4), 1)
+        XCTAssertEqual(
+            ViewportGeometry.zoomedColumns(baseCols: 1, zoom: 4), 2,
+            "the reveal keeps an even column count so the seed stays off centre")
     }
 
     /// The reveal's floor is the widest zoom-out the surface can show one cell

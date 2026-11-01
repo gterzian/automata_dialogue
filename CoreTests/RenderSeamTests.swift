@@ -172,8 +172,8 @@ final class RenderActorTests: XCTestCase {
     }
 
     /// A driven reveal ends its pull-back once the sampled window spans the
-    /// whole board, then eats the picture back onto the horizon and closes it
-    /// into its point; the review advances only once that has settled.
+    /// whole board, then closes the picture into the single dot; the review
+    /// advances only once that has settled.
     func testRevealEndsWhenTheWindowSpansTheWholeBoard() async throws {
         guard GPUContext.isAvailable else {
             throw XCTSkip("no Metal 4 device")
@@ -203,8 +203,8 @@ final class RenderActorTests: XCTestCase {
         let error = await actor.lastError
         XCTAssertNil(error)
 
-        // The ending's frames are the same grid behind a mask that closes as it
-        // plays, so the picture is eaten rather than rescaled.
+        // The ending's frames are the same grid through a mask that closes the
+        // picture into the single dot.
         let revealed = sink.frames.count
         for _ in 0..<100 {
             target.tick(1.0 / 30)
@@ -215,14 +215,17 @@ final class RenderActorTests: XCTestCase {
         XCTAssertEqual(settled, .settled)
         XCTAssertGreaterThan(sink.frames.count, revealed)
         let last = try XCTUnwrap(sink.frames.last)
-        // The mask ends as the horizon line and then its centre point: the line
-        // spans `RevealTimeline.lineRows` grid rows, the point as many columns.
-        XCTAssertEqual(
-            last.mask.bottom - last.mask.top, RevealTimeline.lineRows / 21, accuracy: 0.01)
-        XCTAssertEqual(
-            last.mask.right - last.mask.left, RevealTimeline.lineRows / 20, accuracy: 0.01)
-        XCTAssertEqual((last.mask.left + last.mask.right) / 2, 0.5, accuracy: 0.01)
-        XCTAssertEqual((last.mask.top + last.mask.bottom) / 2, 0.5, accuracy: 0.01)
+        // The ending rests on the intro's single dot: the picture has closed to
+        // `RevealTimeline.dotScale`. It runs on the toned grid, so one sample of
+        // that grid carries the fall.
+        XCTAssertEqual(last.gpu.content, .colors)
+        XCTAssertEqual(last.mask.scale, RevealTimeline.dotScale, accuracy: 1e-6)
+        XCTAssertEqual(last.mask.fall, 1, accuracy: 1e-4)
+        XCTAssertTrue(
+            sink.frames.contains {
+                $0.mask.scale > RevealTimeline.dotScale && $0.mask.scale < 1
+            },
+            "the picture closes through its extents")
 
         // A settled ending stops the loop, so a later tick delivers nothing.
         let delivered = sink.frames.count

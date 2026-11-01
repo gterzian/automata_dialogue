@@ -160,9 +160,10 @@ change, along with the affected tests, counts, and READMEs.
    of the history per cell and drawing that average as tone, so the whole growth
    stays in view at decreasing resolution instead of sliding out through the
    horizon. The pull-back ends where the window spans the whole board: the
-   picture is eaten back onto the horizon line and closed into its point, and
-   the exchange returns to the input carousel, so the reveal never shows the
-   page either side of the pattern. The
+   circle closes around the picture — its limb eroding along the same organic
+   edge as the thinking animation — until only a single ink dot remains. The
+   exchange returns to the input carousel, so the reveal never shows the page
+   either side of the pattern. The
    indicator runs at 30 fps on a reduced drawable so it does not
    compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.

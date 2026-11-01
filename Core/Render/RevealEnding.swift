@@ -1,19 +1,17 @@
 import Foundation
 
-/// The reveal's ending: the picture is eaten back onto the horizon row, the
-/// line closes into its centre point, and the review moves to the next page.
-/// The mask only hides cells — the picture itself never moves or scales, so the
-/// automaton is consumed in place rather than shrunk.
+/// The reveal's ending: the automaton is closed inside the same organic circle
+/// the intro uses and falls into a single ink dot, then the review moves to the
+/// next page. The toned grid the pull-back stops on is sampled through the
+/// circle, so the picture and the dot are one draw.
 public enum RevealEnding {
-    /// Seconds the edges take to eat the picture back to the horizon row.
-    public static let wipeDuration: TimeInterval = 1.2
-    /// Seconds the horizon row takes to close into its centre point.
-    public static let lineDuration: TimeInterval = 0.5
-    /// Seconds the point holds before the next page appears.
-    public static let restDuration: TimeInterval = 0.3
+    /// Seconds the circle takes to close from the picture onto the dot.
+    public static let collapseDuration: TimeInterval = 1.0
+    /// Seconds the dot holds before the next page appears.
+    public static let restDuration: TimeInterval = 0.5
 
     public static var duration: TimeInterval {
-        wipeDuration + lineDuration + restDuration
+        collapseDuration + restDuration
     }
 }
 
@@ -21,118 +19,109 @@ public enum RevealEnding {
 public enum RevealEndPhase: Sendable, Equatable {
     /// The pull-back is still running.
     case playing
-    /// The picture is being eaten onto the horizon and closed into its point.
+    /// The circle is closing the picture into its dot.
     case collapsing
-    /// The point has held for its rest beat; the review moves on.
+    /// The dot has held for its rest beat; the review moves on.
     case settled
 }
 
-/// What a frame's mask leaves of the picture: a box in the surface's
-/// coordinates (0…1, y down) whose top and bottom edges wander, and whose left
-/// and right edges close on the centre point. Every cell outside the box draws
-/// as the page, so the picture is eaten rather than rescaled.
+/// How the ending transforms the picture. Every field is inert in `.full`, so a
+/// frame with that mask draws the untouched grid; the reveal's ending supplies
+/// the fields from `RevealTimeline`. The picture's limb is a circle on the
+/// surface, and the renderer keeps the dot's soft edge at least a couple of
+/// pixels wide so a small surface still shows it.
 public struct RevealMask: Sendable, Equatable {
-    public var left: Float
-    public var top: Float
-    public var right: Float
-    public var bottom: Float
-    /// Height the top and bottom edges wander, as a fraction of the surface.
+    /// Scale of the picture about the centre: 1 is the whole picture and
+    /// `RevealTimeline.dotScale` is the dot it closes into.
+    public var scale: Float
+    /// The fall's progress: darkens the picture and turns it into ink as the
+    /// circle closes.
+    public var fall: Float
+    /// Limb erosion as a fraction of the visible radius, so the circle closes
+    /// along an edge that wanders.
     public var wobble: Float
-    /// Where that wander starts, so every run eats its picture differently.
+    /// Where the limb's erosion starts, so no two endings close alike.
     public var phase: Float
+    /// Seconds into the ending, so the limb, the smoke, and the grain move.
+    public var time: Float
+    /// Film-grain strength over the picture's dark areas.
+    public var grain: Float
 
-    /// The whole picture: no cell is hidden and no edge wanders.
-    public static let full = RevealMask(
-        left: 0, top: 0, right: 1, bottom: 1, wobble: 0, phase: 0)
+    /// The untouched picture: no fall or erosion.
+    public static let full = RevealMask()
 
     public init(
-        left: Float, top: Float, right: Float, bottom: Float,
-        wobble: Float, phase: Float
+        scale: Float = 1,
+        fall: Float = 0,
+        wobble: Float = 0,
+        phase: Float = 0,
+        time: Float = 0,
+        grain: Float = 0
     ) {
-        self.left = left
-        self.top = top
-        self.right = right
-        self.bottom = bottom
+        self.scale = scale
+        self.fall = fall
         self.wobble = wobble
         self.phase = phase
+        self.time = time
+        self.grain = grain
     }
 }
 
-/// One ending's look: how far its edges wander and how much the lower edge
-/// trails the upper one, so the picture is eaten from the top down.
+/// One ending's look: how the circle's limb erodes and how strongly the grain
+/// reads.
 struct RevealVariation: Equatable {
-    /// The wander, as a fraction of the band the edges have left.
+    /// Limb erosion as a fraction of the visible radius.
     var wobble: Float
     var phase: Float
-    /// Seconds the lower edge trails the upper one.
-    var lag: Float
+    /// Film-grain strength.
+    var grain: Float
 
     static func seeded(_ seed: UInt64) -> RevealVariation {
         var draw = SplitMix64(seed: seed)
         return RevealVariation(
-            wobble: draw.float(0.02...0.05),
+            wobble: draw.float(0.04...0.10),
             phase: draw.float(0...Float.pi * 2),
-            lag: draw.float(0.05...0.15))
+            grain: draw.float(0.025...0.05))
     }
 }
 
-/// The ending's timeline. One wall-clock time drives the wipe and the close, so
-/// a dropped frame cannot stretch them. The wipe keeps a few grid rows around
-/// the horizon rather than one, so the line stays visible at the grid's own
-/// resolution, and the close ends on a square point of the same size.
+/// The ending's timeline. One wall-clock time drives the whole fall, so a
+/// dropped frame cannot stretch it: the circle accelerates inward and the dot
+/// holds for the rest beat.
 enum RevealTimeline {
-    /// Grid rows the finished line spans around the horizon.
-    static let lineRows: Float = 3
+    /// Scale of the picture when the circle has closed: the single ink dot.
+    static let dotScale: Float = 0.005
 
     struct Frame {
         var mask: RevealMask
-        /// True once the point has held for `RevealEnding.restDuration`.
+        /// True once the dot has held for `RevealEnding.restDuration`.
         var resting: Bool
     }
 
-    static func frame(
-        time rawTime: Float,
-        rows: Int,
-        cols: Int,
-        variation: RevealVariation
-    ) -> Frame {
-        let wipe = Float(RevealEnding.wipeDuration)
-        let line = Float(RevealEnding.lineDuration)
-        let time = min(max(rawTime, 0), wipe + line + Float(RevealEnding.restDuration))
+    static func frame(time rawTime: Float, variation: RevealVariation) -> Frame {
+        let collapse = Float(RevealEnding.collapseDuration)
+        let rest = Float(RevealEnding.restDuration)
+        let total = collapse + rest
+        let time = min(max(rawTime, 0), total)
 
-        let rowPitch = 1 / Float(max(1, rows))
-        let columnPitch = 1 / Float(max(1, cols))
-        let lineHalf = min(0.5, lineRows * rowPitch / 2)
-        let pointHalf = min(0.5, lineRows * columnPitch / 2)
-
-        // The upper edge leads; the lower one trails by the run's lag, so the
-        // picture reads as eaten from the top down. Both reach the horizon at
-        // the end of the wipe.
-        let lead = max(0.05, wipe - variation.lag)
-        let upper = smoothstep(0, lead, time)
-        let lower = smoothstep(variation.lag, wipe, time)
-
-        // The line closes on its centre point after the wipe.
-        let close = smoothstep(wipe, wipe + line, time)
-
-        let top = upper * (0.5 - lineHalf)
-        let bottom = 1 - lower * (0.5 - lineHalf)
-        let left = close * (0.5 - pointHalf)
-        let right = 1 - close * (0.5 - pointHalf)
-        // The wander fades in with the wipe and follows the band the edges have
-        // left: the frame the collapse starts on is the untouched picture, and
-        // the finished line is exactly the horizon.
-        let wander = variation.wobble * (bottom - top) * smoothstep(0, 0.25, time)
+        // The circle accelerates inward: the scale drops as the square of the
+        // fall's progress, so the picture hangs at its full extent and then
+        // rushes into the dot.
+        let fall = smoothstep(0, collapse, time)
+        let drop = fall * fall
+        let scale = 1 - (1 - dotScale) * drop
 
         return Frame(
             mask: RevealMask(
-                left: left,
-                top: top,
-                right: right,
-                bottom: bottom,
-                wobble: wander,
-                phase: variation.phase),
-            resting: time >= wipe + line + Float(RevealEnding.restDuration))
+                scale: scale,
+                fall: fall,
+                // The limb starts wandering only once the circle has left the
+                // surface's edge, so the full frame's border stays still.
+                wobble: variation.wobble * smoothstep(0.15, 0.5, fall),
+                phase: variation.phase,
+                time: time,
+                grain: variation.grain * smoothstep(0, 0.15, time)),
+            resting: time >= total)
     }
 
     private static func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {

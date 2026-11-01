@@ -43,7 +43,9 @@ public final class CellGridSink: FrameSink, @unchecked Sendable {
             case .colors:
                 try toneRenderer.render(
                     gpu: frame.gpu, mask: frame.mask,
-                    background: spec.display.palette[0], into: surface.texture)
+                    background: spec.display.palette[0],
+                    ink: spec.display.palette[spec.display.palette.count - 1],
+                    into: surface.texture)
             }
         } catch {
             lock.lock()

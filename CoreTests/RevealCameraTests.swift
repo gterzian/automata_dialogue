@@ -36,6 +36,18 @@ final class RevealCameraTests: XCTestCase {
         }
     }
 
+    /// The grid's column count stays even at every step, so the centre column
+    /// keeps the seed half a cell off the centre line. An odd count would
+    /// centre the seed, and the whole pattern would snap sideways as the zoom
+    /// crossed that count.
+    func testColumnsStayEvenAtEveryStep() {
+        for steps in 0...1_200 {
+            let cols = ViewportGeometry.zoomedColumns(
+                baseCols: 720, zoom: zoom(steps: steps))
+            XCTAssertEqual(cols % 2, 0, "step \(steps)")
+        }
+    }
+
     /// Past the close-up the rows a branch has grown track the camera one for
     /// one, so the pattern grows at a constant screen rate instead of jumping
     /// levels.

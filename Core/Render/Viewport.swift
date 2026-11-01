@@ -56,11 +56,13 @@ public enum ViewportGeometry {
 
     /// Display columns for a zoomed window: zooming in shrinks the grid so a
     /// board cell covers more display cells, and zooming out grows it so more
-    /// board fits. The grid stops at the display floor, where one cell is one
-    /// element of the surface; past it `sourceStride` samples more source cells
-    /// per display cell instead of growing the grid.
+    /// board fits. The count stays even so the centre column is always offset
+    /// from the centre line by half a cell: an odd count would centre the seed
+    /// and make the whole pattern jump sideways by half a cell as the zoom
+    /// crosses that count.
     public static func zoomedColumns(baseCols: Int, zoom: Double) -> Int {
-        max(1, Int((Double(max(1, baseCols)) / zoom).rounded()))
+        let columns = max(1, Int((Double(max(1, baseCols)) / zoom).rounded()))
+        return columns % 2 == 0 ? columns : columns + 1
     }
 
     /// Display rows for a zoomed window; see `zoomedColumns`.
@@ -103,9 +105,12 @@ public enum ViewportGeometry {
         max(0, (max(1, rows) - 1) / 2)
     }
 
-    /// Display columns for a window of `size` points.
+    /// Display columns for a window of `size` points. The count stays even so
+    /// the twin grid's centre column sits a half cell off the centre line, the
+    /// side the intro's retraction hands the seed to.
     public static func columns(size: CGSize) -> Int {
-        max(1, Int(max(1, size.width) / minimumCellPoints))
+        let columns = max(1, Int(max(1, size.width) / minimumCellPoints))
+        return columns % 2 == 0 ? columns : columns + 1
     }
 
     /// Rows that keep cells square for `cols` columns in a window of `size`.

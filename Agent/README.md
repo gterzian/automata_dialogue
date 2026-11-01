@@ -37,7 +37,10 @@ relies on and keeps the build independent of the macro plugin. When bumping
 - The container and the system-prompt KV cache are built once and shared; a
   failed build is retried on the next run. Both run off the main actor.
   `AgentEngine.prepare()` starts them so the first run pays only the user turn;
-  it is best-effort, since the run retries and reports the error.
+  it is best-effort, since the run retries and reports the error. `rate` then
+  calls `AgentEngine.warmImage()`: one image turn at up to 256 px and one
+  generated token, so the vision encoder and decode kernels are compiled before
+  the first submission. It is best-effort and does not touch the choice history.
 
 ## Run
 

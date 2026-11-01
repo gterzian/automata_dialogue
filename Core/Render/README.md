@@ -95,10 +95,11 @@ returns `min(startZoom, branchRows / (steps + 1))`. The pull-back ends where the
 sampling widens the window to the whole simulated board
 (`ViewportGeometry.stepsThatSpanBoard`), so the fit never samples past the
 board's edge. `RenderActor` stops stepping there and plays the ending on the
-clock's own ticks: the frame's `RevealMask` closes from the whole picture onto
-the horizon row and then onto its centre point, and both draw paths draw the
-page where the mask hides a cell, so the picture is eaten in place rather than
-rescaled (see `CLI/README.md`). The seed
+clock's own ticks: the frame's `RevealMask` scales and darkens the picture while
+the tone path closes it inside the intro's organic circle and turns it into a
+single ink dot. The ending runs on the toned grid the pull-back stops on, so
+one sample of that grid carries the whole fall; the span path hides cells
+outside the circle (see `CLI/README.md`). The seed
 frame is delivered at that same scale, so the hand-off from the intro does not
 jump. A zoom is a grid refit and a
 redraw of the same surface, not a surface resize: the surface is allocated
@@ -231,12 +232,13 @@ buffer, so a frame must finish before the next one is written.
   the sink draws each delivered `GPUColorGrid` into the target's surface; a grid
   of palette indices is compacted into spans, a grid of colours is drawn as one
   textured quad. The window refits every display row each frame, so an index
-  frame recompacts the whole grid. Both paths take the frame's `RevealMask` and
-  draw the page where it hides a cell.
+  frame recompacts the whole grid. Both paths take the frame's `RevealMask`: the
+  tone path applies the whole ending, and the span path hides the cells outside
+  the falling limb.
 - **Reveal ending** (`RevealEnding`, `RevealMask`, `RevealTimeline`,
-  `RevealVariation`, `RenderActor.advanceEnding`) — the wipe that eats the
-  stopped picture back onto the horizon row and closes the line into its point,
-  with a seeded wander on its edges so no two runs eat the picture alike.
+  `RevealVariation`, `RenderActor.advanceEnding`) — the circle that closes the
+  stopped picture through the intro's organic edge into a single ink dot, and
+  the seeded limb and grain that make no two runs close alike.
 - **Submission beat** (`ShaderSource.submission`, `SubmissionRenderer`,
   `SubmissionTimeline`, `WorkingIndicator.playSubmission`) — the two-clone part
   and the collapse into the intro's opening dot, on the indicator's target.
@@ -395,10 +397,10 @@ frame the submission beat lands on, the submission timeline's phases, the seed
 retraction, that a seed reproduces one run, and that the cycle, the submission
 beat, and the retraction reach their renderers, including that the intro draws
 through an offscreen target rather than a layer and reports its first presented
-frame. `RevealEndingTests` pins the other animation's workflow: the mask starts
-on the untouched picture, eats it back to the horizon line, closes the line into
-its centre point and rests there; the upper edge leads the lower one; a seed
-reproduces one ending; and both draw paths draw the page where the mask hides a
-cell. The display-link presentation
+frame. `RevealEndingTests` pins the other animation's workflow: the timeline
+starts on the untouched picture, accelerates the circle closed onto the single
+ink dot and rests there; the fall's equal slices take more of the picture as it
+goes; a seed reproduces one ending; and both draw paths hide cells outside the
+circle. The display-link presentation
 needs a screen and is not tested here; the animations' looks are accepted by
 visual inspection.

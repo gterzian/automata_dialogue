@@ -353,26 +353,29 @@ public enum ShaderSource {
     struct LayerUniforms {
         uint cols;
         uint rows;
-        float left;
-        float top;
-        float right;
-        float bottom;
+        float scale;
         float wobble;
         float phase;
+        float time;
     };
 
-    // The ending's wipe hides a cell where it meets a wandering edge, so the
-    // picture is eaten by a line that is not perfectly straight. The phase is
-    // seeded per run; a full mask has zero wobble and hides nothing.
-    static float edge_offset(float x, float wobble, float phase) {
-        return wobble * (0.6f * sin(x * 17.0f + phase)
-                         + 0.4f * sin(x * 31.0f - phase * 1.7f));
+    // The ending's limb: the picture falls toward the centre, and a cell outside
+    // the wandering limb draws the page. A full mask has scale 1 and zero
+    // wobble, so no cell is outside it.
+    static float limb_wobble(float angle, float phase, float time) {
+        return 0.55f * sin(angle * 3.0f + phase + time * 1.7f)
+             + 0.30f * sin(angle * 7.0f - phase * 1.7f - time * 2.3f)
+             + 0.15f * sin(angle * 13.0f + phase * 2.3f + time * 3.1f);
     }
 
     static bool masked_out(constant LayerUniforms& u, float2 uv) {
-        if (uv.x < u.left || uv.x > u.right) { return true; }
-        float edge = edge_offset(uv.x, u.wobble, u.phase);
-        return uv.y < u.top + edge || uv.y > u.bottom - edge;
+        float aspect = float(u.cols) / float(max(u.rows, 1u));
+        float2 hp = (uv - 0.5f) * float2(aspect, 1.0f);
+        float corner = length(float2(aspect, 1.0f)) * 0.5f;
+        float radius = length(hp) / max(corner, 1e-5f);
+        float angle = atan2(hp.y, hp.x);
+        float limb = u.scale * (1.0f + u.wobble * limb_wobble(angle, u.phase, u.time));
+        return radius > limb;
     }
 
     // Matches MTLDrawPrimitivesIndirectArguments; `encode_draw` fills it in.
@@ -442,8 +445,8 @@ public enum ShaderSource {
         return out;
     }
 
-    // The pass clears to the page, so a masked span is dropped rather than
-    // drawn in the background colour.
+    // The pass clears to the page, so a span outside the falling limb is dropped
+    // rather than drawn in the background colour.
     fragment float4 layer_fragment(LayerVertexOut in [[stage_in]],
                                    constant LayerUniforms& u [[buffer(1)]]) {
         if (masked_out(u, in.uv)) { discard_fragment(); }
@@ -466,20 +469,46 @@ public enum ShaderSource {
 
     struct ToneUniforms {
         float4 background;
-        float left;
-        float top;
-        float right;
-        float bottom;
+        float4 ink;
+        float aspect;
+        float screenHeight;
+        float scale;
+        float fall;
         float wobble;
         float phase;
+        float time;
+        float grain;
     };
 
-    // The ending's wipe hides a cell where it meets a wandering edge, so the
-    // picture is eaten by a line that is not perfectly straight. The phase is
-    // seeded per run; a full mask has zero wobble and hides nothing.
-    static float edge_offset(float x, float wobble, float phase) {
-        return wobble * (0.6f * sin(x * 17.0f + phase)
-                         + 0.4f * sin(x * 31.0f - phase * 1.7f));
+    // The fall's limb: a smooth noise field read around the circle, so the
+    // picture erodes at more than one scale and the edge drifts as it falls.
+    static float limb_offset(texture2d<float> noise, float angle,
+                             constant ToneUniforms& u) {
+        constexpr sampler s(filter::linear, address::repeat);
+        float2 direction = float2(cos(angle), sin(angle));
+        float2 drift = float2(u.phase, u.phase * 0.73f)
+                     + float2(u.time * 0.05f, -u.time * 0.03f);
+        float coarse = noise.sample(s, direction * 0.75f + drift).r;
+        float fine = noise.sample(s, direction * 1.9f - drift * 1.3f).r;
+        return coarse * 0.65f + fine * 0.35f - 0.5f;
+    }
+
+    // A smooth scalar field read at the sample's position, so the fall's
+    // darkening drifts like smoke instead of a clean vignette.
+    static float field_noise(texture2d<float> noise, float2 p,
+                             constant ToneUniforms& u) {
+        constexpr sampler s(filter::linear, address::repeat);
+        float2 drift = float2(u.phase, u.phase * 0.73f)
+                     + float2(u.time * 0.05f, -u.time * 0.03f);
+        return noise.sample(s, p * 0.55f + drift).r;
+    }
+
+    // Per-pixel white noise for the film grain; the seed moves with the
+    // ending's clock.
+    static float grainAt(float2 pixel, float seed) {
+        float3 p3 = fract(float3(pixel.xyx) * float3(0.1031f, 0.1030f, 0.0973f));
+        p3 += dot(p3, p3.yzx + 33.33f + seed);
+        return fract((p3.x + p3.y) * p3.z);
     }
 
     vertex ToneOut tone_vertex(uint vid [[vertex_id]]) {
@@ -492,18 +521,70 @@ public enum ShaderSource {
         return out;
     }
 
-    // A masked cell draws the page, so the picture is eaten in place instead of
-    // being rescaled into the band the mask leaves.
+    // The whole surface is one sample of the picture. The ending closes that
+    // sample inside the intro's organic circle and turns it into a single ink
+    // dot; a full mask leaves the sample untouched.
     fragment float4 tone_fragment(ToneOut in [[stage_in]],
                                   texture2d<float> cells [[texture(0)]],
+                                  texture2d<float> noise [[texture(1)]],
                                   constant ToneUniforms& u [[buffer(0)]]) {
-        float edge = edge_offset(in.uv.x, u.wobble, u.phase);
-        if (in.uv.x < u.left || in.uv.x > u.right
-            || in.uv.y < u.top + edge || in.uv.y > u.bottom - edge) {
-            return u.background;
+        // hp is the surface in units of its height, so every radius below is a
+        // fraction of the height and a circle stays a circle.
+        float2 hp = (in.uv - 0.5f) * float2(u.aspect, 1.0f);
+        float corner = length(float2(u.aspect, 1.0f)) * 0.5f;
+        float radius = length(hp);
+        float px = 1.0f / max(u.screenHeight, 1.0f);
+
+        float3 color = u.background.rgb;
+
+        // The picture is drawn scaled about the centre. As the fall closes the
+        // circle to the dot, the whole picture shrinks into it.
+        float wobble = 0.0f;
+        if (u.wobble > 0.0f) {
+            float angle = atan2(hp.y, hp.x);
+            wobble = u.wobble * limb_offset(noise, angle, u);
         }
-        constexpr sampler s(filter::linear, address::clamp_to_edge);
-        return cells.sample(s, in.uv);
+        float factor = u.scale * (1.0f + wobble);
+        float limb = corner * factor;
+        // The soft edge fades in only as the circle leaves the surface's edge,
+        // so the full frame's border does not wobble when the fall starts.
+        float soft = max(limb * 0.06f, 1.5f * px)
+                   * smoothstep(0.0f, 0.20f, u.fall);
+        if (factor > 1e-5f && radius < limb + max(soft, 1e-5f)) {
+            float2 source = 0.5f + hp / factor / float2(u.aspect, 1.0f);
+            constexpr sampler picture(filter::linear, address::clamp_to_edge);
+            float3 sampled = cells.sample(picture, source).rgb;
+
+            // Matter darkens as it falls: the outer limb first, then the whole
+            // picture as it reaches the dot, with a darker rim so the shrinking
+            // edge reads as a mass.
+            float rim = 1.0f - smoothstep(0.0f, max(0.03f, 2.0f * px), limb - radius);
+            float outer = smoothstep(0.25f, 1.0f, radius / max(limb, 1e-5f));
+            float smoke = 1.0f;
+            if (u.fall > 0.0f) { smoke = 0.7f + 0.6f * field_noise(noise, hp, u); }
+            float darken = clamp(
+                u.fall * (0.25f + 0.55f * outer + 0.35f * rim) * smoke, 0.0f, 1.0f);
+            sampled = mix(sampled, u.ink.rgb, darken);
+
+            // The last part of the fall turns the shrinking picture solid ink,
+            // so the circle closes on the intro's single dot.
+            sampled = mix(sampled, u.ink.rgb, smoothstep(0.65f, 1.0f, u.fall));
+
+            // The intro's circle has a soft edge; the page shows through it.
+            float edge = 1.0f;
+            if (u.fall > 0.0f && soft > 1e-5f) {
+                edge = 1.0f - smoothstep(limb - soft, limb + soft, radius);
+            }
+            color = mix(u.background.rgb, sampled, edge);
+        }
+
+        // Film grain rides on the dark areas, so the ending keeps the intro's
+        // texture; a full mask has no grain.
+        float darkness = clamp(1.0f - dot(color, float3(1.0f / 3.0f)), 0.0f, 1.0f);
+        float grain = grainAt(floor(in.uv * u.screenHeight), u.phase + u.time * 60.0f) - 0.5f;
+        color += grain * u.grain * darkness * darkness;
+
+        return float4(color, 1.0f);
     }
     """
 

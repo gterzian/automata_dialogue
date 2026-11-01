@@ -84,9 +84,10 @@ Print the catalog without loading a model:
 .build/release/rater-cli catalog
 ```
 
-The first submission is slower than later ones while MLX compiles its Metal
-kernels and the process prefills the system prompt. Measured costs are in
-`Agent/README.md`.
+The CLI loads the model and runs one minimal image turn at launch, so MLX
+compiles its vision and decode kernels and the process prefills the system
+prompt before the first submission. The first submission can still cost more
+than later ones. Measured costs are in `Agent/README.md`.
 
 ## Troubleshooting
 
