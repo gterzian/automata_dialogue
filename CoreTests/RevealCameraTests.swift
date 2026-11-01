@@ -63,4 +63,33 @@ final class RevealCameraTests: XCTestCase {
         XCTAssertEqual(
             RevealCamera.zoom(steps: 100, branchRows: 0), RevealCamera.startZoom)
     }
+
+    /// The reveal's driving rate opens at the paced rate and grows by the
+    /// setup's per-step growth, which itself accelerates each step, so the
+    /// pull-back starts slowly and compounds super-exponentially.
+    func testSpeedScaleStartsSteadyAndAcceleratesPerStep() {
+        let steady = RevealSetup(branchRows: branchRows)
+        XCTAssertEqual(steady.speedScale(atStep: 0), 1)
+        XCTAssertEqual(steady.speedScale(atStep: 500), 1)
+
+        // With a steady acceleration the growth is the plain per-step one.
+        let growing = RevealSetup(
+            branchRows: branchRows, speedGrowthPerStep: 1.01)
+        XCTAssertEqual(growing.speedScale(atStep: 0), 1)
+        XCTAssertEqual(
+            growing.speedScale(atStep: 100), pow(1.01, 100), accuracy: 1e-9)
+
+        // The growth compounds with itself: the log growth of step n is the
+        // opening growth raised to the acceleration's nth power.
+        let accelerating = RevealSetup(
+            branchRows: branchRows, speedGrowthPerStep: 1.001,
+            speedGrowthAcceleration: 1.01)
+        XCTAssertEqual(accelerating.speedScale(atStep: 0), 1)
+        XCTAssertEqual(
+            log(accelerating.speedScale(atStep: 1)), log(1.001), accuracy: 1e-12)
+        XCTAssertEqual(
+            log(accelerating.speedScale(atStep: 101)
+                / accelerating.speedScale(atStep: 100)),
+            log(1.001) * pow(1.01, 100), accuracy: 1e-12)
+    }
 }

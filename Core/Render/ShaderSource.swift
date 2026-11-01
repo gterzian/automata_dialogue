@@ -583,8 +583,13 @@ public enum ShaderSource {
 
         float4 a = sampleFitted(image, s, float2(q.x, q.y + parting), fit, origin);
         float4 b = sampleFitted(image, s, float2(q.x, q.y - parting), fit, origin);
+        // The input pages are dark, so the beat opens on a black field — the
+        // page the picture was submitted on — and the field turns into the
+        // intro's light page as the picture collapses into the dot, so neither
+        // the start nor the handoff flashes a different page.
+        float3 page = mix(float3(0.0), u.white.rgb, u.collapse);
         float total = a.a + b.a;
-        float3 scene = total > 0.0 ? (a.rgb * a.a + b.rgb * b.a) / total : u.white.rgb;
+        float3 scene = total > 0.0 ? (a.rgb * a.a + b.rgb * b.a) / total : page;
 
         // The dot is the intro's opening dot: the same radius, colour, and
         // centre, so the handoff has no jump.

@@ -234,9 +234,16 @@ public actor RenderActor {
             try advanceEnding(by: delta)
             return
         }
-        var steps = pacing.steps(for: delta, remainder: &paceRemainder)
+        guard let simulation else { return }
+        // A reveal accelerates: its row rate grows with every source row the
+        // run has computed, so the same tick advances more rows as the picture
+        // widens. A steady run, or no reveal, keeps the set pacing.
+        let tickPacing = reveal.map {
+            pacing.scaled(by: $0.speedScale(atStep: simulation.steppedRows))
+        } ?? pacing
+        var steps = tickPacing.steps(for: delta, remainder: &paceRemainder)
         guard steps > 0 else { return }
-        if let reveal, let simulation {
+        if let reveal {
             // The pull-back ends where the window's sampling spans the whole
             // board.
             if let limit = revealSpanLimit {

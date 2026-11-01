@@ -140,8 +140,11 @@ the input separates into a double exposure — two copies a fraction of the
 image's height apart, so it reads as one image with a ghost — then the doubled
 screen collapses for half a second onto the dot the intro starts from, bringing
 the two copies back together as it shrinks them. `SubmissionRenderer` samples a
-texture uploaded from the
-input's `RasterImage`; `WorkingIndicator.playSubmission` swaps from the beat to
+texture uploaded from the input's `RasterImage`; the field outside the fitted
+picture starts as the dark page the picture was submitted on and turns into the
+intro's light page as the collapse brings the copies together, so the beat
+opens on the page it replaces and hands over without a page flash.
+`WorkingIndicator.playSubmission` swaps from the beat to
 `CollapseTimeline` at `ReviewIntro.openingTime`, drawing both with the same
 `CollapseVariation` so the dot's radius and colour match. The model runs
 alongside both animations; `WorkingIndicator.start` plays the intro alone when
@@ -201,9 +204,13 @@ buffer, so a frame must finish before the next one is written.
   the frame's buffer only on the render actor. `RenderPacing` turns clock ticks
   into advances: `.fixed` for deterministic tests, `.timed` accumulates
   `Δ × stepsPerSecond` and clamps each tick; `setPacing` changes a driven run's
-  rate in flight. `RenderActor.makeCellGridSink(target:)` builds the sink on the
-  actor's own `GPUContext`, so the sink and the simulation share one device,
-  queue, and residency set.
+  rate in flight. A reveal's `RevealSetup` grows the row rate by
+  `speedGrowthPerStep` at the opening step, and that per-step growth itself
+  multiplies by `speedGrowthAcceleration` each step, so an equal tick advances
+  more rows super-exponentially as the pull-back widens.
+  `RenderActor.makeCellGridSink(target:)` builds the sink on the actor's own
+  `GPUContext`, so the sink and the simulation share one device, queue, and
+  residency set.
 - **Render target** (`RenderTarget`, `RenderSurface`, `MetalLayerTarget`,
   `DisplayLinkClock`) — the swap point between the render logic and the surface
   it draws into. A target owns the pixel format the pipelines compile against,
@@ -293,11 +300,12 @@ buffer, so a frame must finish before the next one is written.
 
 - **Keeping the whole history costs memory that grows with the run.** The
   history ring holds every source row, about `boardWidth` bytes per step (a
-  ten-window board at the CLI's 40 rows/s is ~288 KB/s), and each growth copies
-  the rows on the render thread. A window left on one automaton for minutes
-  holds tens to hundreds of MB, and a growth copy after a long run can pause
-  the reveal. A cap would have to hold the camera there and let the oldest rows
-  leave as before.
+  ten-window board grows ~324 KB/s while the reveal is still at its opening 45
+  rows/s, and much faster as it accelerates), and each growth copies the rows
+  on the render thread, so a growth copy after a long run can pause the reveal.
+  The pull-back's span limit bounds the run's row count, but the ring still
+  holds every row of it. A cap would have to hold the camera there and let the
+  oldest rows leave as before.
 - **The board bounds the reveal.** The pull-back ends once the window's
   sampling spans the ten-window board, so a longer reveal would need a wider
   board, which grows the history memory with it.

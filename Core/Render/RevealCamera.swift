@@ -24,13 +24,49 @@ public enum RevealCamera {
     }
 }
 
-/// The camera settings a driven run applies on each clock tick.
+/// The camera settings and the row-rate curve a driven run applies on each
+/// clock tick.
 public struct RevealSetup: Sendable, Equatable {
     /// Rows from the shared horizon to each outer edge at 1×; the camera's
     /// reference span.
     public var branchRows: Int
+    /// How much the row rate grows at the opening step: 1.001 is +0.1%. 1 keeps
+    /// the paced rate; the growth is the same every step until
+    /// `speedGrowthAcceleration` changes it.
+    public var speedGrowthPerStep: Double
+    /// How much that per-step growth itself multiplies each step. 1 keeps the
+    /// growth constant; above 1 the growth compounds with itself, so the rate
+    /// rises super-exponentially.
+    public var speedGrowthAcceleration: Double
 
-    public init(branchRows: Int) {
+    public init(
+        branchRows: Int,
+        speedGrowthPerStep: Double = 1,
+        speedGrowthAcceleration: Double = 1
+    ) {
         self.branchRows = branchRows
+        self.speedGrowthPerStep = speedGrowthPerStep
+        self.speedGrowthAcceleration = speedGrowthAcceleration
+    }
+
+    /// The row-rate multiplier once the run has grown `steps` source rows: the
+    /// per-step growth is `speedGrowthPerStep` raised to
+    /// `speedGrowthAcceleration^step`, and the multiplier accumulates those
+    /// growths. The first row runs at the paced rate, so the reveal opens at
+    /// the speed a steady run would show and accelerates from there.
+    public func speedScale(atStep steps: Int) -> Double {
+        guard steps > 0 else { return 1 }
+        guard speedGrowthPerStep != 1 else { return 1 }
+        let steps = Double(steps)
+        // The sum of the first `steps` powers of the acceleration: each step
+        // grows the rate by `speedGrowthPerStep^(acceleration^step)`.
+        let exponent: Double
+        if speedGrowthAcceleration == 1 {
+            exponent = steps
+        } else {
+            exponent = (pow(speedGrowthAcceleration, steps) - 1)
+                / (speedGrowthAcceleration - 1)
+        }
+        return pow(speedGrowthPerStep, exponent)
     }
 }

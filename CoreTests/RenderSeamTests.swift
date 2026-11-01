@@ -70,6 +70,33 @@ final class FrameSeamTests: XCTestCase {
         XCTAssertEqual(remainder, 0, accuracy: 1e-9)
         XCTAssertEqual(pacing.steps(for: 1.0 / 1000, remainder: &remainder), 1)
     }
+
+    /// A reveal's accelerating rate multiplies only the timed rate; a fixed
+    /// pacing is driven by its hand-pumped step count.
+    func testScaledPacingMultipliesTheTimedRate() {
+        var baseRemainder = 0.0
+        var scaledRemainder = 0.0
+        let base = RenderPacing.timed(stepsPerSecond: 10)
+        XCTAssertEqual(base.steps(for: 0.25, remainder: &baseRemainder), 2)
+        XCTAssertEqual(
+            base.scaled(by: 2).steps(for: 0.25, remainder: &scaledRemainder), 5)
+
+        var fixedRemainder = 0.0
+        XCTAssertEqual(
+            RenderPacing.fixed(7).scaled(by: 100)
+                .steps(for: 0.25, remainder: &fixedRemainder),
+            7)
+    }
+
+    /// A tick that covers no time advances nothing even when the accelerated
+    /// rate is infinite, which `delta × rate` would turn into NaN.
+    func testTimedPacingIgnoresAZeroTickAtAnInfiniteRate() {
+        var remainder = 0.0
+        let pacing = RenderPacing.timed(stepsPerSecond: .infinity)
+        XCTAssertEqual(pacing.steps(for: 0, remainder: &remainder), 0)
+        XCTAssertEqual(remainder, 0, accuracy: 1e-9)
+        XCTAssertEqual(pacing.steps(for: 1, remainder: &remainder), 64)
+    }
 }
 
 final class RenderActorTests: XCTestCase {
@@ -203,6 +230,39 @@ final class RenderActorTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(20))
         XCTAssertEqual(sink.frames.count, delivered)
 
+        await actor.shutdown()
+    }
+
+    /// A driven reveal accelerates: an equal tick advances more rows once the
+    /// run has grown, because `speedGrowthPerStep` raised its row rate.
+    func testRevealAcceleratesWithEveryGrownRow() async throws {
+        guard GPUContext.isAvailable else {
+            throw XCTSkip("no Metal 4 device")
+        }
+        let spec = Catalog.spec(id: "E90")!
+        let sink = RecordingSink()
+        let target = OffscreenTarget(textures: [])
+        let actor = RenderActor()
+        // 20 base columns over a 400-column board leave 200 steps before the
+        // pull-back spans the board, well past the ticks checked here.
+        let board = Board(width: 400, height: 21, start: .center)
+        _ = try await actor.configure(
+            spec: spec, cols: 20, rows: 21, board: board, layout: .twin,
+            reveal: RevealSetup(
+                branchRows: ViewportGeometry.twinHalfRows(rows: 21),
+                speedGrowthPerStep: 2),
+            sink: sink)
+        // Drain the seed frame so each tick's frame is the next signal.
+        _ = sink.waitForFrame(timeout: 0.01)
+        // A tick of 1/64 s at 64 rows/s is exactly one row at the opening rate;
+        // doubling the rate per grown row turns the next ticks into 2 and 8.
+        await actor.drive(target: target, pacing: .timed(stepsPerSecond: 64))
+        for expected in [1, 3, 11] {
+            target.tick(1.0 / 64)
+            _ = sink.waitForFrame(timeout: 0.5)
+            let steps = await actor.steppedRows
+            XCTAssertEqual(steps, expected)
+        }
         await actor.shutdown()
     }
 

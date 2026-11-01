@@ -46,10 +46,27 @@ public struct RenderPacing: Sendable, Equatable {
         case .fixed(let stepsPerFrame):
             return stepsPerFrame
         case .timed(let stepsPerSecond, let maxStepsPerTick):
+            // A tick that covers no time advances nothing, however large the
+            // rate: an accelerating reveal's rate can be infinite, and
+            // `delta × rate` would then be NaN instead of zero.
+            guard delta > 0 else { return 0 }
             remainder = min(remainder + delta * stepsPerSecond, Double(maxStepsPerTick))
             let steps = Int(remainder)
             remainder -= Double(steps)
             return steps
+        }
+    }
+
+    /// The same pacing with its `.timed` rate multiplied by `scale`. `.fixed` is
+    /// returned unchanged: a hand-driven test has no clock rate to scale.
+    func scaled(by scale: Double) -> RenderPacing {
+        switch mode {
+        case .fixed:
+            return self
+        case .timed(let stepsPerSecond, let maxStepsPerTick):
+            return .timed(
+                stepsPerSecond: stepsPerSecond * scale,
+                maxStepsPerTick: maxStepsPerTick)
         }
     }
 }

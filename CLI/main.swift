@@ -104,8 +104,9 @@ func printUsage() -> Never {
 
 // MARK: - Metal window
 
-/// The review window: no title bar, no buttons, no resize edge, so the content
-/// view is the whole window. A borderless window is not key by default, and the
+/// The review window: no title bar and no resize edge, so the content view is
+/// the whole window and `AutomatonWindow` draws its close control over every
+/// page. A borderless window is not key by default, and the
 /// key monitor only sees events sent to the key window, so it would not receive
 /// Return or the arrows without these overrides.
 final class ReviewWindow: NSWindow {
@@ -182,10 +183,26 @@ final class MetalHostView: NSView {
 /// suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
-    /// Source rows per second each branch grows. A branch fills half the
-    /// window, so twice the single-run rate keeps the window-relative growth
-    /// speed the same; this is the knob for how long the pull-back takes.
-    private static let revealRowsPerSecond = 40.0
+    /// Source rows per second each branch grows at the opening step. A branch
+    /// fills half the window, so half this rate is the window-relative growth
+    /// speed. The reveal opens at this rate and accelerates from it, so this
+    /// is the knob for how slowly the pull-back starts.
+    private static let revealRowsPerSecond = 45.0
+    /// How much the row rate grows at the opening step: 1 + 5e-9 is
+    /// +0.0000005%. At this opening rate a larger opening growth finishes the
+    /// pull-back well under half a minute, so the ramp stays almost flat until
+    /// the acceleration compounds near the end.
+    private static let revealSpeedGrowthPerStep = 1.000000005
+    /// How much that per-step growth itself multiplies each step (1.01 is
+    /// +1%), so the rate compounds super-exponentially. 1 keeps it constant.
+    private static let revealSpeedGrowthAcceleration = 1.01
+    /// The most source rows one tick may advance. The accelerated tail would
+    /// otherwise jump most of the board in a frame; this bounds the zoom-out
+    /// per frame and the backlog after a stalled clock.
+    private static let revealMaxRowsPerTick = 64
+    /// The window's close control in its top-right corner, above every page.
+    private static let windowCloseSize: CGFloat = 24
+    private static let windowCloseInset: CGFloat = 12
 
     private var window: NSWindow?
     private var host: MetalHostView?
@@ -196,6 +213,11 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     private var indicatorHost: MetalHostView?
     private var currentPage: InputPage?
     private var canvas: DrawingCanvasView?
+    /// The window's content view, which holds the page under the window's close
+    /// control, and the page currently in it.
+    private var container: NSView?
+    private var presentedView: NSView?
+    private var closeControl: NSButton?
     /// Pending continuation for a page action (Return or an arrow). The reveal
     /// has its own `enterContinuation`, so arrows during a reveal are ignored.
     private var inputContinuation: CheckedContinuation<InputAction, Never>?
@@ -224,8 +246,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 view = DrawingCanvasView(frame: NSRect(origin: .zero, size: size))
                 canvas = view
             }
-            view.frame = NSRect(origin: .zero, size: size)
-            window.contentView = view
+            show(view, in: window)
             view.window?.makeFirstResponder(view)
         case .image(let url, let behavior):
             let view = NSImageView(frame: NSRect(origin: .zero, size: size))
@@ -235,7 +256,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             // black too and the page reads as one dark field.
             view.wantsLayer = true
             view.layer?.backgroundColor = NSColor.black.cgColor
-            window.contentView = labeled(view, size: size, behavior: behavior)
+            show(labeled(view, size: size, behavior: behavior), in: window)
         }
         window.title = page.title
         currentPage = page
@@ -264,8 +285,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
 
     /// Swaps the reveal for `spec` into the window and suspends until Return,
     /// close, or the end of the pull-back. The corner block shows the submitted
-    /// picture beside the model's English and Chinese reasons, and names the
-    /// chosen entry beneath them. Once the window spans the whole board the
+    /// picture beside the chosen entry's id and class and the model's English
+    /// and Chinese reasons. Once the window spans the whole board the
     /// reveal ends on its own: the panel goes, the picture is eaten back onto
     /// the horizon and closed into its point, and the window advances as Return
     /// would.
@@ -326,11 +347,15 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 layout: .twin,
                 minimumZoom: zoomFloor,
                 reveal: RevealSetup(
-                    branchRows: ViewportGeometry.twinHalfRows(rows: rows)),
+                    branchRows: ViewportGeometry.twinHalfRows(rows: rows),
+                    speedGrowthPerStep: Self.revealSpeedGrowthPerStep,
+                    speedGrowthAcceleration: Self.revealSpeedGrowthAcceleration),
                 sink: sink)
             await actor.drive(
                 target: target,
-                pacing: .timed(stepsPerSecond: Self.revealRowsPerSecond))
+                pacing: .timed(
+                    stepsPerSecond: Self.revealRowsPerSecond,
+                    maxStepsPerTick: Self.revealMaxRowsPerTick))
         } catch {
             print("rate: \(spec.id) failed to render: \(error.localizedDescription)")
             await actor.shutdown()
@@ -345,6 +370,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
         let overlay = PageOverlayView(.init(
             heading: spec.id,
+            subheading: "\(spec.behavior.rawValue) · \(spec.behavior.chineseName)",
             english: choice.rationale,
             chinese: choice.rationaleChinese,
             input: input,
@@ -355,7 +381,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         // first frames that reach the layer, so the swap shows the automaton
         // rather than a bare layer.
         await waitForFirstFrame { made?.hasPresentedFrame ?? true }
-        window.contentView = labeledHost
+        show(labeledHost, in: window)
         window.title = "\(spec.id) — \(spec.title)"
         self.actor = actor
         self.sink = made
@@ -462,7 +488,7 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             // The beat's first frame is presented before the layer is swapped
             // in, or the swap shows the layer's bare background.
             await waitForFirstFrame { await actor.hasPresentedFrame }
-            window.contentView = host
+            show(host, in: window)
             NSApp.activate()
             window.makeKeyAndOrderFront(nil)
         } catch {
@@ -610,8 +636,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     }
 
     /// Opens the screen-sized window, or returns the open one. It has no title
-    /// bar and no buttons: the content view is the whole window, so every point
-    /// of the frame shows a page. The app menu's Quit (Cmd-Q) ends the review.
+    /// bar, so the content view is the whole window and every point of the
+    /// frame shows a page. A close control in the top-right corner closes the
+    /// window; the app menu's Quit (Cmd-Q) ends the review too.
     private func ensureWindow() -> NSWindow {
         if let window { return window }
         let frame = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
@@ -628,11 +655,55 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         // This type holds the window; let ARC release it, not AppKit.
         window.isReleasedWhenClosed = false
         window.setFrame(frame, display: true)
+        // A swap replaces the window's content, so the close control lives in a
+        // container above the page instead of in a page.
+        let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        container.autoresizingMask = [.width, .height]
+        // Layer-back the container so the close control composites above the
+        // pages' layers, the automaton's included, by subview order.
+        container.wantsLayer = true
+        let close = NSButton()
+        close.isBordered = false
+        close.imagePosition = .imageOnly
+        close.image = NSImage(
+            systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close window")
+        close.contentTintColor = .secondaryLabelColor
+        close.imageScaling = .scaleProportionallyDown
+        close.target = self
+        close.action = #selector(closeWindow)
+        close.frame = NSRect(
+            x: container.bounds.maxX - Self.windowCloseInset - Self.windowCloseSize,
+            y: container.bounds.maxY - Self.windowCloseInset - Self.windowCloseSize,
+            width: Self.windowCloseSize, height: Self.windowCloseSize)
+        close.autoresizingMask = [.minXMargin, .minYMargin]
+        container.addSubview(close)
+        window.contentView = container
+        self.container = container
+        self.presentedView = nil
+        self.closeControl = close
         self.window = window
         return window
     }
 
-    /// The window's drawable area: its content view is the whole window.
+    /// Puts `view` in the window under its close control. Every content swap
+    /// goes through here, so the control stays in place across the carousel,
+    /// the submission beat, the intro, and the reveal.
+    private func show(_ view: NSView, in window: NSWindow) {
+        guard let container else { return }
+        if presentedView !== view {
+            presentedView?.removeFromSuperview()
+            container.addSubview(view, positioned: .below, relativeTo: closeControl)
+            presentedView = view
+        }
+        view.frame = container.bounds
+        view.autoresizingMask = [.width, .height]
+    }
+
+    @objc private func closeWindow() {
+        window?.close()
+    }
+
+    /// The window's drawable area: the container spans the whole window.
     private func drawableContentSize(of window: NSWindow) -> NSSize {
         window.contentView?.bounds.size ?? window.frame.size
     }

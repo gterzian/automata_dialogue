@@ -1,9 +1,9 @@
 import AppKit
 
 /// The text the review window draws over a page: the class an input drawing
-/// illustrates, or the submitted picture beside the model's reasons and the
-/// chosen automaton. The text lives in AppKit only, so a reference drawing's
-/// pixels reach the model without the label the window adds.
+/// illustrates, or the submitted picture beside the chosen automaton's class
+/// and the model's reasons. The text lives in AppKit only, so a reference
+/// drawing's pixels reach the model without the label the window adds.
 ///
 /// The input class is white text on the black reference page and needs no
 /// panel. The reveal's block sits over the automaton's growth, so
@@ -20,8 +20,10 @@ final class PageOverlayView: NSView {
 
     struct Content {
         /// The label style's class, or the detail style's chosen id: the
-        /// model's own answer field, shown above its two reasons.
+        /// model's own answer field, shown above the rest of the block.
         var heading: String?
+        /// The detail style's chosen class in English and Chinese, taken from
+        /// the catalog entry the model named.
         var subheading: String?
         var english: String?
         var chinese: String?
@@ -127,8 +129,9 @@ final class PageOverlayView: NSView {
             bottom = y
 
         case .detail:
-            // The panel is the picture and the model's answer: its id field,
-            // then the English and Chinese reasons, all written by the model.
+            // The panel is the picture and the chosen entry: the model's id
+            // field, the class that id belongs to, then the model's English
+            // and Chinese reasons.
             let hasThumbnail = content.input != nil
             let columnX = hasThumbnail
                 ? padding + Self.thumbnailSide + Self.thumbnailGap
@@ -139,7 +142,8 @@ final class PageOverlayView: NSView {
             var y = padding
             for (text, gap) in [
                 (headingText(), CGFloat(0)),
-                (reasonText(), 6),
+                (subheadingText(), 3),
+                (reasonText(), 8),
             ] {
                 guard !text.string.isEmpty else { continue }
                 y += gap
