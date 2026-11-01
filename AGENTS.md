@@ -107,6 +107,18 @@ change, along with the affected tests, counts, and READMEs.
 
 ## Build and test
 
+- **One build pass per batch of edits.** Make every edit first, then run one
+  `swift test --disable-sandbox` and, once the work is done, one
+  `swift build --disable-sandbox -c release`. The test run compiles the sources
+  and tests in debug; the release build compiles them again in another
+  configuration, so rebuilding after every edit doubles the work without an
+  earlier signal. Read the first error from a failed run before rebuilding, and
+  do not build or test for a comment, README, or artifact edit.
+- **Tests run in debug only.** `CoreTests` uses `@testable import Core`, so
+  `swift test -c release` (or `swift build -c release --build-tests`) fails
+  with `unable to resolve Swift module dependency to a compatible module:
+  'Core'`. Configure the test run for debug and the user-facing binary for
+  release.
 - **`xcodebuild` does not work in this sandbox.** Build and test with the
   SwiftPM commands in `README.md` → Setup. **Anything the user runs** is a
   release build. SwiftPM's own sandbox cannot apply here, so every command
@@ -114,9 +126,11 @@ change, along with the affected tests, counts, and READMEs.
   `sandbox_apply: Operation not permitted` before compiling anything.
 - A documentation-only change needs no build or test; run them when source,
   tests, or `Package.swift` change.
-- To see only warnings from this repo's targets (the `Agent` dependency tree
-  emits its own warnings from `.build/checkouts`):
-  `swift build --disable-sandbox -c release 2>&1 | grep warning: | grep -v .build/checkouts`.
+- Warnings come for free from the one compiling run: capture it
+  (`swift build --disable-sandbox -c release 2>&1 | tee /tmp/rater-build.log`)
+  and grep the log afterwards for `warning:` minus `.build/checkouts` (the
+  `Agent` dependency tree emits its own warnings). A cached rebuild prints
+  nothing, so the warnings have to be read from the run that compiled.
 - The `Agent` target links `mlx-swift-lm` and a large C++/Metal build, so every
   SwiftPM command builds it. It needs Xcode's Metal toolchain component, which
   `README.md` → Setup installs; without it the `metal` shim has no compiler and

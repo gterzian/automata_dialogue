@@ -13,7 +13,8 @@ What must be covered:
 - **Prompt** — `SystemPrompt.build` embeds every catalog id under its class
   heading, describes all four classes, states that complexity requires both an
   ordered and a disordered part (so a recognizable figure such as the house is
-  repetition), states the answer format in both languages, and stays within the
+  repetition), splits `repetition` from `nesting` on the copies' sizes, states
+  the answer format in both languages, and stays within the
   ~4k budget.
 - **Choice** — the parser (`id:` field, English and Chinese reasons, full-width
   colon, markdown, prose fallback, longest-id match, unknown id) and the
@@ -39,9 +40,10 @@ What must be covered:
   branch has room, then matches the branches' growth one for one and keeps
   pulling back below the display floor; the review window's first frame is
   already at that close-up.
-- **Reveal ending** — the timeline starts on the untouched picture, accelerates
-  the circle closed onto the single ink dot and rests there; a seed reproduces
-  one ending; both draw paths hide cells outside the circle.
+- **Reveal ending** — the timeline starts on the untouched picture, keeps the
+  speed the pull-back ended on as the circle closes onto the single ink dot,
+  and rests there; a seed reproduces one ending; both draw paths hide cells
+  outside the circle.
 - **Cell grid sink** — (Metal 4 only) an offscreen render fills each span with
   its palette colour, a toned grid is drawn with its cells' own colours, a
   renderer handles a grid resize, the sink draws into

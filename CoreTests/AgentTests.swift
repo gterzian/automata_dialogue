@@ -114,7 +114,7 @@ final class SystemPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("A picture that is wholly ordered is repetition or nesting"))
         XCTAssertTrue(prompt.contains("When in doubt, choose the simpler class"))
         XCTAssertTrue(prompt.contains("Mixture test: name one ordered part and one disordered part"))
-        XCTAssertTrue(prompt.contains("a wholly ordered figure is repetition (or nesting), whether or not you recognize it"))
+        XCTAssertTrue(prompt.contains("a wholly ordered figure is repetition or nesting, whether or not you recognize it"))
     }
 
     func testDoesNotTreatARecognizableSubjectAsComplexity() {
@@ -127,6 +127,38 @@ final class SystemPromptTests: XCTestCase {
         ] {
             XCTAssertFalse(prompt.contains(retired), "prompt still uses the retired subject test: \(retired)")
         }
+    }
+
+    /// A shape drawn again at another size is nesting, at the same size it is
+    /// repetition. The 4B read the separated triangles of `example_4.png` as
+    /// repetition while the nesting description required containment, so the
+    /// prompt makes the copies' sizes the discriminator and lets nesting win
+    /// that comparison.
+    func testNestingWinsWhenTheCopiesDifferInSize() {
+        let prompt = SystemPrompt.build()
+        XCTAssertTrue(prompt.contains(
+            "The copies may sit one inside another or apart"))
+        XCTAssertTrue(prompt.contains(
+            "a shape drawn again at a clearly different size is nesting, not repetition"))
+        XCTAssertTrue(prompt.contains(
+            "compare the copies' sizes first: different sizes make the class nesting, equal sizes make it repetition"))
+        XCTAssertTrue(prompt.contains(
+            "two or more copies of one shape at different sizes, nested or apart -> nesting"))
+        XCTAssertTrue(prompt.contains(
+            "Scale test: when one shape appears more than once, compare the copies."))
+        XCTAssertTrue(prompt.contains(
+            "Copies whose sizes differ only slightly are the same size."))
+    }
+
+    /// The signals appear in the order the model should apply them: the size
+    /// comparison precedes the broad "one shape repeated" signal, which on its
+    /// own would send scaled copies to repetition.
+    func testChecksTheCopySizesBeforeCallingAShapeRepeated() throws {
+        let prompt = SystemPrompt.build()
+        let nesting = try XCTUnwrap(
+            prompt.range(of: "two or more copies of one shape at different sizes"))
+        let repetition = try XCTUnwrap(prompt.range(of: "one shape repeated at one size"))
+        XCTAssertLessThan(nesting.lowerBound, repetition.lowerBound)
     }
 
     /// The artifact is the human-readable copy of the prompt; nothing generates

@@ -480,16 +480,16 @@ public enum ShaderSource {
         float grain;
     };
 
-    // The fall's limb: a smooth noise field read around the circle, so the
-    // picture erodes at more than one scale and the edge drifts as it falls.
-    static float limb_offset(texture2d<float> noise, float angle,
-                             constant ToneUniforms& u) {
+    // The fall's limb reads the same noise field the intro's circles undulate
+    // through, sampled by position at two scales: the closing edge carries that
+    // gentle multi-scale wander instead of one coarse lobe around the circle.
+    static float limb_warp(texture2d<float> noise, float2 p,
+                           constant ToneUniforms& u) {
         constexpr sampler s(filter::linear, address::repeat);
-        float2 direction = float2(cos(angle), sin(angle));
         float2 drift = float2(u.phase, u.phase * 0.73f)
                      + float2(u.time * 0.05f, -u.time * 0.03f);
-        float coarse = noise.sample(s, direction * 0.75f + drift).r;
-        float fine = noise.sample(s, direction * 1.9f - drift * 1.3f).r;
+        float coarse = noise.sample(s, p * 0.30f + drift).r;
+        float fine = noise.sample(s, p * 0.75f - drift * 1.3f).r;
         return coarse * 0.65f + fine * 0.35f - 0.5f;
     }
 
@@ -538,13 +538,18 @@ public enum ShaderSource {
         float3 color = u.background.rgb;
 
         // The picture is drawn scaled about the centre. As the fall closes the
-        // circle to the dot, the whole picture shrinks into it.
+        // circle to the dot, the whole picture shrinks into it. The intro's
+        // circles breathe as they grow, so the closing circle breathes with
+        // them and the fall reads as one of those circles ending. The breath
+        // eases in with the fall, so the frame the pull-back stops on still
+        // hands over untouched.
+        float breathing = 1.0f + 0.012f * sin(u.time * 2.1f + u.phase)
+                        * smoothstep(0.0f, 0.25f, u.fall);
         float wobble = 0.0f;
         if (u.wobble > 0.0f) {
-            float angle = atan2(hp.y, hp.x);
-            wobble = u.wobble * limb_offset(noise, angle, u);
+            wobble = u.wobble * limb_warp(noise, hp, u);
         }
-        float factor = u.scale * (1.0f + wobble);
+        float factor = u.scale * (1.0f + wobble) * breathing;
         float limb = corner * factor;
         // The soft edge fades in only as the circle leaves the surface's edge,
         // so the full frame's border does not wobble when the fall starts.
@@ -552,6 +557,15 @@ public enum ShaderSource {
                    * smoothstep(0.0f, 0.20f, u.fall);
         if (factor > 1e-5f && radius < limb + max(soft, 1e-5f)) {
             float2 source = 0.5f + hp / factor / float2(u.aspect, 1.0f);
+            // The intro's mass churns as it grows; the falling picture's inside
+            // drifts the same way, so the circle reads as one of the intro's
+            // rather than a photograph shrinking.
+            if (u.fall > 0.0f) {
+                float2 churn = float2(
+                    field_noise(noise, hp * 1.7f + float2(0.31f, 0.17f), u),
+                    field_noise(noise, hp * 1.7f - float2(0.23f, 0.41f), u)) - 0.5f;
+                source += churn * 0.05f * u.fall;
+            }
             constexpr sampler picture(filter::linear, address::clamp_to_edge);
             float3 sampled = cells.sample(picture, source).rgb;
 

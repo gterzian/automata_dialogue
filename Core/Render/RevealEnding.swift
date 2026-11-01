@@ -5,8 +5,11 @@ import Foundation
 /// next page. The toned grid the pull-back stops on is sampled through the
 /// circle, so the picture and the dot are one draw.
 public enum RevealEnding {
-    /// Seconds the circle takes to close from the picture onto the dot.
-    public static let collapseDuration: TimeInterval = 1.0
+    /// Seconds the circle takes to close from the picture onto the dot. The
+    /// pull-back stops while the last rows still fly past at the per-tick cap,
+    /// so the fall starts at speed and lasts barely longer than one breath;
+    /// a longer, eased-in collapse reads as the animation braking.
+    public static let collapseDuration: TimeInterval = 0.4
     /// Seconds the dot holds before the next page appears.
     public static let restDuration: TimeInterval = 0.5
 
@@ -79,7 +82,9 @@ struct RevealVariation: Equatable {
     static func seeded(_ seed: UInt64) -> RevealVariation {
         var draw = SplitMix64(seed: seed)
         return RevealVariation(
-            wobble: draw.float(0.04...0.10),
+            // The same gentle undulation the intro's circles carry; a larger
+            // amplitude reads as a ragged, eroding edge instead of a circle.
+            wobble: draw.float(0.012...0.035),
             phase: draw.float(0...Float.pi * 2),
             grain: draw.float(0.025...0.05))
     }
@@ -104,12 +109,14 @@ enum RevealTimeline {
         let total = collapse + rest
         let time = min(max(rawTime, 0), total)
 
-        // The circle accelerates inward: the scale drops as the square of the
-        // fall's progress, so the picture hangs at its full extent and then
-        // rushes into the dot.
-        let fall = smoothstep(0, collapse, time)
-        let drop = fall * fall
-        let scale = 1 - (1 - dotScale) * drop
+        // The fall leaves at the speed the pull-back ended on and eases into
+        // the dot: the radius gives up three quarters of its extent in the
+        // first half, so the ending continues the motion instead of starting a
+        // slower one. `fall` is zero at time 0, so the first frame is still the
+        // untouched picture.
+        let progress = min(max(time / collapse, 0), 1)
+        let fall = 1 - pow(1 - progress, 2)
+        let scale = 1 - (1 - dotScale) * fall
 
         return Frame(
             mask: RevealMask(

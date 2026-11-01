@@ -398,9 +398,10 @@ retraction, that a seed reproduces one run, and that the cycle, the submission
 beat, and the retraction reach their renderers, including that the intro draws
 through an offscreen target rather than a layer and reports its first presented
 frame. `RevealEndingTests` pins the other animation's workflow: the timeline
-starts on the untouched picture, accelerates the circle closed onto the single
-ink dot and rests there; the fall's equal slices take more of the picture as it
-goes; a seed reproduces one ending; and both draw paths hide cells outside the
+starts on the untouched picture, keeps the speed the pull-back ended on as the
+circle closes onto the single ink dot, and rests there; each slice of the fall
+takes less of the picture than the one before; a seed reproduces one ending;
+and both draw paths hide cells outside the
 circle. The display-link presentation
 needs a screen and is not tested here; the animations' looks are accepted by
 visual inspection.

@@ -61,24 +61,28 @@ written.
 
 ## Remaining work
 
-- Model choice is a heuristic, not settled. On the `artifacts/example_*.png`
-  reference set with the no-repeat window, `Qwen3.5-4B-MLX-4bit` chose 13–14
-  distinct ids in 13–14/14 submissions at 3.2–5.2 s per submission after the
-  one-time system-prefix prefill (~9 s; the whole 14-image `bench` takes
-  59–71 s). Class agreement is approximate: the dialogue treats the class the
-  model commits to as the answer, and an occasional mis-rating is accepted.
-  `Qwen3.5-2B-6bit` is smaller but fails to name a usable id once the exclusion
-  list is present; `gemma-4-e2b-it-4bit` is larger and weaker. On the current
-  prompt, `Qwen3.5-9B-4bit` was not better: it matched 10/14 classes in
-  `classify` and 9/14 in the no-repeat dialogue, against the 4B's 11/14 and
-  10/14, while its per-run prefill plus generation was about 1.7–2× the 4B's.
-  The 4B remains the sweet spot. Re-measured on the current four-line answer
-  with `bench artifacts/`, both snapshots chose 14/14 distinct ids: the 4B
-  agreed with the reference class on 11/14 at 5.2–6.9 s per image (prompt
-  4,665 tokens / 44 s, generation 983 tokens / 41 s), and the 9B on 12/14 at
-  6.0–14.8 s per image (4,616 tokens / 61 s, 963 tokens / 65 s). The 9B's two
-  reason sentences are as specific as the 4B's on this set, but its run grows
-  slower toward the end of the batch, so the 4B stays the faster product model.
+- Model choice is a heuristic, not settled. `classify artifacts/` scores
+  class agreement alone (no exclusion list); `bench` exercises the no-repeat
+  dialogue. With the current prompt `Qwen3.5-4B-MLX-4bit` scored 13/14 in
+  `classify`, and both nesting drawings (`example_4.png`, `example_13.png`)
+  were classed correctly in every run of both commands; a prompt whose
+  `nesting` description required contained copies scored 12/14 and read
+  `example_4.png` as `repetition` in every run. An occasional mis-rating is
+  accepted (see `AGENTS.md`), so score the set rather than single drawings.
+  In the no-repeat dialogue the 4B produced 10–12 usable answers out of 14 in
+  three runs, and the same failures occur with and without the nesting change:
+  they cluster on the randomness drawings after it chooses `T177`, which the
+  exclusion note did not overturn. That note is the weak point to address next.
+  A 14-image run costs 4.4–7.4 s per image, with 4,616–4,672 prompt tokens over
+  26–43 s and 929–994 generated tokens over 31–41 s at 512 px.
+  `Qwen3.5-2B-6bit` fails to name a usable id once the exclusion list is
+  present; `gemma-4-e2b-it-4bit` is larger and weaker. `Qwen3.5-9B-4bit` matched
+  12/14 in `bench` at 6.0–14.8 s per image (prompt 4,616 tokens / 61 s,
+  generation 963 tokens / 65 s), with reason sentences as specific as the 4B's
+  and a run that grows slower toward the end of the batch. Those 9B numbers
+  predate the current `nesting` boundary, so re-measure it with
+  `classify artifacts/` before preferring it; the 4B remains the faster product
+  model.
 - Image-only turns and the four-line `class:`/`id:`/`reason:`/`reason_zh:`
   answer work on the local snapshots. The mixture rubric's soft boundary is a
   wholly ordered, recognizable figure versus a picture that mixes order and

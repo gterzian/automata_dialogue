@@ -59,6 +59,11 @@ ids), and the answer format. The rubric reserves `complexity` for a picture
 that contains both an ordered and a disordered part of different kinds (or
 localized structures inside a different texture); a wholly ordered figure, even
 a recognizable one such as a house or a glyph, is `repetition` or `nesting`.
+Those two split on the copies' sizes: copies at one size are `repetition`, and
+copies at different sizes are `nesting`, whether the copies nest inside one
+another or sit apart. The size comparison is stated before the broad "one shape
+repeated" signal, because scaled copies fit that signal too: without the
+comparison, separated triangles such as `example_4.png` read as `repetition`.
 Grouping puts the class next to the ids it contains, so the model chooses inside
 the class it decided instead of reading a class column at the end of each line. The string
 is identical on every run, so it is a cacheable prefix; `AgentEngine` prefills
@@ -77,5 +82,6 @@ the prompt budget assumes the listing is grouped ids.
 ## Tests
 
 Choice parsing (the `id:` field, markdown, fallback to prose, the longest-id
-match, and an unknown id), the prompt's class descriptions and the per-class id
-sections, and the prompt budget.
+match, and an unknown id), the prompt's class descriptions (including the size
+split between `repetition` and `nesting` and the order of its signals), the
+per-class id sections, and the prompt budget.

@@ -5,8 +5,8 @@ import XCTest
 /// The reveal's ending: the mask the driven run animates, and that both draw
 /// paths apply it. The look of the fall itself is accepted by visual inspection.
 final class RevealEndingTests: XCTestCase {
-    /// The timeline starts on the untouched picture, accelerates the circle
-    /// closed onto the single dot, and holds it for the rest beat.
+    /// The timeline starts on the untouched picture, keeps the speed the
+    /// pull-back ended on, and settles on the single dot for the rest beat.
     func testTheCircleClosesIntoTheDot() {
         let variation = RevealVariation(wobble: 0.06, phase: 1.2, grain: 0.03)
         let collapse = Float(RevealEnding.collapseDuration)
@@ -20,7 +20,7 @@ final class RevealEndingTests: XCTestCase {
         XCTAssertFalse(start.resting)
 
         let falling = RevealTimeline.frame(time: collapse / 2, variation: variation)
-        XCTAssertEqual(falling.mask.fall, 0.5, accuracy: 1e-4)
+        XCTAssertEqual(falling.mask.fall, 0.75, accuracy: 1e-4)
         XCTAssertLessThan(falling.mask.scale, 1, "the picture has started to close")
         XCTAssertGreaterThan(falling.mask.scale, RevealTimeline.dotScale)
         XCTAssertGreaterThan(falling.mask.wobble, 0, "the limb erodes as the circle closes")
@@ -38,10 +38,12 @@ final class RevealEndingTests: XCTestCase {
         XCTAssertTrue(later.resting)
     }
 
-    /// The fall accelerates: an equal slice of the collapse takes more of the
-    /// picture's remaining scale than the slice before it.
-    func testTheFallAccelerates() {
-        let variation = RevealVariation(wobble: 0.05, phase: 0.4, grain: 0.03)
+    /// The pull-back stops while the last rows still fly past at the per-tick
+    /// cap, so the fall must continue at that speed: the first slice takes most
+    /// of the picture and each later slice takes less as the fall settles into
+    /// the dot. A fall that eases in reads as the animation braking.
+    func testTheFallStartsFastAndSettlesIntoTheDot() {
+        let variation = RevealVariation(wobble: 0.03, phase: 0.4, grain: 0.03)
         let collapse = Float(RevealEnding.collapseDuration)
         let quarter = collapse / 4
 
@@ -53,10 +55,9 @@ final class RevealEndingTests: XCTestCase {
         let firstDrop = scale[0] - scale[1]
         let secondDrop = scale[1] - scale[2]
         let thirdDrop = scale[2] - scale[3]
-        XCTAssertGreaterThan(firstDrop, 0)
-        XCTAssertLessThan(firstDrop, secondDrop)
-        XCTAssertLessThan(secondDrop, thirdDrop, "the fall takes more picture as it goes")
-        XCTAssertGreaterThan(scale[1], 0.9, "the fall starts slowly")
+        XCTAssertGreaterThan(firstDrop, secondDrop)
+        XCTAssertGreaterThan(secondDrop, thirdDrop, "the fall settles as it closes")
+        XCTAssertLessThan(scale[1], 0.75, "the fall leaves at speed, with no eased-in start")
         XCTAssertEqual(scale[4], RevealTimeline.dotScale, accuracy: 1e-6,
                        "the picture closes into the dot")
     }

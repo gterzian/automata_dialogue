@@ -32,7 +32,8 @@ final class PageOverlayView: NSView {
         var style: Style
     }
 
-    /// Distance from the page's edges, shared with `LabeledPageView`.
+    /// Distance from the page's left, bottom, and right edges, shared with
+    /// `LabeledPageView`; it adds the title bar's height above the top edge.
     static let inset: CGFloat = 18
     /// Padding between a panel's edge and its content. `NSGlassEffectView`
     /// stretches its content view over its own bounds, so the padding is drawn
@@ -288,12 +289,16 @@ final class LabeledPageView: NSView {
     private let page: NSView
     private let overlay: PageOverlayView
     private let glass: NSGlassEffectView?
+    /// The title bar's height over the page: the traffic lights sit in it, so
+    /// the overlay starts below them.
+    private let topClearance: CGFloat
     /// Dismisses the panel from inside its top-right corner.
     private let closeButton: NSButton?
 
-    init(page: NSView, overlay: PageOverlayView) {
+    init(page: NSView, overlay: PageOverlayView, topClearance: CGFloat) {
         self.page = page
         self.overlay = overlay
+        self.topClearance = topClearance
         if overlay.style == .detail {
             let panel = NSGlassEffectView()
             panel.contentView = overlay
@@ -342,7 +347,8 @@ final class LabeledPageView: NSView {
     private func layoutPages() {
         page.frame = bounds
         let size = overlay.measuredSize(inPage: bounds.size)
-        let origin = NSPoint(x: PageOverlayView.inset, y: PageOverlayView.inset)
+        let origin = NSPoint(
+            x: PageOverlayView.inset, y: PageOverlayView.inset + topClearance)
         if let glass {
             glass.frame = NSRect(origin: origin, size: size)
             // The panel stretches its content view over its bounds; the overlay
