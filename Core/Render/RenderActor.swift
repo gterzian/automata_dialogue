@@ -39,8 +39,10 @@ public actor RenderActor {
     /// either side of the pattern, so the run ends here instead. Computed from
     /// the grid the widest zoom-out reaches, which is where the limit is hit.
     private var revealSpanLimit: Int?
-    /// Where the reveal is: the pull-back plays, then the ending closes the
-    /// picture into its dot; the review window advances on `settled`.
+    /// Where the reveal is: the pull-back plays, the run holds once the window
+    /// spans the whole board, the ending closes the held picture into its dot
+    /// when the review asks for it, and the review window advances on
+    /// `settled`.
     public private(set) var revealEnding: RevealEndPhase = .playing
     /// Seconds into the ending's timeline while it plays.
     private var endingTime: TimeInterval = 0
@@ -244,11 +246,13 @@ public actor RenderActor {
         guard steps > 0 else { return }
         if let reveal {
             // The pull-back ends where the window's sampling spans the whole
-            // board.
+            // board: past it the fit would sample columns off the board, so the
+            // run freezes on its last frame until the review asks for the
+            // ending.
             if let limit = revealSpanLimit {
                 let remaining = limit - simulation.steppedRows
                 if remaining <= 0 {
-                    beginEnding()
+                    hold()
                     return
                 }
                 steps = min(steps, remaining)
@@ -260,22 +264,32 @@ public actor RenderActor {
                 steps: target, branchRows: reveal.branchRows))
             _ = try advance(by: steps)
             if let limit = revealSpanLimit, simulation.steppedRows >= limit {
-                beginEnding()
+                hold()
             }
             return
         }
         _ = try advance(by: steps)
     }
 
-    /// Starts the ending once the pull-back spans the whole board: the circle
-    /// closes the picture through its organic edge and holds the dot. The last
-    /// frame it delivered is the widest view, so the fit never samples past the
-    /// board's edge.
-    private func beginEnding() {
+    /// Freezes the run where its pull-back widened the window to the whole
+    /// board. The frame it delivered last stays on screen — a tick delivers
+    /// nothing more — until `beginEnding` is called.
+    private func hold() {
         guard revealEnding == .playing else { return }
+        revealEnding = .holding
+    }
+
+    /// Starts the ending that closes the held picture into its dot, on the
+    /// clock's own ticks. Returns false when there is nothing to close: the
+    /// pull-back has not spanned the board, or the ending has already been
+    /// asked for.
+    @discardableResult
+    public func beginEnding() -> Bool {
+        guard revealEnding == .holding else { return false }
         revealEnding = .collapsing
         endingTime = 0
         endingVariation = .seeded(UInt64.random(in: .min ... .max))
+        return true
     }
 
     /// Draws one frame of the ending, frozen on the run's last grid, and settles

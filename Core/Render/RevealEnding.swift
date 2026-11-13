@@ -18,10 +18,13 @@ public enum RevealEnding {
     }
 }
 
-/// Where a driven reveal is in its ending.
+/// Where a driven reveal is.
 public enum RevealEndPhase: Sendable, Equatable {
     /// The pull-back is still running.
     case playing
+    /// The pull-back has spanned the whole board and the run is frozen on its
+    /// last frame; the ending has not been asked for yet.
+    case holding
     /// The circle is closing the picture into its dot.
     case collapsing
     /// The dot has held for its rest beat; the review moves on.

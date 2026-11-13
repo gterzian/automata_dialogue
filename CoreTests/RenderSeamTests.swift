@@ -171,10 +171,10 @@ final class RenderActorTests: XCTestCase {
         await actor.shutdown()
     }
 
-    /// A driven reveal ends its pull-back once the sampled window spans the
-    /// whole board, then closes the picture into the single dot; the review
-    /// advances only once that has settled.
-    func testRevealEndsWhenTheWindowSpansTheWholeBoard() async throws {
+    /// A driven reveal freezes once its pull-back spans the whole board, holds
+    /// that frame until the review asks for the ending, and then closes the
+    /// picture into the single dot; the review advances once that has settled.
+    func testTheRevealHoldsUntilTheEndingIsAskedFor() async throws {
         guard GPUContext.isAvailable else {
             throw XCTSkip("no Metal 4 device")
         }
@@ -193,19 +193,41 @@ final class RenderActorTests: XCTestCase {
         _ = sink.waitForFrame(timeout: 0.01)
         await actor.drive(target: target, pacing: .fixed(100))
 
+        // Return before the pull-back has finished has nothing to close.
+        let early = await actor.beginEnding()
+        XCTAssertFalse(early)
+        let stillPlaying = await actor.revealEnding
+        XCTAssertEqual(stillPlaying, .playing)
+
         target.tick(1.0 / 30)
         _ = sink.waitForFrame(timeout: 0.5)
         let steps = await actor.steppedRows
-        let collapsing = await actor.revealEnding
+        let holding = await actor.revealEnding
         XCTAssertEqual(steps, 20)
-        XCTAssertEqual(collapsing, .collapsing)
+        XCTAssertEqual(holding, .holding)
         XCTAssertEqual(sink.frames.last?.gpu.content, .colors)
         let error = await actor.lastError
         XCTAssertNil(error)
 
+        // The held run keeps the frame it stopped on: ticks step nothing and
+        // deliver nothing, so the picture stays as it is until Return.
+        let held = sink.frames.count
+        for _ in 0..<5 {
+            target.tick(1.0 / 30)
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(sink.frames.count, held)
+        let stillHolding = await actor.revealEnding
+        XCTAssertEqual(stillHolding, .holding)
+
+        // The ending starts only when it is asked for, and only from the hold.
+        let started = await actor.beginEnding()
+        XCTAssertTrue(started)
+        let closing = await actor.revealEnding
+        XCTAssertEqual(closing, .collapsing)
+
         // The ending's frames are the same grid through a mask that closes the
         // picture into the single dot.
-        let revealed = sink.frames.count
         for _ in 0..<100 {
             target.tick(1.0 / 30)
             _ = sink.waitForFrame(timeout: 0.5)
@@ -213,7 +235,7 @@ final class RenderActorTests: XCTestCase {
         }
         let settled = await actor.revealEnding
         XCTAssertEqual(settled, .settled)
-        XCTAssertGreaterThan(sink.frames.count, revealed)
+        XCTAssertGreaterThan(sink.frames.count, held)
         let last = try XCTUnwrap(sink.frames.last)
         // The ending rests on the intro's single dot: the picture has closed to
         // `RevealTimeline.dotScale`. It runs on the toned grid, so one sample of
@@ -227,7 +249,10 @@ final class RenderActorTests: XCTestCase {
             },
             "the picture closes through its extents")
 
-        // A settled ending stops the loop, so a later tick delivers nothing.
+        // A settled ending stops the loop, so a later tick delivers nothing and
+        // a second request has nothing left to play.
+        let replayed = await actor.beginEnding()
+        XCTAssertFalse(replayed)
         let delivered = sink.frames.count
         target.tick(1.0 / 30)
         try await Task.sleep(for: .milliseconds(20))

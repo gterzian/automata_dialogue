@@ -173,13 +173,13 @@ change, along with the affected tests, counts, and READMEs.
    one display element the camera keeps pulling back by averaging a wider block
    of the history per cell and drawing that average as tone, so the whole growth
    stays in view at decreasing resolution instead of sliding out through the
-   horizon. The pull-back ends where the window spans the whole board: the
-   circle closes around the picture — its limb eroding along the same organic
-   edge as the thinking animation — until only a single ink dot remains. The
-   exchange returns to the input carousel, so the reveal never shows the page
-   either side of the pattern. The
-   indicator runs at 30 fps on a reduced drawable so it does not
-   compete with inference for the GPU. See `CLI/README.md`.
+   horizon. The pull-back ends where the window spans the whole board, and the
+   finished picture is held there until Return, which closes the circle around
+   it — its limb eroding along the same organic edge as the thinking
+   animation — until only a single ink dot remains. The exchange then returns
+   to the input carousel, so the reveal never shows the page either side of
+   the pattern. The indicator runs at 30 fps on a reduced drawable so it does
+   not compete with inference for the GPU. See `CLI/README.md`.
 3. **A new input stops both branches immediately** before the next run begins.
 4. The MLX VLM is isolated in an `Agent` target so `Core` stays pure and
    testable; `Core` holds the prompt-building and answer-parsing logic. There is

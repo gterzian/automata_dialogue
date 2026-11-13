@@ -94,12 +94,13 @@ so the rows each branch has grown then always fill its half: `RevealCamera.zoom`
 returns `min(startZoom, branchRows / (steps + 1))`. The pull-back ends where the
 sampling widens the window to the whole simulated board
 (`ViewportGeometry.stepsThatSpanBoard`), so the fit never samples past the
-board's edge. `RenderActor` stops stepping there and plays the ending on the
-clock's own ticks: the frame's `RevealMask` scales and darkens the picture while
-the tone path closes it inside the intro's organic circle and turns it into a
-single ink dot. The ending runs on the toned grid the pull-back stops on, so
-one sample of that grid carries the whole fall; the span path hides cells
-outside the circle (see `CLI/README.md`). The seed
+board's edge. `RenderActor` stops stepping there and holds the last frame on
+screen until the review's window calls `beginEnding`. The ending then runs on
+the clock's own ticks: the frame's `RevealMask` scales and darkens the picture
+while the tone path closes it inside the intro's organic circle and turns it
+into a single ink dot. The ending runs on the toned grid the pull-back stops
+on, so one sample of that grid carries the whole fall; the span path hides
+cells outside the circle (see `CLI/README.md`). The seed
 frame is delivered at that same scale, so the hand-off from the intro does not
 jump. A zoom is a grid refit and a
 redraw of the same surface, not a surface resize: the surface is allocated
@@ -235,10 +236,10 @@ buffer, so a frame must finish before the next one is written.
   frame recompacts the whole grid. Both paths take the frame's `RevealMask`: the
   tone path applies the whole ending, and the span path hides the cells outside
   the falling limb.
-- **Reveal ending** (`RevealEnding`, `RevealMask`, `RevealTimeline`,
-  `RevealVariation`, `RenderActor.advanceEnding`) — the circle that closes the
-  stopped picture through the intro's organic edge into a single ink dot, and
-  the seeded limb and grain that make no two runs close alike.
+- **Reveal ending** (`RevealEnding`, `RevealEndPhase`, `RevealMask`,
+  `RevealTimeline`, `RevealVariation`, `RenderActor.advanceEnding`) — the circle
+  that closes the held picture through the intro's organic edge into a single
+  ink dot, and the seeded limb and grain that make no two runs close alike.
 - **Submission beat** (`ShaderSource.submission`, `SubmissionRenderer`,
   `SubmissionTimeline`, `WorkingIndicator.playSubmission`) — the two-clone part
   and the collapse into the intro's opening dot, on the indicator's target.
@@ -375,9 +376,9 @@ outgrows the display floor (including across a history-ring growth).
 `RenderActorTests` asserts the actor runs off the main thread, delivers
 GPU-resident frames, advances on each frame the target delivers, that
 `stopDriving` ends them, restarts, refits on zoom, exposes the twin run's step
-count, delivers the first frame of a reveal at the camera's close-up, ends the
-pull-back once the sampled window spans the whole board, and plays the ending to
-its settled point.
+count, delivers the first frame of a reveal at the camera's close-up, holds the
+run once the sampled window spans the whole board, and plays the ending to its
+settled point once it is asked for.
 `RevealCameraTests` pins the camera: it opens at the close-up, holds it while
 the branch has room, never zooms in, then matches the branches' growth one for
 one and keeps pulling back below the display floor. `RenderTests` pins the pan

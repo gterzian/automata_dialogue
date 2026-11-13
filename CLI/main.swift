@@ -166,10 +166,9 @@ final class MetalHostView: NSView {
 /// Return or an arrow; `beginSubmission` doubles the submitted image and
 /// collapses it onto the intro's opening dot while the model works; `present`
 /// swaps the reveal's two mirrored automaton branches into the same window and
-/// suspends until Return, close, or the end of the pull-back, which swells the
-/// picture, falls it into its point, and opens the black hole the ending rests
-/// on. The key monitor
-/// calls `submit()` and
+/// holds them there until Return or close. Once the pull-back has widened the
+/// window to the whole board, Return closes the held picture into its point
+/// before the exchange moves on. The key monitor calls `submit()` and
 /// `navigate(_:)`; `NSApplication.run()` keeps delivering events while
 /// suspended.
 @MainActor
@@ -275,13 +274,12 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         canvas?.clear()
     }
 
-    /// Swaps the reveal for `spec` into the window and suspends until Return,
-    /// close, or the end of the pull-back. The corner block shows the submitted
+    /// Swaps the reveal for `spec` into the window and holds the automaton
+    /// there until Return or close. The corner block shows the submitted
     /// picture beside the chosen entry's id and class and the model's English
-    /// and Chinese reasons. Once the window spans the whole board the
-    /// reveal ends on its own: the panel goes, the picture takes its last
-    /// breath and falls into its point, the horizon opens, and the window
-    /// advances as Return would.
+    /// and Chinese reasons; it goes once the window spans the whole board, so
+    /// the finished picture is held alone. Return there plays the ending — the
+    /// circle closing the picture into its dot — before the window advances.
     func present(_ spec: ProgramSpec, choice: Choice, submitted: RasterImage?) async {
         guard !isClosed else { return }
         guard GPUContext.isAvailable else {
@@ -382,20 +380,18 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
-        let ending = Task { await self.endRevealWhenTheBoardFills(
+        let panel = Task { await self.hidePanelWhenThePullBackEnds(
             actor: actor, page: labeledHost) }
         await waitForEnter()
-        ending.cancel()
+        panel.cancel()
+        await playEnding(actor: actor)
         await stopRun()
     }
 
-    /// Ends the reveal once its pull-back has widened the window to the whole
-    /// board: the panel goes, and the run's ending swells the picture, falls it
-    /// into its point, and opens the horizon. The window then advances as
-    /// Return would, so the exchange never sits with the page either side of the
-    /// pattern. The wait is bounded after the ending starts, so a display link
-    /// that stopped delivering cannot hold the turn up.
-    private func endRevealWhenTheBoardFills(
+    /// Takes the panel away once the pull-back has widened the window to the
+    /// whole board, so the finished picture is held alone until Return. The
+    /// run keeps the frame it stopped on: nothing draws over it while it holds.
+    private func hidePanelWhenThePullBackEnds(
         actor: RenderActor, page: LabeledPageView
     ) async {
         while !isClosed, !Task.isCancelled {
@@ -408,9 +404,18 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         }
         guard !isClosed, !Task.isCancelled else { return }
         page.hideOverlay()
+    }
+
+    /// Return on a held automaton closes the picture into its dot, and the
+    /// window waits for the dot to settle so the exchange never cuts the ending
+    /// off. A Return before the pull-back has spanned the board advances
+    /// without it, and the wait is bounded so a display link that stopped
+    /// delivering cannot hold the turn up.
+    private func playEnding(actor: RenderActor) async {
+        guard !isClosed, await actor.beginEnding() else { return }
         var waited: TimeInterval = 0
-        while !isClosed, !Task.isCancelled, waited < RevealEnding.duration + 2 {
-            if await actor.revealEnding == .settled { break }
+        while !isClosed, waited < RevealEnding.duration + 2 {
+            if await actor.revealEnding == .settled { return }
             do {
                 try await Task.sleep(for: .milliseconds(50))
             } catch {
@@ -418,8 +423,6 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             }
             waited += 0.05
         }
-        guard !isClosed, !Task.isCancelled else { return }
-        submit()
     }
 
     /// The submission beat and intro the review window shows while the model's
@@ -573,8 +576,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     }
 
     /// Resumes the pending page action on Return, or the reveal's wait when the
-    /// automaton is on screen, which the reveal's own ending also does. A
-    /// Return while the model runs is ignored.
+    /// automaton is on screen, so a held reveal closes into its dot and moves
+    /// on. A Return while the model runs is ignored.
     func submit() {
         guard !isClosed else { return }
         if let input = inputContinuation {

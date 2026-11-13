@@ -69,10 +69,11 @@
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
   controls. The pull-back ends where its sampling widens the window to the
   whole board, before the fit would show the page either side of the pattern:
-  the panel disappears, the circle closes around the picture — its limb
-  eroding — until only a single ink dot remains. The window then advances to
-  the next carousel page as Return would. Return on the
-  reveal still advances early; closing the window stops the run. The reveal's
+  the panel disappears and the finished picture stays on screen until Return.
+  Return then closes the circle around the picture — its limb eroding —
+  until only a single ink dot remains, and the window advances to the next
+  carousel page. Return before the pull-back has finished advances without that
+  ending; closing the window stops the run. The reveal's
   top-left panel puts a thumbnail of the submitted picture beside the chosen
   entry's id and its class in English and Chinese, then the model's English and
   Chinese reasons, so the reasons read as commentary on the picture. The × in
