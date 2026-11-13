@@ -34,33 +34,34 @@ The release build writes `.build/release/rater-cli`.
 
 ## Install the 4B model
 
-This guide uses `Models/Qwen3.5-4B-MLX-4bit`, a 4-bit MLX conversion of
-`Qwen/Qwen3.5-4B`; the snapshot directories are git-ignored. The engine is
-local-only (see `AGENTS.md` → Product decisions), so the directory must already
-exist. `Models/README.md` records the verified file list, commit, and weight
-hash.
+This guide uses `../Models/Qwen3.5-4B-MLX-4bit`, a 4-bit MLX conversion of
+`Qwen/Qwen3.5-4B`, from the snapshot directory outside this repository; the
+paths below resolve from the repository root, and `../Models/README.md`
+records the verified file list, source, commit, and weight hash. The engine
+is local-only (see `AGENTS.md` → Product decisions), so the directory must
+already exist.
 
 The conversion used for the verified snapshot is:
 
 ```sh
 python3 -m mlx_vlm convert \
   --hf-path Qwen/Qwen3.5-4B \
-  --mlx-path Models/Qwen3.5-4B-MLX-4bit \
+  --mlx-path ../Models/Qwen3.5-4B-MLX-4bit \
   -q --q-bits 4 --q-group-size 64
 ```
 
 The verified conversion used mlx-vlm's `pc/fix-qwen35-predicate` branch. After
 converting, compare
-`shasum -a 256 Models/Qwen3.5-4B-MLX-4bit/model.safetensors` with the hash in
-`Models/README.md`. A snapshot kept elsewhere is fine: pass its directory with
-`--model` or `RATER_MODEL_PATH`.
+`shasum -a 256 ../Models/Qwen3.5-4B-MLX-4bit/model.safetensors` with the hash in
+`../Models/README.md`. A snapshot kept elsewhere is fine: pass its directory
+with `--model` or `RATER_MODEL_PATH`.
 
 ## Run the CLI
 
 Point the CLI at the snapshot once per shell:
 
 ```sh
-export RATER_MODEL_PATH="$PWD/Models/Qwen3.5-4B-MLX-4bit"
+export RATER_MODEL_PATH="$PWD/../Models/Qwen3.5-4B-MLX-4bit"
 ```
 
 Rate the reference drawings in the review window:

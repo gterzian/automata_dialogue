@@ -149,8 +149,8 @@ change, along with the affected tests, counts, and READMEs.
   the sandbox cannot write; a fresh run traps with `Unable to build metal
   library from source … monolithic_metal.pcm: Operation not permitted`. Run that
   model once from a normal Terminal, then `rater-cli bench` runs headless here
-  (verified with `Models/Qwen3.5-4B-MLX-4bit`). `rate` remains the interactive
-  path.
+  (verified with `../Models/Qwen3.5-4B-MLX-4bit`). `rate` remains the
+  interactive path.
 - Toolchain: Swift 6.4, `swift-tools-version: 6.0`, macOS 26, strict
   concurrency (`complete`).
 

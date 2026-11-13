@@ -22,8 +22,8 @@ relies on and keeps the build independent of the macro plugin. When bumping
   that takes no `Downloader`, so it has no path to the network. A configuration
   with no directory fails the run with `AgentEngineError.noModelDirectory`;
   nothing is ever fetched. Obtain the snapshot outside the software.
-  `Models/README.md` records the verified snapshots.
-- `Models/Qwen3.5-4B-MLX-4bit` is the recommended snapshot: the smallest that
+  `../Models/README.md` records the verified snapshots.
+- `../Models/Qwen3.5-4B-MLX-4bit` is the recommended snapshot: the smallest that
   both matches the class and honours the no-repeat list. The 9B is slower and
   the 2B fails the exclusion list (see Remaining work). A registry entry is not
   required: the config's `qwen3_5` model type loads it.

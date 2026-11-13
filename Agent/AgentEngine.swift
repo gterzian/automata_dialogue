@@ -40,7 +40,7 @@ public actor AgentEngine: AgentRunning {
     public struct Configuration: Sendable {
         /// The local Hugging Face snapshot directory to load. Models are never
         /// downloaded: a configuration with no directory fails the run. See
-        /// `Models/README.md` for the snapshots and `Agent/README.md`.
+        /// `../Models/README.md` for the snapshots and `Agent/README.md`.
         public var modelDirectory: URL?
         public var maxTokens: Int
         public var temperature: Float
