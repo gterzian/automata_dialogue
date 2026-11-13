@@ -20,9 +20,11 @@
   `Core/Render/README.md`). The window's title bar is transparent and carries
   no title, so the page spans the whole window and only the standard traffic
   lights float over it; their close button ends the review, and Cmd-Q (the app
-  menu's Quit) does too. It opens on the drawing page. At launch it loads the
-  model and runs one minimal image turn at up to 256 px in the background, so
-  the vision and decode kernels are compiled before the first submission. When
+  menu's Quit) does too. It opens on the collapse intro. At launch it loads the
+  model, prefills the system prompt, and runs one image turn at the review's own
+  image size and sampling while that intro repeats, accepting no input until the
+  warm-up finishes; the first page then appears with nothing left to compile.
+  When
   an image
   sits beside an `examples.json` reference manifest, its page shows the class it
   illustrates in English and Chinese in the top-left corner; the window draws
@@ -56,12 +58,9 @@
   into each cell and drawing that average as tone, so the seed stays on the
   horizon and the newest rows stay on the outer edges at decreasing resolution
   instead of older rows leaving through the horizon. The history ring grows with
-  the run so no row is dropped. The run opens at 60 source rows per second
-  (`.timed`), so each branch fills half the window in 30 rows per second. The
-  rate's per-step growth is +0.3% and that growth itself compounds by +0.02%
-  each step, so the pull-back is quicker from the first second, doubles its
-  speed by about three seconds, and still finishes super-exponentially: a
-  screen-sized window (about 2,000 source rows) pulls back in about 5.4 s.
+  the run so no row is dropped. The pull-back lasts a minute (`.timed`): its
+  opening rate follows from the window's span, and the row rate grows 0.1% per
+  source row, so the growth starts slow and ends several times faster.
   The window's
   drawable is allocated at the floor's grid size, and the run simulates a board
   ten windows wide, so the pattern keeps evolving after it leaves the first
@@ -69,8 +68,8 @@
   pans the viewport with it. The reveal has no zoom, speed, restart, or pan
   controls. The pull-back ends where its sampling widens the window to the
   whole board, before the fit would show the page either side of the pattern:
-  the panel disappears and the finished picture stays on screen until Return.
-  Return then closes the circle around the picture — its limb eroding —
+  the panel stays in the corner and the finished picture stays on screen until
+  Return, which closes the circle around the picture — its limb eroding —
   until only a single ink dot remains, and the window advances to the next
   carousel page. Return before the pull-back has finished advances without that
   ending; closing the window stops the run. The reveal's

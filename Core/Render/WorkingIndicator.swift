@@ -32,7 +32,12 @@ public final class WorkingIndicator: @unchecked Sendable {
     /// When the settled line started retracting onto the seed cell; 0 until the
     /// first frame of the retraction stamps it.
     private var finaleStartedAt: CFTimeInterval?
+    /// The look this run's cycle draws; a looping intro draws a fresh one per
+    /// cycle.
     private var variation = CollapseVariation.standard
+    /// True when the intro repeats instead of resting, for a wait that lasts as
+    /// long as its work does.
+    private var loops = false
     private var finished = false
     private var settled = false
     private var lineHalfThickness: Float = 0.00125
@@ -87,6 +92,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         settled = false
         presentedFrames = 0
         error = nil
+        loops = false
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
         self.cellHalfHeight = cellHalfHeight
@@ -99,8 +105,15 @@ public final class WorkingIndicator: @unchecked Sendable {
     /// `lineHalfThickness` is the half-height of the row the cycle ends on in
     /// screen-height units, which the shader scales the opening dot and the
     /// resting hairline from; `cellHalfHeight` is half the height of the cell
-    /// the finale lands on, the reveal's first. Safe to call after `stop()`.
-    public func start(lineHalfThickness: Float, cellHalfHeight: Float) {
+    /// the finale lands on, the reveal's first. `loops` repeats the cycle with a
+    /// fresh look instead of resting on the line, so a wait whose work sets its
+    /// own length keeps animating until `stop()` or `finish()`. Safe to call
+    /// after `stop()`.
+    public func start(
+        lineHalfThickness: Float,
+        cellHalfHeight: Float,
+        loops: Bool = false
+    ) {
         lock.lock()
         submissionStartedAt = nil
         introStartedAt = 0
@@ -110,6 +123,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         settled = false
         presentedFrames = 0
         error = nil
+        self.loops = loops
         variation = .seeded(UInt64.random(in: .min ... .max))
         self.lineHalfThickness = lineHalfThickness
         self.cellHalfHeight = cellHalfHeight
@@ -185,6 +199,7 @@ public final class WorkingIndicator: @unchecked Sendable {
         let introStart = introStartedAt
         let finaleStart = finaleStartedAt
         let variation = variation
+        let loops = loops
         let lineHalfThickness = lineHalfThickness
         let cellHalfHeight = cellHalfHeight
         let ink = finaleStart == nil ? self.ink : (finaleInk ?? self.ink)
@@ -232,9 +247,20 @@ public final class WorkingIndicator: @unchecked Sendable {
                         cellHalfHeight: cellHalfHeight)
                 }
             } else if let introStart {
-                let elapsed = now - introStart
+                var elapsed = now - introStart
+                var look = variation
+                if loops, ReviewIntro.openingTime + elapsed >= ReviewIntro.duration {
+                    // The cycle has run its course and the work it covers has
+                    // not finished: draw a fresh one from its opening dot.
+                    lock.lock()
+                    self.introStartedAt = now
+                    self.variation = .seeded(UInt64.random(in: .min ... .max))
+                    look = self.variation
+                    lock.unlock()
+                    elapsed = 0
+                }
                 let introTime = ReviewIntro.openingTime + elapsed
-                let frame = CollapseTimeline.frame(time: Float(introTime), variation: variation)
+                let frame = CollapseTimeline.frame(time: Float(introTime), variation: look)
                 try renderer.render(
                     into: surface.texture, frame: frame, white: white, ink: ink,
                     lineHalfThickness: lineHalfThickness,

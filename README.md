@@ -85,10 +85,13 @@ Print the catalog without loading a model:
 .build/release/rater-cli catalog
 ```
 
-The CLI loads the model and runs one minimal image turn at launch, so MLX
-compiles its vision and decode kernels and the process prefills the system
-prompt before the first submission. The first submission can still cost more
-than later ones. Measured costs are in `Agent/README.md`.
+At launch the CLI loads the model, prefills the system prompt, and runs one
+image turn at the same image size and sampling the review uses, so the vision
+encoder, the prefill, and the one-token decode step are compiled before the
+first submission. The window opens on the collapse intro, repeating it and
+accepting no input until that warm-up finishes; the first page then appears and
+the first submission costs its own turn. Measured costs are in
+`Agent/README.md`.
 
 ## Troubleshooting
 

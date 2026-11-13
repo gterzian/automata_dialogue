@@ -38,9 +38,12 @@ relies on and keeps the build independent of the macro plugin. When bumping
   failed build is retried on the next run. Both run off the main actor.
   `AgentEngine.prepare()` starts them so the first run pays only the user turn;
   it is best-effort, since the run retries and reports the error. `rate` then
-  calls `AgentEngine.warmImage()`: one image turn at up to 256 px and one
-  generated token, so the vision encoder and decode kernels are compiled before
-  the first submission. It is best-effort and does not touch the choice history.
+  calls `AgentEngine.warmImage()`: one image turn at the configured image size
+  and sampling that generates three tokens, so the vision encoder runs at the
+  first submission's patch count and the one-token decode step runs once.
+  `rate` shows the intro, taking no input, until the warm-up finishes, then
+  opens its first page. The warm-up is best-effort and does not touch the choice
+  history.
 
 ## Run
 
@@ -61,6 +64,11 @@ written.
 
 ## Remaining work
 
+- **The warm-up is not measured against the first submission.** It runs the
+  review's image size, sampling, and an empty first prompt, but nothing here
+  compares the first `rate` turn with the second; `rate`'s debug output prints
+  each turn's prefill and generation seconds, so the residual excess is whatever
+  the first image shows over the second.
 - Model choice is a heuristic, not settled. `classify artifacts/` scores
   class agreement alone (no exclusion list); `bench` exercises the no-repeat
   dialogue. With the current prompt `Qwen3.5-4B-MLX-4bit` scored 13/14 in

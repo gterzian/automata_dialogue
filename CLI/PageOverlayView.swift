@@ -364,8 +364,8 @@ final class LabeledPageView: NSView {
         }
     }
 
-    /// Removes the reveal's text block (and its close button) once the ending
-    /// takes the page over or the reader dismisses it.
+    /// Removes the reveal's text block (and its close button) when the reader
+    /// dismisses it.
     func hideOverlay() {
         (glass ?? overlay).isHidden = true
         closeButton?.isHidden = true

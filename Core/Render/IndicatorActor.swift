@@ -48,15 +48,18 @@ public actor IndicatorActor {
     /// loop, so the pipeline is not recompiled for every run.
     /// `lineHalfThickness` is the half-height of the row the cycle ends on in
     /// screen-height units; `cellHalfHeight` is half the height of the cell the
-    /// retraction lands on.
+    /// retraction lands on. `loops` repeats the cycle instead of resting, so a
+    /// wait whose work sets its own length keeps animating until `stop()`.
     public func start(
         target: any RenderTarget,
         lineHalfThickness: Float,
-        cellHalfHeight: Float
+        cellHalfHeight: Float,
+        loops: Bool = false
     ) throws {
         let indicator = try ensureIndicator(target: target)
         indicator.start(
-            lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight)
+            lineHalfThickness: lineHalfThickness, cellHalfHeight: cellHalfHeight,
+            loops: loops)
     }
 
     private func ensureIndicator(target: any RenderTarget) throws -> WorkingIndicator {

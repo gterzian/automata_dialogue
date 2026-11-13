@@ -173,25 +173,15 @@ final class MetalHostView: NSView {
 /// suspended.
 @MainActor
 final class AutomatonWindow: NSObject, NSWindowDelegate {
-    /// Source rows per second each branch grows at the opening step. A branch
-    /// fills half the window, so half this rate is the window-relative growth
-    /// speed. The reveal opens at this rate and accelerates from it, so this
-    /// is the knob for how slowly the pull-back starts.
-    private static let revealRowsPerSecond = 60.0
-    /// How much the row rate grows at the opening step: 1.003 is +0.3%, which
-    /// compounds from the first step, so the pull-back is already visibly
-    /// quicker by the time the camera starts moving (about 1.2× after one
-    /// second) instead of holding one crawl for most of the run.
-    private static let revealSpeedGrowthPerStep = 1.003
-    /// How much that per-step growth itself multiplies each step (1.0002 is
-    /// +0.02%). It sharpens the tail into the super-exponential finish: with
-    /// the opening growth above, a screen-sized window (about 2,000 source
-    /// rows) pulls back in about 5.4 s without the rate leaving the 64-row
-    /// per-tick cap for more than the last second.
-    private static let revealSpeedGrowthAcceleration = 1.0002
-    /// The most source rows one tick may advance. The accelerated tail would
-    /// otherwise jump most of the board in a frame; this bounds the zoom-out
-    /// per frame and the backlog after a stalled clock.
+    /// Seconds the pull-back takes to widen the window to the whole board: the
+    /// opening row rate is derived from it, so the automaton grows for this
+    /// long on any window, then holds the finished picture until Return.
+    private static let revealDuration: TimeInterval = 60
+    /// How much the row rate grows per source row (1.001 is +0.1%): the
+    /// pull-back starts slow and speeds up a little toward the end.
+    private static let revealSpeedGrowthPerStep = 1.001
+    /// The most source rows one tick may advance, so a stalled clock cannot
+    /// jump most of the board in one frame.
     private static let revealMaxRowsPerTick = 64
     private var window: NSWindow?
     private var host: MetalHostView?
@@ -277,9 +267,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// Swaps the reveal for `spec` into the window and holds the automaton
     /// there until Return or close. The corner block shows the submitted
     /// picture beside the chosen entry's id and class and the model's English
-    /// and Chinese reasons; it goes once the window spans the whole board, so
-    /// the finished picture is held alone. Return there plays the ending — the
-    /// circle closing the picture into its dot — before the window advances.
+    /// and Chinese reasons, and stays over the picture while it grows and
+    /// holds. Return plays the ending — the circle closing the picture into
+    /// its dot — before the window advances.
     func present(_ spec: ProgramSpec, choice: Choice, submitted: RasterImage?) async {
         guard !isClosed else { return }
         guard GPUContext.isAvailable else {
@@ -327,6 +317,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
             start: runSpec.board.start,
             injection: runSpec.board.injection)
         let actor = RenderActor()
+        let reveal = RevealSetup(
+            branchRows: ViewportGeometry.twinHalfRows(rows: rows),
+            speedGrowthPerStep: Self.revealSpeedGrowthPerStep)
         var made: CellGridSink?
         do {
             try await actor.start()
@@ -336,15 +329,17 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 spec: runSpec, cols: cols, rows: rows, board: board,
                 layout: .twin,
                 minimumZoom: zoomFloor,
-                reveal: RevealSetup(
-                    branchRows: ViewportGeometry.twinHalfRows(rows: rows),
-                    speedGrowthPerStep: Self.revealSpeedGrowthPerStep,
-                    speedGrowthAcceleration: Self.revealSpeedGrowthAcceleration),
+                reveal: reveal,
                 sink: sink)
+            // The pull-back lasts `revealDuration` whatever the window's span:
+            // the opening rate is the one whose growth over that span takes the
+            // time.
+            let span = await actor.revealSpanLimit ?? 0
             await actor.drive(
                 target: target,
                 pacing: .timed(
-                    stepsPerSecond: Self.revealRowsPerSecond,
+                    stepsPerSecond: reveal.openingRowsPerSecond(
+                        steps: span, duration: Self.revealDuration),
                     maxStepsPerTick: Self.revealMaxRowsPerTick))
         } catch {
             print("rate: \(spec.id) failed to render: \(error.localizedDescription)")
@@ -380,30 +375,9 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
-        let panel = Task { await self.hidePanelWhenThePullBackEnds(
-            actor: actor, page: labeledHost) }
         await waitForEnter()
-        panel.cancel()
         await playEnding(actor: actor)
         await stopRun()
-    }
-
-    /// Takes the panel away once the pull-back has widened the window to the
-    /// whole board, so the finished picture is held alone until Return. The
-    /// run keeps the frame it stopped on: nothing draws over it while it holds.
-    private func hidePanelWhenThePullBackEnds(
-        actor: RenderActor, page: LabeledPageView
-    ) async {
-        while !isClosed, !Task.isCancelled {
-            if await actor.revealEnding != .playing { break }
-            do {
-                try await Task.sleep(for: .milliseconds(50))
-            } catch {
-                return
-            }
-        }
-        guard !isClosed, !Task.isCancelled else { return }
-        page.hideOverlay()
     }
 
     /// Return on a held automaton closes the picture into its dot, and the
@@ -429,8 +403,10 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
     /// turn is prepared. They and the model run together; if the model outlasts
     /// the intro, the window holds the rest frame until the choice lands.
     /// `present` or `stopThinking` ends it. A missing raster skips the beat and
-    /// starts the intro directly, so a failed decode still leaves a wait.
-    func beginSubmission(_ image: RasterImage?) async {
+    /// starts the intro directly, so a failed decode still leaves a wait, and
+    /// `loops` makes that intro repeat instead of resting: the launch wait uses
+    /// it, since the warm-up sets how long it runs.
+    func beginSubmission(_ image: RasterImage?, loops: Bool = false) async {
         guard !isClosed, GPUContext.isAvailable else { return }
         let window = ensureWindow()
         let contentSize = drawableContentSize(of: window)
@@ -479,7 +455,8 @@ final class AutomatonWindow: NSObject, NSWindowDelegate {
                 try await actor.start(
                     target: target,
                     lineHalfThickness: lineHalfThickness,
-                    cellHalfHeight: cellHalfHeight)
+                    cellHalfHeight: cellHalfHeight,
+                    loops: loops)
             }
             // The beat's first frame is presented before the layer is swapped
             // in, or the swap shows the layer's bare background.
@@ -986,11 +963,13 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
 func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
-    // Load the weights and warm the vision path while the first page is on
-    // screen. The first run then pays only prefill and generation, not the
-    // snapshot load or the kernel compilation. A failure is logged but not
-    // fatal: the run retries and reports it again.
-    Task {
+    // Load the weights and warm the image path while the first page is on
+    // screen, so the first run pays only its own turn instead of the snapshot
+    // load, the kernel compilation, and the system-prefix prefill as well. A
+    // submission's turn starts once this finishes, while its beat and intro
+    // play; a failure is logged but not fatal, since the run retries and
+    // reports it again.
+    let warmup = Task.detached(priority: .userInitiated) {
         do {
             try await engine.prepare()
         } catch {
@@ -1005,6 +984,10 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
                 Data("rate: image warmup failed: \(error.localizedDescription)\n".utf8))
         }
     }
+    // The window opens on the intro and repeats it until the warm-up finishes,
+    // taking no input meanwhile: a Return during the load is dropped rather than
+    // queued behind it.
+    await presenter.beginSubmission(nil, loops: true)
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
     let labels: [String: Behavior]
@@ -1017,6 +1000,8 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     }
     let pages = InputPage.carousel(for: setup.paths, labels: labels)
     var index = 0
+    await warmup.value
+    await presenter.stopThinking()
     presenter.showPage(pages[index])
     var chosen = 0
     var shown = 0
@@ -1037,7 +1022,9 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
                 input = .drawing(presenter.currentDrawing ?? Drawing())
             }
             // The turn and the submission beat run together, so the model is
-            // already working while the image doubles and collapses.
+            // already working while the image doubles and collapses. The
+            // warm-up is done before the first page shows, so nothing is left
+            // to wait for here.
             let turn = Task.detached(priority: .userInitiated) {
                 await rateInput(
                     input, engine: engine, directory: directory,

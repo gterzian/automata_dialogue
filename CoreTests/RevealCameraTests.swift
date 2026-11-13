@@ -76,32 +76,33 @@ final class RevealCameraTests: XCTestCase {
             RevealCamera.zoom(steps: 100, branchRows: 0), RevealCamera.startZoom)
     }
 
-    /// The reveal's driving rate opens at the paced rate and grows by the
-    /// setup's per-step growth, which itself accelerates each step, so the
-    /// pull-back starts slowly and compounds super-exponentially.
-    func testSpeedScaleStartsSteadyAndAcceleratesPerStep() {
+    /// The row rate grows by the setup's per-row growth, and the opening rate is
+    /// the one whose growth over a span takes exactly the requested time.
+    func testTheRowRateGrowsAndPacesToTheDuration() {
         let steady = RevealSetup(branchRows: branchRows)
-        XCTAssertEqual(steady.speedScale(atStep: 0), 1)
         XCTAssertEqual(steady.speedScale(atStep: 500), 1)
+        XCTAssertEqual(
+            steady.openingRowsPerSecond(steps: 600, duration: 60), 10,
+            accuracy: 1e-9)
 
-        // With a steady acceleration the growth is the plain per-step one.
         let growing = RevealSetup(
-            branchRows: branchRows, speedGrowthPerStep: 1.01)
+            branchRows: branchRows, speedGrowthPerStep: 1.001)
         XCTAssertEqual(growing.speedScale(atStep: 0), 1)
         XCTAssertEqual(
-            growing.speedScale(atStep: 100), pow(1.01, 100), accuracy: 1e-9)
+            growing.speedScale(atStep: 1000), pow(1.001, 1000), accuracy: 1e-9)
+        XCTAssertGreaterThan(
+            growing.speedScale(atStep: 1000), growing.speedScale(atStep: 500),
+            "the pull-back speeds up as it goes")
 
-        // The growth compounds with itself: the log growth of step n is the
-        // opening growth raised to the acceleration's nth power.
-        let accelerating = RevealSetup(
-            branchRows: branchRows, speedGrowthPerStep: 1.001,
-            speedGrowthAcceleration: 1.01)
-        XCTAssertEqual(accelerating.speedScale(atStep: 0), 1)
-        XCTAssertEqual(
-            log(accelerating.speedScale(atStep: 1)), log(1.001), accuracy: 1e-12)
-        XCTAssertEqual(
-            log(accelerating.speedScale(atStep: 101)
-                / accelerating.speedScale(atStep: 100)),
-            log(1.001) * pow(1.01, 100), accuracy: 1e-12)
+        // Each row takes `1 / rate` at the rate it is grown at, and their sum is
+        // the pull-back's length.
+        let steps = 2_000
+        let duration = 60.0
+        let opening = growing.openingRowsPerSecond(steps: steps, duration: duration)
+        let seconds = (0..<steps).reduce(0.0) { total, row in
+            total + 1 / (opening * growing.speedScale(atStep: row))
+        }
+        XCTAssertEqual(seconds, duration, accuracy: 0.05)
+        XCTAssertGreaterThan(seconds, duration - 0.05, "the pull-back lasts the time")
     }
 }

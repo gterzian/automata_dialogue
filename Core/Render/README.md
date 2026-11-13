@@ -206,10 +206,11 @@ buffer, so a frame must finish before the next one is written.
   the frame's buffer only on the render actor. `RenderPacing` turns clock ticks
   into advances: `.fixed` for deterministic tests, `.timed` accumulates
   `Δ × stepsPerSecond` and clamps each tick; `setPacing` changes a driven run's
-  rate in flight. A reveal's `RevealSetup` grows the row rate by
-  `speedGrowthPerStep` at the opening step, and that per-step growth itself
-  multiplies by `speedGrowthAcceleration` each step, so an equal tick advances
-  more rows super-exponentially as the pull-back widens.
+  rate in flight. A reveal's `RevealSetup` carries the branch's reference rows
+  and `speedGrowthPerStep`, so a tick advances a growing number of rows as the
+  picture widens. `openingRowsPerSecond(steps:duration:)` gives the opening rate
+  whose growth over a span takes the time a driver wants, and `revealSpanLimit`
+  reports the steps that span takes.
   `RenderActor.makeCellGridSink(target:)` builds the sink on the actor's own
   `GPUContext`, so the sink and the simulation share one device, queue, and
   residency set.
@@ -303,9 +304,9 @@ buffer, so a frame must finish before the next one is written.
 
 - **Keeping the whole history costs memory that grows with the run.** The
   history ring holds every source row, about `boardWidth` bytes per step (a
-  ten-window board grows ~324 KB/s while the reveal is still at its opening 45
-  rows/s, and much faster as it accelerates), and each growth copies the rows
-  on the render thread, so a growth copy after a long run can pause the reveal.
+  ten-window board grows 0.1–0.8 MB/s over the reveal's minute), and each
+  growth copies the rows on the render thread, so a growth copy after a long
+  run can pause the reveal.
   The pull-back's span limit bounds the run's row count, but the ring still
   holds every row of it. A cap would have to hold the camera there and let the
   oldest rows leave as before.

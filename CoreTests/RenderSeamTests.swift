@@ -71,8 +71,8 @@ final class FrameSeamTests: XCTestCase {
         XCTAssertEqual(pacing.steps(for: 1.0 / 1000, remainder: &remainder), 1)
     }
 
-    /// A reveal's accelerating rate multiplies only the timed rate; a fixed
-    /// pacing is driven by its hand-pumped step count.
+    /// A reveal's growing rate multiplies only the timed rate; a fixed pacing
+    /// is driven by its hand-pumped step count.
     func testScaledPacingMultipliesTheTimedRate() {
         var baseRemainder = 0.0
         var scaledRemainder = 0.0
@@ -88,11 +88,10 @@ final class FrameSeamTests: XCTestCase {
             7)
     }
 
-    /// A tick that covers no time advances nothing even when the accelerated
-    /// rate is infinite, which `delta × rate` would turn into NaN.
-    func testTimedPacingIgnoresAZeroTickAtAnInfiniteRate() {
+    /// A tick that covers no time advances nothing.
+    func testTimedPacingIgnoresAZeroTick() {
         var remainder = 0.0
-        let pacing = RenderPacing.timed(stepsPerSecond: .infinity)
+        let pacing = RenderPacing.timed(stepsPerSecond: 64)
         XCTAssertEqual(pacing.steps(for: 0, remainder: &remainder), 0)
         XCTAssertEqual(remainder, 0, accuracy: 1e-9)
         XCTAssertEqual(pacing.steps(for: 1, remainder: &remainder), 64)
@@ -190,6 +189,9 @@ final class RenderActorTests: XCTestCase {
             reveal: RevealSetup(
                 branchRows: ViewportGeometry.twinHalfRows(rows: 21)),
             sink: sink)
+        // The span a driver paces the pull-back from.
+        let limit = await actor.revealSpanLimit
+        XCTAssertEqual(limit, 20)
         _ = sink.waitForFrame(timeout: 0.01)
         await actor.drive(target: target, pacing: .fixed(100))
 
@@ -261,9 +263,9 @@ final class RenderActorTests: XCTestCase {
         await actor.shutdown()
     }
 
-    /// A driven reveal accelerates: an equal tick advances more rows once the
-    /// run has grown, because `speedGrowthPerStep` raised its row rate.
-    func testRevealAcceleratesWithEveryGrownRow() async throws {
+    /// A driven reveal grows faster with every source row it computes: an equal
+    /// tick advances more rows once the run has grown.
+    func testTheRevealSpeedsUpWithTheGrownRows() async throws {
         guard GPUContext.isAvailable else {
             throw XCTSkip("no Metal 4 device")
         }
@@ -282,8 +284,8 @@ final class RenderActorTests: XCTestCase {
             sink: sink)
         // Drain the seed frame so each tick's frame is the next signal.
         _ = sink.waitForFrame(timeout: 0.01)
-        // A tick of 1/64 s at 64 rows/s is exactly one row at the opening rate;
-        // doubling the rate per grown row turns the next ticks into 2 and 8.
+        // A tick of 1/64 s at 64 rows/s is one row at the opening rate; the rate
+        // doubles per grown row, so the next ticks take 2 and then 8.
         await actor.drive(target: target, pacing: .timed(stepsPerSecond: 64))
         for expected in [1, 3, 11] {
             target.tick(1.0 / 64)

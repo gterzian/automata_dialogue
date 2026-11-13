@@ -35,10 +35,12 @@ public actor RenderActor {
     /// growth instead of in main-actor polling steps.
     private var reveal: RevealSetup?
     /// Source steps at which the pull-back has widened the window to the whole
-    /// board. Past it the fit samples columns off the board and shows the page
-    /// either side of the pattern, so the run ends here instead. Computed from
-    /// the grid the widest zoom-out reaches, which is where the limit is hit.
-    private var revealSpanLimit: Int?
+    /// board, or nil when the run has no reveal. Past it the fit samples columns
+    /// off the board and shows the page either side of the pattern, so the run
+    /// holds there. Computed from the grid the widest zoom-out reaches, which is
+    /// where the limit is hit. A driver paces the run from it:
+    /// `revealSpanLimit / rowsPerSecond` is how long the pull-back lasts.
+    public private(set) var revealSpanLimit: Int?
     /// Where the reveal is: the pull-back plays, the run holds once the window
     /// spans the whole board, the ending closes the held picture into its dot
     /// when the review asks for it, and the review window advances on
@@ -236,9 +238,9 @@ public actor RenderActor {
             return
         }
         guard let simulation else { return }
-        // A reveal accelerates: its row rate grows with every source row the
-        // run has computed, so the same tick advances more rows as the picture
-        // widens. A steady run, or no reveal, keeps the set pacing.
+        // A reveal grows a little faster with every source row it computes, so
+        // the same tick advances more rows as the picture widens. A steady run
+        // keeps the set pacing.
         let tickPacing = reveal.map {
             pacing.scaled(by: $0.speedScale(atStep: simulation.steppedRows))
         } ?? pacing

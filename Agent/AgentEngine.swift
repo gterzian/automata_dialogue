@@ -121,23 +121,26 @@ public actor AgentEngine: AgentRunning {
         _ = try await promptCache()
     }
 
-    /// Runs one minimal image turn so the vision encoder and the decode
-    /// kernels are compiled and the image KV-cache path is exercised before
-    /// the first review submission. The image is at most 256 px square (the
-    /// smallest square the Qwen preprocessor accepts), and the turn generates
-    /// one token. Its answer is discarded and the choice history is not
-    /// touched. `rate` calls it after `prepare()`; a failure is logged and left
-    /// to the first real run to report again.
+    /// Runs one image turn at the review's own shape so everything that shapes
+    /// it is compiled and cached first: the configured image size (the vision
+    /// encoder's patch grid and the image-token count in the prompt), the
+    /// configured sampling, and the decode step after the prefill. The turn
+    /// generates three tokens — the first comes out of the prefill, the rest
+    /// run the one-token decode path — and its answer is discarded; the choice
+    /// history is not touched. `rate` calls it after `prepare()`, and `rate`'s
+    /// first submission waits for it; a failure is logged and left to the first
+    /// real run to report again.
     public func warmImage() async throws {
         let cache = try await promptCache()
-        let dimension = max(1, min(256, configuration.imageDimension))
+        let dimension = configuration.imageDimension
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("rater-warmup-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: url) }
         try Self.writeWarmupImage(to: url, dimension: dimension)
         _ = try await answer(
             cache: cache, to: "", imageURL: url,
-            parameters: GenerateParameters(maxTokens: 1, temperature: 0),
+            parameters: GenerateParameters(
+                maxTokens: 3, temperature: configuration.temperature),
             imageDimension: dimension)
     }
 

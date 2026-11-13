@@ -46,9 +46,7 @@ public struct RenderPacing: Sendable, Equatable {
         case .fixed(let stepsPerFrame):
             return stepsPerFrame
         case .timed(let stepsPerSecond, let maxStepsPerTick):
-            // A tick that covers no time advances nothing, however large the
-            // rate: an accelerating reveal's rate can be infinite, and
-            // `delta × rate` would then be NaN instead of zero.
+            // A tick that covers no time advances nothing.
             guard delta > 0 else { return 0 }
             remainder = min(remainder + delta * stepsPerSecond, Double(maxStepsPerTick))
             let steps = Int(remainder)

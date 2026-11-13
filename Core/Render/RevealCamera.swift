@@ -24,49 +24,38 @@ public enum RevealCamera {
     }
 }
 
-/// The camera settings and the row-rate curve a driven run applies on each
+/// The camera settings and the row-rate growth a driven run applies on each
 /// clock tick.
 public struct RevealSetup: Sendable, Equatable {
     /// Rows from the shared horizon to each outer edge at 1×; the camera's
     /// reference span.
     public var branchRows: Int
-    /// How much the row rate grows at the opening step: 1.001 is +0.1%. 1 keeps
-    /// the paced rate; the growth is the same every step until
-    /// `speedGrowthAcceleration` changes it.
+    /// How much the row rate grows per source row: 1.001 is +0.1%, so the
+    /// pull-back starts slow and speeds up a little as it goes. 1 keeps the
+    /// paced rate.
     public var speedGrowthPerStep: Double
-    /// How much that per-step growth itself multiplies each step. 1 keeps the
-    /// growth constant; above 1 the growth compounds with itself, so the rate
-    /// rises super-exponentially.
-    public var speedGrowthAcceleration: Double
 
-    public init(
-        branchRows: Int,
-        speedGrowthPerStep: Double = 1,
-        speedGrowthAcceleration: Double = 1
-    ) {
+    public init(branchRows: Int, speedGrowthPerStep: Double = 1) {
         self.branchRows = branchRows
         self.speedGrowthPerStep = speedGrowthPerStep
-        self.speedGrowthAcceleration = speedGrowthAcceleration
     }
 
-    /// The row-rate multiplier once the run has grown `steps` source rows: the
-    /// per-step growth is `speedGrowthPerStep` raised to
-    /// `speedGrowthAcceleration^step`, and the multiplier accumulates those
-    /// growths. The first row runs at the paced rate, so the reveal opens at
-    /// the speed a steady run would show and accelerates from there.
+    /// The row-rate multiplier once the run has grown `steps` source rows.
     public func speedScale(atStep steps: Int) -> Double {
-        guard steps > 0 else { return 1 }
-        guard speedGrowthPerStep != 1 else { return 1 }
-        let steps = Double(steps)
-        // The sum of the first `steps` powers of the acceleration: each step
-        // grows the rate by `speedGrowthPerStep^(acceleration^step)`.
-        let exponent: Double
-        if speedGrowthAcceleration == 1 {
-            exponent = steps
-        } else {
-            exponent = (pow(speedGrowthAcceleration, steps) - 1)
-                / (speedGrowthAcceleration - 1)
-        }
-        return pow(speedGrowthPerStep, exponent)
+        guard steps > 0, speedGrowthPerStep != 1 else { return 1 }
+        return pow(speedGrowthPerStep, Double(steps))
+    }
+
+    /// The opening rows per second that make growing `steps` source rows last
+    /// `duration` seconds under this curve: each row takes `1 / rate` at the
+    /// rate it is grown at, and their sum is the pull-back's length.
+    public func openingRowsPerSecond(steps: Int, duration: TimeInterval) -> Double {
+        let count = Double(max(1, steps))
+        let seconds = max(duration, 1e-3)
+        guard speedGrowthPerStep != 1 else { return count / seconds }
+        // The sum of `g^-n` over the run, in closed form.
+        let growth = speedGrowthPerStep
+        let weighted = (1 - pow(growth, -count)) / (1 - 1 / growth)
+        return weighted / seconds
     }
 }
