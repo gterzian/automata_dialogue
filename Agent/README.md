@@ -23,10 +23,11 @@ relies on and keeps the build independent of the macro plugin. When bumping
   with no directory fails the run with `AgentEngineError.noModelDirectory`;
   nothing is ever fetched. Obtain the snapshot outside the software.
   `../Models/README.md` records the verified snapshots.
-- `../Models/Qwen3.5-4B-MLX-4bit` is the recommended snapshot: the smallest that
-  both matches the class and honours the no-repeat list. The 9B is slower and
-  the 2B fails the exclusion list (see Remaining work). A registry entry is not
-  required: the config's `qwen3_5` model type loads it.
+- `../Models/Qwen3.5-9B-4bit` is the snapshot in use: it matched 12/14 in
+  `bench`, with reason sentences as specific as the 4B's. The 4B is the faster
+  alternative (13/14 in `classify`, 4.4–7.4 s per image) and the 2B fails the
+  exclusion list (see Remaining work). A registry entry is not required: the
+  config's `qwen3_5` model type loads all of them.
 - The directory must be a complete Hugging Face snapshot (`config.json`,
   `*.safetensors` with `model.safetensors.index.json`, `tokenizer.json`,
   `tokenizer_config.json`, `vocab.json`, `chat_template.jinja`, and the
@@ -84,13 +85,12 @@ written.
   A 14-image run costs 4.4–7.4 s per image, with 4,616–4,672 prompt tokens over
   26–43 s and 929–994 generated tokens over 31–41 s at 512 px.
   `Qwen3.5-2B-6bit` fails to name a usable id once the exclusion list is
-  present; `gemma-4-e2b-it-4bit` is larger and weaker. `Qwen3.5-9B-4bit` matched
-  12/14 in `bench` at 6.0–14.8 s per image (prompt 4,616 tokens / 61 s,
-  generation 963 tokens / 65 s), with reason sentences as specific as the 4B's
-  and a run that grows slower toward the end of the batch. Those 9B numbers
-  predate the current `nesting` boundary, so re-measure it with
-  `classify artifacts/` before preferring it; the 4B remains the faster product
-  model.
+  present. `Qwen3.5-9B-4bit` matched 12/14 in `bench` at 6.0–14.8 s per image
+  (prompt 4,616 tokens / 61 s, generation 963 tokens / 65 s), with reason
+  sentences as specific as the 4B's and a run that grows slower toward the end
+  of the batch. Those 9B figures predate the current `nesting` boundary, so
+  re-measure them with `classify artifacts/`; the 4B is the fallback when
+  latency matters more than the reasons.
 - Image-only turns and the four-line `class:`/`id:`/`reason:`/`reason_zh:`
   answer work on the local snapshots. The mixture rubric's soft boundary is a
   wholly ordered, recognizable figure versus a picture that mixes order and

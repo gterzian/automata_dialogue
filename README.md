@@ -9,7 +9,7 @@ choices so the answer stays varied.
 
 - Apple Silicon Mac on macOS 26 or later.
 - Xcode with the Swift 6.4 toolchain and the Metal toolchain component.
-- About 3 GB free for the 4B model snapshot, plus SwiftPM's build output.
+- About 6 GB free for the 9B model snapshot, plus SwiftPM's build output.
 - Network access for the Metal toolchain component, the SwiftPM dependencies,
   and the model snapshot.
 
@@ -32,36 +32,39 @@ swift test --disable-sandbox
 
 The release build writes `.build/release/rater-cli`.
 
-## Install the 4B model
+## Install the 9B model
 
-This guide uses `../Models/Qwen3.5-4B-MLX-4bit`, a 4-bit MLX conversion of
-`Qwen/Qwen3.5-4B`, from the snapshot directory outside this repository; the
-paths below resolve from the repository root, and `../Models/README.md`
-records the verified file list, source, commit, and weight hash. The engine
-is local-only (see `AGENTS.md` → Product decisions), so the directory must
-already exist.
+This guide uses `../Models/Qwen3.5-9B-4bit`, the hub's
+`mlx-community/Qwen3.5-9B-4bit` conversion of `Qwen/Qwen3.5-9B-Base`, from the
+snapshot directory outside this repository; the paths below resolve from the
+repository root, and `../Models/README.md` records the verified file list,
+commit, and weight hashes. The engine is local-only (see `AGENTS.md` → Product
+decisions), so the directory must already exist.
 
-The conversion used for the verified snapshot is:
+The snapshot comes from the Hugging Face hub, fetched by a command you run:
+`rater-cli` never talks to the network. The Hub CLI is `hf`
+(`pip install -U huggingface_hub`, or Homebrew's `hf` formula):
 
 ```sh
-python3 -m mlx_vlm convert \
-  --hf-path Qwen/Qwen3.5-4B \
-  --mlx-path ../Models/Qwen3.5-4B-MLX-4bit \
-  -q --q-bits 4 --q-group-size 64
+hf download mlx-community/Qwen3.5-9B-4bit --local-dir ../Models/Qwen3.5-9B-4bit
 ```
 
-The verified conversion used mlx-vlm's `pc/fix-qwen35-predicate` branch. After
-converting, compare
-`shasum -a 256 ../Models/Qwen3.5-4B-MLX-4bit/model.safetensors` with the hash in
-`../Models/README.md`. A snapshot kept elsewhere is fine: pass its directory
-with `--model` or `RATER_MODEL_PATH`.
+`--local-dir` writes the files flat, the way the engine reads a snapshot.
+`../Models/README.md` lists the other verified snapshots with their repository
+ids and commits.
+
+After downloading, compare `shasum -a 256` of
+`../Models/Qwen3.5-9B-4bit/model-00001-of-00002.safetensors` and
+`model-00002-of-00002.safetensors` with the hashes in `../Models/README.md`. A
+snapshot kept elsewhere is fine: pass its directory with `--model` or
+`RATER_MODEL_PATH`.
 
 ## Run the CLI
 
 Point the CLI at the snapshot once per shell:
 
 ```sh
-export RATER_MODEL_PATH="$PWD/../Models/Qwen3.5-4B-MLX-4bit"
+export RATER_MODEL_PATH="$PWD/../Models/Qwen3.5-9B-4bit"
 ```
 
 Rate the reference drawings in the review window:
