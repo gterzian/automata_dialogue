@@ -68,15 +68,13 @@ func printCatalog() {
             print("  \(spec.id)  \(spec.title)")
         }
     }
-    print("\n--- index ---")
-    for line in Catalog.promptIndexLines { print(line) }
 }
 
 func printUsage() -> Never {
     let usage = """
     usage: rater-cli <command> [options]
 
-      catalog                         print the catalog and prompt index
+      catalog                         print the catalog grouped by class
       rate <path|dir> ...               run the MLX agent over reference images
         a directory contributes its top-level images; the batch cycles
         options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
@@ -93,10 +91,10 @@ func printUsage() -> Never {
         Runs each image once with no window or automaton and prints the prompt
         and generation cost, so a prompt or model change can be measured from
         a terminal script.
-      classify <path|dir> ...           print each image's chosen class, headless
+      classify <path|dir> ...           print each image's rated class, headless
         options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
-        Runs each image once with no window and prints `name<TAB>class<TAB>id`
-        plus a class tally, so a labeled reference set can be scored.
+        Runs each image once with no window and prints `name<TAB>class` plus a
+        class tally, so a labeled reference set can be scored.
     """
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
@@ -785,9 +783,9 @@ struct RateOutcome: Sendable {
     let metrics: [GenerationMetrics]
 }
 
-/// Runs the agent over one normalized image. The engine carries the
-/// recent-choice window across the batch, so each input is asked to pick an
-/// unused automaton. `startedAt` keeps the reported seconds inclusive of the
+/// Runs the agent over one normalized image. The engine's session keeps the
+/// picked automata across the batch, so each input gets one the batch has not
+/// shown. `startedAt` keeps the reported seconds inclusive of the
 /// caller's normalization/export work.
 func runEngine(
     engine: AgentEngine,
@@ -826,7 +824,7 @@ func runEngine(
         print("[debug] \(name) answer after \(seconds)s:")
         print(response.isEmpty ? "[debug]   (empty response)" : response)
         if let choice, let spec = Catalog.spec(id: choice.id) {
-            print("[debug]   parsed \(choice.id) [\(spec.behavior.rawValue)] \(spec.title)")
+            print("[debug]   rated \(choice.behavior.rawValue), showing \(choice.id) \(spec.title)")
         }
     }
     return RateOutcome(
@@ -834,8 +832,9 @@ func runEngine(
         metrics: metrics)
 }
 
-/// Runs the agent over one image file. The engine carries the recent-choice
-/// window across the batch, so each image is asked to pick an unused automaton.
+/// Runs the agent over one image file. The engine's session keeps the picked
+/// automata across the batch, so each image is paired with one the batch has
+/// not shown.
 func rateOne(
     engine: AgentEngine,
     path: String,
@@ -939,8 +938,8 @@ func submissionRaster(for input: ReviewInput) async -> RasterImage? {
     }.value
 }
 
-/// Prints the `name<TAB>id<TAB>seconds` result line and returns the chosen
-/// spec, if any.
+/// Prints the `name<TAB>class<TAB>id<TAB>seconds` result line and returns the
+/// picked spec, if any.
 @discardableResult
 func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
     if let failure = outcome.failure {
@@ -948,10 +947,10 @@ func printRateOutcome(_ outcome: RateOutcome) -> ProgramSpec? {
         return nil
     }
     guard let choice = outcome.choice else {
-        print("\(outcome.name)\tFAILED\tno catalog id\t\(outcome.seconds)s")
+        print("\(outcome.name)\tFAILED\tno rated class\t\(outcome.seconds)s")
         return nil
     }
-    print("\(outcome.name)\t\(choice.id)\t\(outcome.seconds)s")
+    print("\(outcome.name)\t\(choice.behavior.rawValue)\t\(choice.id)\t\(outcome.seconds)s")
     return Catalog.spec(id: choice.id)
 }
 
@@ -1104,10 +1103,10 @@ func runBench(_ setup: RateSetup) async {
 }
 
 /// Headless classification: run the agent once per image with no window and
-/// print the chosen behavior class, so a labeled reference set can be scored.
-/// Each image is classified independently (the choice history is cleared), so
-/// the score measures the model, not the order of the batch; `bench` is the
-/// same path with timing and the product's no-repeat window.
+/// print the class the model rated, so a labeled reference set can be scored.
+/// The model never sees earlier ratings, so each image's rating is independent
+/// of the batch; `bench` is the same path with timing and the session's random
+/// pick.
 func runClassify(_ setup: RateSetup) async {
     printRateDebugHeader(setup)
     let engine = AgentEngine(configuration: setup.configuration)
@@ -1122,17 +1121,16 @@ func runClassify(_ setup: RateSetup) async {
     var classified = 0
     var tally: [Behavior: Int] = [:]
     for path in setup.paths {
-        await engine.resetHistory()
         let outcome = await rateOne(
             engine: engine, path: path, directory: directory,
             dimension: setup.configuration.imageDimension, verbose: false)
-        guard let choice = outcome.choice, let spec = Catalog.spec(id: choice.id) else {
-            print("\(outcome.name)\tFAILED\t\(outcome.failure ?? "no catalog id")")
+        guard let choice = outcome.choice else {
+            print("\(outcome.name)\tFAILED\t\(outcome.failure ?? "no rated class")")
             continue
         }
         classified += 1
-        tally[spec.behavior, default: 0] += 1
-        print("\(outcome.name)\t\(spec.behavior.rawValue)\t\(choice.id)")
+        tally[choice.behavior, default: 0] += 1
+        print("\(outcome.name)\t\(choice.behavior.rawValue)")
     }
     ImageImport.removeSessionDirectory(for: sessionID)
     let summary = Behavior.allCases

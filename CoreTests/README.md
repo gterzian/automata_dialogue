@@ -7,18 +7,18 @@ Metal 4.
 What must be covered:
 
 - **Catalog** — 111 unique ids in inventory order; behavior counts
-  (repetition 29, nesting 28, randomness 40, complexity 14); the listing and the
-  catalog ids agree; per-entry follow rates, and which seed rows are a single
-  centred cell.
-- **Prompt** — `SystemPrompt.build` embeds every catalog id under its class
-  heading, describes all four classes, states that complexity requires both an
-  ordered and a disordered part (so a recognizable figure such as the house is
+  (repetition 29, nesting 28, randomness 40, complexity 14); per-entry follow
+  rates, and which seed rows are a single centred cell.
+- **Prompt** — `SystemPrompt.build` names no automaton and no catalog id,
+  describes all four classes, states that complexity requires both an ordered
+  and a disordered part (so a recognizable figure such as the house is
   repetition), splits `repetition` from `nesting` on the copies' sizes, states
-  the answer format in both languages, and stays within the
-  ~4k budget.
-- **Choice** — the parser (`id:` field, English and Chinese reasons, full-width
-  colon, markdown, prose fallback, longest-id match, unknown id) and the
-  recent-choice window (limit, exclusion note).
+  the three-line answer format in both languages, and stays within the ~1.5k
+  budget.
+- **Class rating and the session pick** — the parser (`class:` field, English
+  and Chinese reasons, full-width colon, markdown, prose fallback, whole-word
+  matching) and `SessionChoices` (an entry of the rated class, no repeat before
+  the class is exhausted, the class-only reset when it is).
 - **Import** — normalization writes a 512×512 PNG; temp lifecycle; a blank
   drawing is a uniform raster while a stroke reaches the raster; aspect-fit
   keeps a wide drawing's shape; a drawing normalizes to a square PNG; reference

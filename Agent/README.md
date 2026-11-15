@@ -23,11 +23,11 @@ relies on and keeps the build independent of the macro plugin. When bumping
   with no directory fails the run with `AgentEngineError.noModelDirectory`;
   nothing is ever fetched. Obtain the snapshot outside the software.
   `../Models/README.md` records the verified snapshots.
-- `../Models/Qwen3.5-9B-4bit` is the snapshot in use: it matched 12/14 in
-  `bench`, with reason sentences as specific as the 4B's. The 4B is the faster
-  alternative (13/14 in `classify`, 4.4–7.4 s per image) and the 2B fails the
-  exclusion list (see Remaining work). A registry entry is not required: the
-  config's `qwen3_5` model type loads all of them.
+- `../Models/Qwen3.5-9B-4bit` is the snapshot in use; the 4B is the faster
+  alternative when latency matters more. A registry entry is not required: the
+  config's `qwen3_5` model type loads all of them. Score a snapshot with
+  `rater-cli classify artifacts/`; the prompt no longer lists the catalog, so
+  the model is judged only on the class it names.
 - The directory must be a complete Hugging Face snapshot (`config.json`,
   `*.safetensors` with `model.safetensors.index.json`, `tokenizer.json`,
   `tokenizer_config.json`, `vocab.json`, `chat_template.jinja`, and the
@@ -43,8 +43,8 @@ relies on and keeps the build independent of the macro plugin. When bumping
   and sampling that generates three tokens, so the vision encoder runs at the
   first submission's patch count and the one-token decode step runs once.
   `rate` shows the intro, taking no input, until the warm-up finishes, then
-  opens its first page. The warm-up is best-effort and does not touch the choice
-  history.
+  opens its first page. The warm-up is best-effort and does not touch the
+  session's shown ids.
 
 ## Run
 
@@ -59,9 +59,10 @@ isolate the prefix fails with `AgentEngineError.noCacheableSystemPrefix`.
 There is no tool dispatch and no tool-dispatch round. The engine emits the whole
 answer as `.text`, one `.metrics` event (prefilled and cached prompt tokens,
 generation tokens, and times), then the parsed `.choice`, or `.failed` when no
-usable catalog id appears; the parser is `Core/Agent`'s `ChoiceParser`. There is
-no repair pass, so a miss costs one generation and a terse reason is accepted as
-written.
+class appears; the parser is `Core/Agent`'s `RatedClassParser`. The `.choice`
+carries the id `SessionChoices` picked from the rated class, the class itself,
+and the two reasons. There is no repair pass, so a miss costs one generation and
+a terse reason is accepted as written.
 
 ## Remaining work
 
@@ -70,35 +71,20 @@ written.
   compares the first `rate` turn with the second; `rate`'s debug output prints
   each turn's prefill and generation seconds, so the residual excess is whatever
   the first image shows over the second.
-- Model choice is a heuristic, not settled. `classify artifacts/` scores
-  class agreement alone (no exclusion list); `bench` exercises the no-repeat
-  dialogue. With the current prompt `Qwen3.5-4B-MLX-4bit` scored 13/14 in
-  `classify`, and both nesting drawings (`example_4.png`, `example_13.png`)
-  were classed correctly in every run of both commands; a prompt whose
-  `nesting` description required contained copies scored 12/14 and read
-  `example_4.png` as `repetition` in every run. An occasional mis-rating is
-  accepted (see `AGENTS.md`), so score the set rather than single drawings.
-  In the no-repeat dialogue the 4B produced 10–12 usable answers out of 14 in
-  three runs, and the same failures occur with and without the nesting change:
-  they cluster on the randomness drawings after it chooses `T177`, which the
-  exclusion note did not overturn. That note is the weak point to address next.
-  A 14-image run costs 4.4–7.4 s per image, with 4,616–4,672 prompt tokens over
-  26–43 s and 929–994 generated tokens over 31–41 s at 512 px.
-  `Qwen3.5-2B-6bit` fails to name a usable id once the exclusion list is
-  present. `Qwen3.5-9B-4bit` matched 12/14 in `bench` at 6.0–14.8 s per image
-  (prompt 4,616 tokens / 61 s, generation 963 tokens / 65 s), with reason
-  sentences as specific as the 4B's and a run that grows slower toward the end
-  of the batch. Those 9B figures predate the current `nesting` boundary, so
-  re-measure them with `classify artifacts/`; the 4B is the fallback when
-  latency matters more than the reasons.
-- Image-only turns and the four-line `class:`/`id:`/`reason:`/`reason_zh:`
-  answer work on the local snapshots. The mixture rubric's soft boundary is a
-  wholly ordered, recognizable figure versus a picture that mixes order and
-  randomness. The expected class of every reference drawing is in
-  `artifacts/README.md`; score
-  the set with `rater-cli classify artifacts/`.
+- **Class accuracy is a heuristic, not settled.** `classify artifacts/` scores
+  class agreement alone; `bench` exercises the session's random pick and its
+  timing. An occasional mis-rating is accepted (see `AGENTS.md`), so score the
+  set rather than single drawings. The first run of a snapshot must happen
+  outside the sandbox, so its Metal kernels are cached (`AGENTS.md` → Build and
+  test).
+- Image-only turns and the three-line
+  `class:`/`reason:`/`reason_zh:` answer are the format. The mixture rubric's
+  soft boundary is a wholly ordered, recognizable figure versus a picture that
+  mixes order and randomness. The expected class of every reference drawing is
+  in `artifacts/README.md`; score the set with `rater-cli classify artifacts/`.
 - `AgentEngine` is not covered by `CoreTests`; test answer parsing in `Core`
-  against `ChoiceParser` and test the model through the headless
-  `rater-cli bench` (or the interactive `rater-cli rate`).
+  against `RatedClassParser` and the session pick against `SessionChoices`, and
+  test the model through the headless `rater-cli bench` (or the interactive
+  `rater-cli rate`).
 - The system-prefix cache lives for one `AgentEngine`, so each process pays its
   prefill once. Persisting it across processes would remove that cost.

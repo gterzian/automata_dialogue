@@ -1,23 +1,22 @@
 # Core/Catalog
 
-One table of 111 `ProgramSpec` values feeds the renderer, the system prompt's
-automata listing, and the CLI catalog debug print. The listing is built from
-this table, so what the model chooses and what the renderer draws cannot
-diverge.
+One table of 111 `ProgramSpec` values feeds the renderer, the session's random
+pick, and the CLI catalog debug print. `SessionChoices` picks from this table,
+so the automaton the model's rated class resolves to and the renderer's drawing
+cannot diverge.
 
 ## Invariants
 
 - 111 entries, unique ids, in the inventory's order.
 - Behavior counts: **repetition 29, nesting 28, randomness 40, complexity 14**.
-- Every id appears in `Catalog.ids`, and `Catalog.promptIndexLines` is generated
-  from the same table, grouped under a `### <class>` heading.
+- Every id appears in `Catalog.ids`; the ids and the table cannot drift.
 
 ## Types
 
 - `Behavior` — the four classes: `.repetition`, `.nesting`, `.randomness`,
-  `.complexity`. Every entry carries exactly one; the prompt groups the ids
-  under their class heading. `chineseName` is the label the review window shows
-  beside the English name.
+  `.complexity`. Every entry carries exactly one; `SessionChoices` picks only
+  among the entries of the rated class. `chineseName` is the label the review
+  window shows beside the English name.
 - `GPUProgram` — `.elementary(rule:)`, `.totalistic(code:colors:)`, or
   `.k2r2(code:)` (radius 2, binary, inventory §1.3); selects the step kernel
   and its constants.
@@ -41,10 +40,9 @@ diverge.
 ## `look`
 
 `ProgramSpec.look` is a one-sentence visual description that stays in sync with
-the inventory artifact (`testInventoryMatchesCatalog`). It is not submitted in
-the system prompt, which lists only the class headings and their ids: the class
-is what the model matches, and keeping the 111 sentences out of the prompt holds
-the prefill within the prompt budget. It must stay one line.
+the inventory artifact (`testInventoryMatchesCatalog`). It is not part of the
+system prompt, which describes only the classes: the class is what the model
+rates, and `SessionChoices` supplies the entry. It must stay one line.
 
 ## Per-run seeds
 

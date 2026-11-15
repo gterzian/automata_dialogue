@@ -1,9 +1,9 @@
 # Automata Rater
 
 A macOS command-line tool that answers a drawing or image with one of 111
-curated cellular automata. A local MLX vision-language model chooses the entry
-whose class of behavior matches what it sees, and each run excludes the recent
-choices so the answer stays varied.
+curated cellular automata. A local MLX vision-language model rates the class of
+behavior it sees, and the CLI shows a random automaton of that class that the
+session has not shown yet, so the answers stay varied.
 
 ## Requirements
 

@@ -12,65 +12,56 @@ stable cacheable prefix.
 
 ## One answer, no tool call
 
-There is no tool schema and no tool-dispatch round. The prompt asks for four
+There is no tool schema and no tool-dispatch round. The prompt asks for three
 lines:
 
 ```
 class: <one of repetition, nesting, randomness, complexity>
-id: <one id from the section for that class>
 reason: <one full English sentence>
 reason_zh: <the same reason in one Simplified Chinese sentence>
 ```
 
-The `class` line comes first so the model commits to a class before choosing an
-id; the id then comes from that class's section, and the reason names the same
-class. The parser reads `id:`, `reason:`, and `reason_zh:`; the class line is
-ignored. The review window shows the id field above the two reasons, so the
-reason does not repeat the id; an answer that omits the Chinese line leaves it
-empty and the choice still stands. Keep the id out of the reason and do not add
-an example sentence for it: an example is copied verbatim, including its id (the
-4B named the example's `E54` while choosing other ids), and both models drop an
-id-in-sentence requirement unpredictably. With the plain format both reference
-snapshots chose 14/14 distinct ids (see `Agent/README.md`).
+The model rates the picture's class of behavior; it never names an automaton,
+so the prompt carries no catalog. The class line comes first so the model
+commits to a class before writing the reason, and the reason names the same
+class. An answer that omits the Chinese line leaves it empty and the rating
+still stands.
 
-`ChoiceParser.choice(from:)` reads the id, preferring the explicit `id:` field
-and otherwise taking the first catalog id anywhere in the text (longest match
-first, so `E90.sparse` beats `E90`). There is no repair pass: an answer with no
-usable id (unknown, or recently used) ends the run in `.failed`, and a terse
-reason is accepted as written. Text beyond the parsed fields is ignored. The
-parser is pure, so the MLX engine and the tests share one implementation.
+`RatedClassParser.ratedClass(from:)` reads the class, preferring the explicit
+`class:` field and otherwise taking the first class word anywhere in the text
+(whole words only). It reads `reason:` and `reason_zh:`; text beyond the parsed
+fields is ignored. There is no repair pass: an answer with no class ends the run
+in `.failed`, and a terse reason is accepted as written. The parser is pure, so
+the MLX engine and the tests share one implementation.
 
-## No repeats
+## Random pick, no repeats
 
-The dialogue must not replay the same automaton. The engine carries a
-`ChoiceHistory` of the last 20 chosen ids across runs and, before each run,
-builds the user turn with `ChoiceHistory.userTurn(_:)`, which appends a note
-that the listed ids were used recently and that an answer using one is invalid.
-That note rides with the image in the user turn, so the system prompt stays a
-cacheable prefix. The engine treats an excluded id the same as an unknown one:
-the run fails without recording a choice.
+`SessionChoices` records every id shown in the session. For each rated class it
+takes the catalog entries of that class the session has not shown, picks one
+uniformly at random, and records it, so the model's rating alone decides the
+class and the engine decides the entry. When a class is exhausted, its shown
+ids are cleared first: the class outranks the no-repeat rule, and the smallest
+class is only 14 entries. The model never sees this state; the user turn carries
+only the submitted text, so the prompt stays a cacheable prefix. `Choice`
+carries the picked id, the rated class, and the two reasons.
 
 ## Prompt
 
-`SystemPrompt.build()` joins three parts into one immutable string: the four
-behavior classes described plainly, the catalog grouped by class
-(`Catalog.promptIndexLines`, a `### <class>` heading followed by that class's
-ids), and the answer format. The rubric reserves `complexity` for a picture
-that contains both an ordered and a disordered part of different kinds (or
-localized structures inside a different texture); a wholly ordered figure, even
-a recognizable one such as a house or a glyph, is `repetition` or `nesting`.
-Those two split on the copies' sizes: copies at one size are `repetition`, and
-copies at different sizes are `nesting`, whether the copies nest inside one
-another or sit apart. The size comparison is stated before the broad "one shape
-repeated" signal, because scaled copies fit that signal too: without the
-comparison, separated triangles such as `example_4.png` read as `repetition`.
-Grouping puts the class next to the ids it contains, so the model chooses inside
-the class it decided instead of reading a class column at the end of each line. The string
-is identical on every run, so it is a cacheable prefix; `AgentEngine` prefills
-it once into a KV cache and copies that prefix for each run (see
-`Agent/README.md`). The per-entry `look` sentence stays in `Catalog` for the
-inventory sync but is not submitted: the class is what the model matches, and
-the prompt budget assumes the listing is grouped ids.
+`SystemPrompt.build()` joins two parts into one immutable string: the four
+behavior classes described plainly, and the answer format. The rubric reserves
+`complexity` for a picture that contains both an ordered and a disordered part
+of different kinds (or localized structures inside a different texture); a
+wholly ordered figure, even a recognizable one such as a house or a glyph, is
+`repetition` or `nesting`. Those two split on the copies' sizes: copies at one
+size are `repetition`, and copies at different sizes are `nesting`, whether the
+copies nest inside one another or sit apart. The size comparison is stated
+before the broad "one shape repeated" signal, because scaled copies fit that
+signal too: without the comparison, separated triangles such as
+`example_4.png` read as `repetition`. The string is identical on every run, so
+it is a cacheable prefix; `AgentEngine` prefills it once into a KV cache and
+copies that prefix for each run (see `Agent/README.md`). The prompt names no
+automaton and no id: the class is what the model rates, and `SessionChoices`
+supplies the entry.
 
 ## Events
 
@@ -81,7 +72,10 @@ the prompt budget assumes the listing is grouped ids.
 
 ## Tests
 
-Choice parsing (the `id:` field, markdown, fallback to prose, the longest-id
-match, and an unknown id), the prompt's class descriptions (including the size
+Class parsing (the `class:` field, markdown, the prose fallback, whole-word
+matching, and the reasons), the prompt's class descriptions (including the size
 split between `repetition` and `nesting` and the order of its signals), the
-per-class id sections, and the prompt budget.
+answer format, that the prompt names no automaton, and the prompt budget. The
+session's random pick is covered by `SessionChoicesTests`: an entry of the rated
+class, no repeat before the class is exhausted, and the class-only reset when
+it is.

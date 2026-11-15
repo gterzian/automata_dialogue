@@ -1,21 +1,23 @@
 # AGENTS.md — Automata Rater
 
-Automata Rater: a macOS CLI where a local MLX agent chooses one of 111
-curated cellular automata to display for an input. The catalog and rubric live
-in the two artifacts in `artifacts/`.
+Automata Rater: a macOS CLI where a local MLX agent rates the class of behavior
+in an input and the CLI displays a curated cellular automaton of that class.
+The catalog and rubric live in the two artifacts in `artifacts/`.
 
 ## Product intent
 
 The unit of the product is a **dialogue**, not a lookup. Each submission is the
-user showing something; the CLI answers in the shared language of complexity by
-choosing an automaton whose class of behavior matches. Two consequences drive
-design decisions:
+user showing something; the model answers in the shared language of complexity
+by naming the class of behavior it sees, and the CLI shows an automaton of that
+class. Two consequences drive design decisions:
 
-- **Variety is required.** The agent keeps a sliding window of the last 20
-  choices across runs and puts them in the **user** turn as an exclusion list
-  (never the system prompt, which must stay a cacheable prefix). Repeating an
-  automaton breaks the illusion of dialogue, so the model must pick an unused
-  one. See `ChoiceHistory` in `Core/Agent`.
+- **Variety is required.** The model names only the class and a reason; the
+  engine picks a uniformly random automaton of that class that the session has
+  not shown. Repeating an automaton breaks the illusion of dialogue. See
+  `SessionChoices` in `Core/Agent`. The model never sees the history, so the
+  system prompt and the user turn stay stable across runs. When a class is
+  exhausted, its shown ids are cleared so a long session keeps answering: the
+  class match outranks the no-repeat rule.
 - **Occasional mis-rating is acceptable.** This is an evocative exchange, not a
   scientific classifier: match at the level of the class of behavior, not
   visual likeness, and do not chase per-image correctness at the cost of the
@@ -25,12 +27,13 @@ The catalog is the vocabulary: the four behavior classes
 (`repetition`/`nesting`/`randomness`/`complexity`) are what both sides talk in.
 
 **Optimization target.** Pick the model and prompt with the best blend of low
-latency, accuracy, and **diversity of output**, biased toward low latency and
-diversity: latency is what makes the exchange feel live, and repeating an
-automaton breaks the dialogue outright, while an occasional off-class choice is
-acceptable. So prefer a faster, varied model over a slower, slightly more
-accurate one. Re-run the reference set (`artifacts/example_*.png`) whenever the
-prompt or model changes; see `Agent/README.md`.
+latency and **class accuracy**, biased toward low latency: latency is what
+makes the exchange feel live, and an occasional off-class choice is acceptable.
+Variety of automata is the engine's job (`SessionChoices`), so the model is
+judged only on the class it names. Prefer a faster model over a slower,
+slightly more accurate one. Re-run the reference set
+(`artifacts/example_*.png`) whenever the prompt or model changes; see
+`Agent/README.md`.
 
 ## Rule Number One
 

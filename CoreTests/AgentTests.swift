@@ -2,41 +2,6 @@ import XCTest
 @testable import Core
 
 final class SystemPromptTests: XCTestCase {
-    func testEmbedsEveryCatalogID() {
-        let prompt = SystemPrompt.build()
-        for id in Catalog.ids {
-            XCTAssertTrue(prompt.contains(id), "prompt is missing \(id)")
-        }
-    }
-
-    /// The listing groups ids under their class heading, so the class the
-    /// model matched is adjacent to the ids it may choose.
-    func testEachEntryAppearsUnderItsClassHeading() {
-        let prompt = SystemPrompt.build()
-        for behavior in Behavior.allCases {
-            XCTAssertTrue(prompt.contains("### \(behavior.rawValue)"), "prompt is missing the \(behavior.rawValue) heading")
-        }
-        var heading: Behavior?
-        for line in Catalog.promptIndexLines {
-            if line.hasPrefix("### ") {
-                heading = Behavior(rawValue: String(line.dropFirst(4)))
-                continue
-            }
-            XCTAssertEqual(
-                Catalog.spec(id: line)?.behavior, heading,
-                "\(line) is listed under the wrong class heading")
-        }
-    }
-
-    /// The `look` sentence stays out of the submitted prompt: it is the bulk of
-    /// the catalog and the class, not the look, is what the model must match.
-    func testPromptOmitsTheLookSentences() {
-        let prompt = SystemPrompt.build()
-        for spec in Catalog.all where !spec.look.isEmpty {
-            XCTAssertFalse(prompt.contains(spec.look), "prompt still carries the look for \(spec.id)")
-        }
-    }
-
     func testDescribesTheFourClasses() {
         let prompt = SystemPrompt.build()
         for behavior in Behavior.allCases {
@@ -50,7 +15,6 @@ final class SystemPromptTests: XCTestCase {
     func testStatesTheAnswerFormat() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains("class: <one of repetition, nesting, randomness, complexity>"))
-        XCTAssertTrue(prompt.contains("id: <one id from the section for that class>"))
         XCTAssertTrue(prompt.contains(
             "reason: <one full English sentence, not just the class name: the visible feature you matched, then the same class>"))
         XCTAssertTrue(prompt.contains(
@@ -63,19 +27,17 @@ final class SystemPromptTests: XCTestCase {
     func testRequiresAFullSentenceReason() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains(
-            "Reply with exactly four lines, starting with `class:` and no other text:"))
+            "Reply with exactly three lines, starting with `class:` and no other text:"))
         XCTAssertTrue(prompt.contains("one full English sentence, not just the class name"))
     }
 
-    /// The class line comes before the id so the model commits to a class, then
-    /// chooses an id from that class's section; the reason follows and names the
-    /// same class.
-    func testRequiresTheIDToCarryTheClassOnTheFirstLine() {
+    /// The class line comes before the reason, and the reason names the same
+    /// class, so an answer that names one class on the first line and another
+    /// in its sentence is invalid.
+    func testRequiresTheReasonToNameTheSameClass() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains(
-            "The class heading above your id must be the class on your first line; the answer is wrong when those differ."))
-        XCTAssertTrue(prompt.contains(
-            "the heading above your id must be the same word as the class on your first line and in your reason"))
+            "the class on your first line and the one in your reason must be the same word"))
     }
 
     /// The review window shows the reason in both languages, so the answer
@@ -86,10 +48,18 @@ final class SystemPromptTests: XCTestCase {
             "reason_zh: <the same reason in one Simplified Chinese sentence>"))
     }
 
-    func testSaysToMatchByBehaviorNotLikeness() {
+    /// The model rates the class and the engine picks the automaton, so the
+    /// catalog has no place in the prompt.
+    func testDoesNotNameTheCatalogOrAnAutomaton() {
         let prompt = SystemPrompt.build()
-        XCTAssertTrue(prompt.contains("Do not look for an automaton that resembles the image."))
-        XCTAssertTrue(prompt.contains("the match is conceptual, not visual"))
+        for term in ["automaton", "automata", "### ", "id:"] {
+            XCTAssertFalse(
+                prompt.lowercased().contains(term),
+                "prompt still mentions \(term)")
+        }
+        for id in Catalog.ids {
+            XCTAssertFalse(prompt.contains(id), "prompt still names \(id)")
+        }
     }
 
     func testDropsTheRetiredRatingRubric() {
@@ -101,13 +71,12 @@ final class SystemPromptTests: XCTestCase {
 
     func testPrefixStaysWithinBudget() {
         let tokens = SystemPrompt.estimatedTokenCount(of: SystemPrompt.build())
-        XCTAssertLessThan(tokens, 2500, "system prompt is larger than the ~1k budget")
+        XCTAssertLessThan(tokens, 1600, "system prompt is larger than the ~1.5k budget")
     }
 
     /// `complexity` is reserved for a picture that visibly mixes an ordered
     /// part with a disordered one. A coherent, recognizable figure is fully
-    /// ordered, so it must land in repetition or nesting; the old rubric's
-    /// "designed or meaningful" test sent the house to complexity.
+    /// ordered, so it must land in repetition or nesting.
     func testComplexityRequiresAMixtureOfOrderAndRandomness() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains("- complexity: order and randomness mix in the same picture."))
@@ -130,10 +99,8 @@ final class SystemPromptTests: XCTestCase {
     }
 
     /// A shape drawn again at another size is nesting, at the same size it is
-    /// repetition. The 4B read the separated triangles of `example_4.png` as
-    /// repetition while the nesting description required containment, so the
-    /// prompt makes the copies' sizes the discriminator and lets nesting win
-    /// that comparison.
+    /// repetition. The prompt makes the copies' sizes the discriminator and
+    /// lets nesting win that comparison.
     func testNestingWinsWhenTheCopiesDifferInSize() {
         let prompt = SystemPrompt.build()
         XCTAssertTrue(prompt.contains(
@@ -175,10 +142,6 @@ final class SystemPromptTests: XCTestCase {
             return XCTFail("artifact has no prompt body separator")
         }
         let body = markdown[separator.upperBound...]
-            .replacingOccurrences(
-                of: "<!-- AUTOMATA -->",
-                with: Catalog.promptIndexLines.joined(separator: "\n")
-            )
         XCTAssertEqual(
             body.trimmingCharacters(in: .whitespacesAndNewlines),
             SystemPrompt.build().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -186,118 +149,141 @@ final class SystemPromptTests: XCTestCase {
     }
 }
 
-final class ChoiceParserTests: XCTestCase {
-    func testParsesIDAndReasonFields() {
-        let response = "id: E90\nreason: nested Sierpinski holes match the drawing"
-        let choice = ChoiceParser.choice(from: response)
-        XCTAssertEqual(choice?.id, "E90")
-        XCTAssertEqual(choice?.rationale, "nested Sierpinski holes match the drawing")
-    }
-
-    func testParsesTheChineseReason() {
+final class RatedClassParserTests: XCTestCase {
+    func testParsesTheClassAndBothReasons() {
         let response = """
         class: nesting
-        id: E90
-        reason: nested triangles repeat at several scales
-        reason_zh: 嵌套的三角形在多个尺度上重复
+        reason: the same triangle appears at three sizes
+        reason_zh: 同一个三角形出现在三种大小上
         """
-        let choice = ChoiceParser.choice(from: response)
-        XCTAssertEqual(choice?.id, "E90")
-        XCTAssertEqual(choice?.rationale, "nested triangles repeat at several scales")
-        XCTAssertEqual(choice?.rationaleChinese, "嵌套的三角形在多个尺度上重复")
+        let rating = RatedClassParser.ratedClass(from: response)
+        XCTAssertEqual(rating?.behavior, .nesting)
+        XCTAssertEqual(rating?.rationale, "the same triangle appears at three sizes")
+        XCTAssertEqual(rating?.rationaleChinese, "同一个三角形出现在三种大小上")
     }
 
     /// A Chinese-speaking model may write the field with a full-width colon.
     func testParsesAChineseReasonWithAFullWidthColon() {
-        let response = "id: E90\nreason: holes\nreason_zh：嵌套的孔洞"
-        XCTAssertEqual(ChoiceParser.choice(from: response)?.rationaleChinese, "嵌套的孔洞")
+        let response = "class: repetition\nreason: one circle\nreason_zh：一个圆"
+        XCTAssertEqual(RatedClassParser.ratedClass(from: response)?.rationaleChinese, "一个圆")
     }
 
     /// A missing Chinese line leaves the reason empty rather than failing the
-    /// choice; the window then shows the English sentence alone.
+    /// rating; the window then shows the English sentence alone.
     func testMissingChineseReasonIsEmpty() {
-        let choice = ChoiceParser.choice(from: "id: E90\nreason: holes")
-        XCTAssertEqual(choice?.rationaleChinese, "")
+        let rating = RatedClassParser.ratedClass(from: "class: repetition\nreason: one circle")
+        XCTAssertEqual(rating?.rationaleChinese, "")
     }
 
     func testParsesMarkdownEmphasis() {
-        let response = "**id:** E110\n**reason:** one-sided growth"
-        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "E110")
+        let response = "**class:** complexity\n**reason:** order and randomness"
+        XCTAssertEqual(RatedClassParser.ratedClass(from: response)?.behavior, .complexity)
     }
 
     func testParsesBulletedFields() {
-        let response = "- id: E90\n- reason: nested holes"
-        let choice = ChoiceParser.choice(from: response)
-        XCTAssertEqual(choice?.id, "E90")
-        XCTAssertEqual(choice?.rationale, "nested holes")
+        let response = "- class: randomness\n- reason: a scatter of marks"
+        let rating = RatedClassParser.ratedClass(from: response)
+        XCTAssertEqual(rating?.behavior, .randomness)
+        XCTAssertEqual(rating?.rationale, "a scatter of marks")
     }
 
-    func testFallsBackToAnIDInProse() {
-        let response = "I would display E54 because it has moving structures."
-        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "E54")
+    func testFallsBackToAClassNamedInProse() {
+        let response = "I rate this picture nesting because one square repeats at five sizes."
+        XCTAssertEqual(RatedClassParser.ratedClass(from: response)?.behavior, .nesting)
     }
 
-    func testPrefersTheLongestIDMatch() {
-        let response = "The entry E90.sparse matches the sparse speckle."
-        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "E90.sparse")
-    }
-
-    func testMatchesAnIDWithTrailingPunctuation() {
-        XCTAssertEqual(ChoiceParser.choice(from: "id: E90.\nreason: holes")?.id, "E90")
-        XCTAssertEqual(ChoiceParser.choice(from: "The Sierpinski entry is E90.")?.id, "E90")
-    }
-
-    func testDoesNotMatchAnIDInsideAWord() {
-        XCTAssertNil(ChoiceParser.choice(from: "prefixE90suffix"))
-    }
-
-    func testReturnsNilWhenNoCatalogIDAppears() {
-        XCTAssertNil(ChoiceParser.choice(from: "I cannot decide."))
-    }
-
-    func testIgnoresAnUnknownID() {
-        XCTAssertNil(ChoiceParser.choice(from: "id: E999\nreason: none"))
-    }
-
-    func testIDFieldWinsOverAnIDInTheReason() {
-        let response = "id: T237\nreason: unlike E110, the holes are large"
-        XCTAssertEqual(ChoiceParser.choice(from: response)?.id, "T237")
+    /// The explicit field is the model's commitment; a class word in the reason
+    /// cannot override it.
+    func testClassFieldWinsOverAClassWordInTheReason() {
+        let response = "class: repetition\nreason: unlike randomness, the marks are evenly spaced"
+        XCTAssertEqual(RatedClassParser.ratedClass(from: response)?.behavior, .repetition)
     }
 
     func testIsCaseInsensitive() {
-        XCTAssertEqual(ChoiceParser.choice(from: "ID: e250")?.id, "E250")
-        XCTAssertEqual(ChoiceParser.choice(from: "id: e110")?.id, "E110")
+        XCTAssertEqual(RatedClassParser.ratedClass(from: "CLASS: Nesting")?.behavior, .nesting)
+    }
+
+    func testAcceptsTrailingPunctuationOnAFieldValue() {
+        XCTAssertEqual(RatedClassParser.ratedClass(from: "class: nesting.")?.behavior, .nesting)
+    }
+
+    /// The fallback matches whole words only, so a class name inside another
+    /// word is not a rating.
+    func testDoesNotMatchAClassInsideAWord() {
+        XCTAssertNil(RatedClassParser.ratedClass(from: "antirepetition"))
+    }
+
+    func testReturnsNilWhenNoClassAppears() {
+        XCTAssertNil(RatedClassParser.ratedClass(from: "I cannot decide."))
     }
 }
 
-final class ChoiceHistoryTests: XCTestCase {
-    func testIsEmptyUntilAChoiceIsRecorded() {
-        XCTAssertTrue(ChoiceHistory().excludedIDs.isEmpty)
-        XCTAssertEqual(ChoiceHistory().userTurn(""), "")
-        XCTAssertEqual(ChoiceHistory().userTurn("look"), "look")
+final class SessionChoicesTests: XCTestCase {
+    func testStartsEmpty() {
+        XCTAssertTrue(SessionChoices().shownIDs.isEmpty)
     }
 
-    func testKeepsOnlyTheMostRecentChoices() {
-        var history = ChoiceHistory()
-        for index in 0..<(ChoiceHistory.limit + 5) { history.record("id\(index)") }
-        XCTAssertEqual(history.excludedIDs.count, ChoiceHistory.limit)
-        XCTAssertEqual(history.excludedIDs.first, "id5")
-        XCTAssertEqual(history.excludedIDs.last, "id\(ChoiceHistory.limit + 4)")
+    func testPickReturnsAnEntryOfTheRatedClassAndRecordsIt() throws {
+        var choices = SessionChoices()
+        var generator = SeededGenerator(seed: 1)
+        let picked = try XCTUnwrap(choices.pick(behavior: .nesting, using: &generator))
+        XCTAssertEqual(picked.behavior, .nesting)
+        XCTAssertEqual(choices.shownIDs, Set([picked.id]))
     }
 
-    func testUserTurnAppendsTheExclusionNote() {
-        var history = ChoiceHistory()
-        history.record("E90")
-        history.record("E110")
-        let turn = history.userTurn("")
-        XCTAssertTrue(turn.contains("Do not choose any of these ids"))
-        XCTAssertTrue(turn.contains("E90, E110"))
-        XCTAssertTrue(turn.contains("Pick a different id from the same class."))
+    /// Every entry of a class is picked once before any of them repeats.
+    func testEveryEntryIsShownOnceBeforeTheClassRepeats() throws {
+        var choices = SessionChoices()
+        var generator = SeededGenerator(seed: 7)
+        let total = Catalog.count(of: .complexity)
+        var ids: Set<String> = []
+        for _ in 0..<total {
+            let picked = try XCTUnwrap(choices.pick(behavior: .complexity, using: &generator))
+            XCTAssertEqual(picked.behavior, .complexity)
+            XCTAssertTrue(
+                ids.insert(picked.id).inserted,
+                "\(picked.id) repeated before the class was exhausted")
+        }
+        XCTAssertEqual(ids.count, total)
     }
 
-    func testUserTurnKeepsTheSubmittedTextFirst() {
-        var history = ChoiceHistory()
-        history.record("E90")
-        XCTAssertTrue(history.userTurn("look").hasPrefix("look\n\n"))
+    /// The class the picture matched outranks the no-repeat rule: once every
+    /// entry of the class has been shown, that class starts over and the other
+    /// classes' shown ids stay excluded.
+    func testExhaustedClassStartsOverWithoutTouchingOtherClasses() throws {
+        var choices = SessionChoices()
+        var generator = SeededGenerator(seed: 3)
+        let other = try XCTUnwrap(choices.pick(behavior: .repetition, using: &generator))
+        for _ in 0..<Catalog.count(of: .complexity) {
+            XCTAssertNotNil(choices.pick(behavior: .complexity, using: &generator))
+        }
+        XCTAssertEqual(choices.shownIDs.count, 1 + Catalog.count(of: .complexity))
+        let repeated = try XCTUnwrap(choices.pick(behavior: .complexity, using: &generator))
+        XCTAssertEqual(repeated.behavior, .complexity)
+        XCTAssertTrue(choices.shownIDs.contains(other.id))
+        XCTAssertTrue(choices.shownIDs.contains(repeated.id))
+        XCTAssertEqual(choices.shownIDs.count, 2)
+    }
+
+    func testAClassMissingFromTheCatalogReturnsNil() {
+        var choices = SessionChoices()
+        var generator = SeededGenerator(seed: 1)
+        XCTAssertNil(choices.pick(behavior: .nesting, catalog: [], using: &generator))
+        XCTAssertTrue(choices.shownIDs.isEmpty)
+    }
+}
+
+/// A deterministic generator, so a test can depend on `pick` drawing from it
+/// rather than on the system's entropy.
+private struct SeededGenerator: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return state
     }
 }

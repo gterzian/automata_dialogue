@@ -33,9 +33,10 @@ public enum AgentEngineError: Error, LocalizedError {
 /// shared; each run copies that prefix and prefills only the current input.
 ///
 /// There is no tool call and no tool-dispatch round: the model replies with a
-/// `class:` line and an `id:` line, and `ChoiceParser` reads the chosen entry
-/// out of the text. A reply without a usable catalog id fails the run; there is
-/// no repair pass.
+/// `class:` line and a reason, and `RatedClassParser` reads the rated class out
+/// of the text. `SessionChoices` then picks a random entry of that class that
+/// the session has not shown, so the model never names an automaton. A reply
+/// with no class fails the run; there is no repair pass.
 public actor AgentEngine: AgentRunning {
     public struct Configuration: Sendable {
         /// The local Hugging Face snapshot directory to load. Models are never
@@ -85,9 +86,9 @@ public actor AgentEngine: AgentRunning {
     /// The system-prompt KV cache, built once after the container loads. Each
     /// run copies it, so the prefix arrays are never mutated by a run.
     private var promptCacheTask: Task<PromptCacheHolder, Error>?
-    /// Recent choices, carried across runs. `perform` turns it into the
-    /// user-turn exclusion note, so the dialogue never repeats an automaton.
-    private var history = ChoiceHistory()
+    /// The automata shown so far in this session. `perform` asks it for a
+    /// random entry of the class the model rated.
+    private var sessionChoices = SessionChoices()
 
     /// Carries the built system-prompt cache out of `ModelContainer.perform`.
     /// SAFETY: the snapshot is built from a fresh cache inside the container's
@@ -126,10 +127,10 @@ public actor AgentEngine: AgentRunning {
     /// encoder's patch grid and the image-token count in the prompt), the
     /// configured sampling, and the decode step after the prefill. The turn
     /// generates three tokens — the first comes out of the prefill, the rest
-    /// run the one-token decode path — and its answer is discarded; the choice
-    /// history is not touched. `rate` calls it after `prepare()`, and `rate`'s
-    /// first submission waits for it; a failure is logged and left to the first
-    /// real run to report again.
+    /// run the one-token decode path — and its answer is discarded; the
+    /// session's shown ids are not touched. `rate` calls it after `prepare()`,
+    /// and `rate`'s first submission waits for it; a failure is logged and left
+    /// to the first real run to report again.
     public func warmImage() async throws {
         let cache = try await promptCache()
         let dimension = configuration.imageDimension
@@ -142,13 +143,6 @@ public actor AgentEngine: AgentRunning {
             parameters: GenerateParameters(
                 maxTokens: 3, temperature: configuration.temperature),
             imageDimension: dimension)
-    }
-
-    /// Drops the recent-choice window, so the next run is not asked to avoid
-    /// earlier ids. `classify` uses it to measure each image's class
-    /// independently of the others.
-    public func resetHistory() {
-        history = ChoiceHistory()
     }
 
     public nonisolated func run(_ input: AgentInput) -> AsyncThrowingStream<AgentEvent, Error> {
@@ -165,37 +159,40 @@ public actor AgentEngine: AgentRunning {
         into continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
     ) async {
         do {
-            let excluded = Set(history.excludedIDs)
-            let prompt = history.userTurn(input.text)
             let cache = try await promptCache()
 
             let result = try await answer(
-                cache: cache, to: prompt, imageURL: input.imageURL,
+                cache: cache, to: input.text, imageURL: input.imageURL,
                 parameters: generateParameters,
                 imageDimension: configuration.imageDimension)
             let response = result.text
-            let choice = Self.allowed(
-                ChoiceParser.choice(from: response), excluding: excluded)
+            let rating = RatedClassParser.ratedClass(from: response)
             if !response.isEmpty { continuation.yield(.text(response)) }
             if let metrics = result.metrics { continuation.yield(.metrics(metrics)) }
 
-            if let choice {
-                history.record(choice.id)
-                continuation.yield(.choice(choice))
-                continuation.yield(.finished)
+            if let rating {
+                var generator = SystemRandomNumberGenerator()
+                if let spec = sessionChoices.pick(
+                    behavior: rating.behavior, using: &generator) {
+                    let choice = Choice(
+                        id: spec.id,
+                        behavior: rating.behavior,
+                        rationale: rating.rationale,
+                        rationaleChinese: rating.rationaleChinese)
+                    continuation.yield(.choice(choice))
+                    continuation.yield(.finished)
+                } else {
+                    continuation.yield(.failed(
+                        "the catalog has no \(rating.behavior.rawValue) entry"))
+                }
             } else {
-                continuation.yield(.failed("the model did not name a catalog id"))
+                continuation.yield(.failed("the model did not name a behavior class"))
             }
             continuation.finish()
         } catch {
             continuation.yield(.failed(error.localizedDescription))
             continuation.finish()
         }
-    }
-
-    private nonisolated static func allowed(_ choice: Choice?, excluding excluded: Set<String>) -> Choice? {
-        guard let choice, !excluded.contains(choice.id) else { return nil }
-        return choice
     }
 
     /// One generation pass over `prompt`; returns the full text and, when the

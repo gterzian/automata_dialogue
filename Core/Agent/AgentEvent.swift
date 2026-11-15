@@ -1,8 +1,9 @@
 import Foundation
 
 /// One submitted input: optional text plus an optional image file path (the
-/// normalized 512×512 PNG from `Core/Import`). The engine owns the recent-choice
-/// window and appends it to this turn (see `ChoiceHistory`).
+/// normalized 512×512 PNG from `Core/Import`). The engine owns the session's
+/// shown automata and picks from the class the model rates (see
+/// `SessionChoices`); the input carries only what the user submitted.
 public struct AgentInput: Sendable, Hashable {
     public var text: String
     public var imageURL: URL?
@@ -53,7 +54,8 @@ public enum AgentEvent: Sendable, Hashable {
     case text(String)
     /// One generation pass's token counts and times.
     case metrics(GenerationMetrics)
-    /// The single answer: the catalog entry the model chose.
+    /// The automaton picked for the model's rated class, with the rating's
+    /// reasons.
     case choice(Choice)
     case finished
     case failed(String)

@@ -1,8 +1,8 @@
 import Foundation
 
 /// The curated inventory as one table. Exactly 111 entries, in
-/// the inventory's order; the system prompt's automata listing and the CLI
-/// catalog print are generated from this table.
+/// the inventory's order; the session's random pick and the CLI
+/// catalog print read this table.
 public enum Catalog {
     public static let all: [ProgramSpec] = makeAll()
 
@@ -15,15 +15,6 @@ public enum Catalog {
     public static var ids: [String] { all.map(\.id) }
 
     public static func spec(id: String) -> ProgramSpec? { byID[id] }
-
-    /// The prompt's automata listing, grouped by behavior: a `### <class>`
-    /// heading followed by that class's ids. The class sits next to the ids the
-    /// model chooses from, so a trailing class column cannot be overlooked.
-    public static var promptIndexLines: [String] {
-        Behavior.allCases.flatMap { behavior in
-            ["### \(behavior.rawValue)"] + all.filter { $0.behavior == behavior }.map(\.id)
-        }
-    }
 
     public static func count(of behavior: Behavior) -> Int {
         all.filter { $0.behavior == behavior }.count

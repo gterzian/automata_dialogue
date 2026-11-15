@@ -1,71 +1,103 @@
 import Foundation
 
-/// The automaton the model chose for one input.
-public struct Choice: Sendable, Hashable, Codable {
-    public var id: String
+/// The model's rating of one input: the behavior class it matched and the
+/// sentence explaining the match. The automaton itself is chosen by
+/// `SessionChoices`, so the model never names one.
+public struct RatedClass: Sendable, Hashable, Codable {
+    public var behavior: Behavior
     public var rationale: String
     /// The same reason in Simplified Chinese, shown under the English sentence
     /// in the review window. Empty when the answer omits the field.
     public var rationaleChinese: String
 
-    public init(id: String, rationale: String, rationaleChinese: String = "") {
-        self.id = id
+    public init(behavior: Behavior, rationale: String, rationaleChinese: String = "") {
+        self.behavior = behavior
         self.rationale = rationale
         self.rationaleChinese = rationaleChinese
     }
 }
 
-/// The engine's recent-choice window, carried across runs. Before each run the
-/// engine builds the user turn with `userTurn(_:)`, so the ids are submitted
-/// with the image and the system prompt stays a cacheable prefix. Older choices
-/// drop off once `limit` is reached.
-public struct ChoiceHistory: Sendable, Equatable {
-    public static let limit = 20
+/// The automaton displayed for one input: an entry of the rated class, picked
+/// at random by `SessionChoices`, with the model's reasons for that class.
+public struct Choice: Sendable, Hashable, Codable {
+    public var id: String
+    public var behavior: Behavior
+    public var rationale: String
+    public var rationaleChinese: String
 
-    private var ids: [String] = []
-
-    public init() {}
-
-    /// The ids not to choose this round, oldest first.
-    public var excludedIDs: [String] { ids }
-
-    public mutating func record(_ id: String) {
-        ids.append(id)
-        if ids.count > Self.limit { ids.removeFirst(ids.count - Self.limit) }
-    }
-
-    /// The user turn for the next submission: `text` plus a note listing the
-    /// recent ids. The note lives in the user turn, not the system prompt.
-    public func userTurn(_ text: String) -> String {
-        guard !ids.isEmpty else { return text }
-        let note = "Do not choose any of these ids; each was used recently: "
-            + ids.joined(separator: ", ")
-            + ". Pick a different id from the same class. An answer that uses one of them is invalid."
-        return text.isEmpty ? note : "\(text)\n\n\(note)"
+    public init(
+        id: String,
+        behavior: Behavior,
+        rationale: String,
+        rationaleChinese: String = ""
+    ) {
+        self.id = id
+        self.behavior = behavior
+        self.rationale = rationale
+        self.rationaleChinese = rationaleChinese
     }
 }
 
-/// Extracts the chosen automaton from the model's plain-text answer. The
-/// prompt (`SystemPrompt`) asks for `id:`, `reason:`, and `reason_zh:` lines,
-/// but a model may add prose or ignore the format, so the parser first honours
-/// an explicit `id:` field and otherwise falls back to the first catalog id
-/// mentioned anywhere. Pure and `nonisolated` so the MLX engine and the tests
-/// share one implementation.
-public enum ChoiceParser {
-    public static func choice(
-        from response: String,
-        catalog: [ProgramSpec] = Catalog.all
-    ) -> Choice? {
-        // Longest first, so `E90.sparse` is preferred over `E90`.
-        let orderedIDs = catalog.map(\.id).sorted { $0.count > $1.count }
-        let idField = field(named: "id", in: response)
-        guard let id = idField.flatMap({ firstID(in: $0, orderedIDs: orderedIDs) })
-            ?? firstID(in: response, orderedIDs: orderedIDs)
-        else { return nil }
-        return Choice(
-            id: id,
+/// The automata this session has displayed. The engine asks it for a random
+/// entry of the class the model rated, so the same automaton does not come back
+/// within a session. The model never sees this state: every input is rated on
+/// its own and nothing is appended to the user turn.
+public struct SessionChoices: Sendable, Equatable {
+    private var shown: Set<String> = []
+
+    public init() {}
+
+    /// The ids shown so far, for diagnostics.
+    public var shownIDs: Set<String> { shown }
+
+    /// A uniformly random entry of `behavior` this session has not shown,
+    /// marked as shown. When every entry of the class is already shown, the
+    /// class's ids are cleared first: the class the picture matched outranks
+    /// the no-repeat rule, and a session can outlast the smallest class.
+    public mutating func pick(
+        behavior: Behavior,
+        catalog: [ProgramSpec] = Catalog.all,
+        using generator: inout some RandomNumberGenerator
+    ) -> ProgramSpec? {
+        let entries = catalog.filter { $0.behavior == behavior }
+        guard !entries.isEmpty else { return nil }
+        var candidates = entries.filter { !shown.contains($0.id) }
+        if candidates.isEmpty {
+            shown.subtract(entries.map(\.id))
+            candidates = entries
+        }
+        guard let picked = candidates.randomElement(using: &generator) else { return nil }
+        shown.insert(picked.id)
+        return picked
+    }
+}
+
+/// Extracts the model's rating from its plain-text answer. The prompt
+/// (`SystemPrompt`) asks for `class:`, `reason:`, and `reason_zh:` lines, but a
+/// model may add prose or ignore the format, so the parser first honours an
+/// explicit `class:` field and otherwise takes the first class word anywhere.
+/// Pure and `nonisolated` so the MLX engine and the tests share one
+/// implementation.
+public enum RatedClassParser {
+    public static func ratedClass(from response: String) -> RatedClass? {
+        guard let behavior = classField(in: response) ?? firstClass(in: response) else {
+            return nil
+        }
+        return RatedClass(
+            behavior: behavior,
             rationale: field(named: "reason", in: response) ?? "",
             rationaleChinese: field(named: "reason_zh", in: response) ?? "")
+    }
+
+    /// The class named by a `class:` field, ignoring case and trailing
+    /// punctuation. A value with extra words falls through to `firstClass`,
+    /// which finds the class word inside it.
+    private static func classField(in response: String) -> Behavior? {
+        guard let value = field(named: "class", in: response) else { return nil }
+        let name = value
+            .trimmingCharacters(in: CharacterSet(charactersIn: " .,;"))
+            .lowercased()
+        return Behavior(rawValue: name)
     }
 
     /// The text after the first `name:` at the start of a line, ignoring
@@ -91,21 +123,26 @@ public enum ChoiceParser {
         return nil
     }
 
-    /// The first catalog id in `text`. `.` and `-` continue an id only when a
-    /// suffix follows (`E90.sparse`), so `E90.sparse` does not match as `E90`
-    /// and a sentence-ending `E90.` still matches.
-    private static func firstID(in text: String, orderedIDs: [String]) -> String? {
+    /// The first class word in `text`, on word boundaries.
+    private static func firstClass(in text: String) -> Behavior? {
         let haystack = text.lowercased()
-        for id in orderedIDs {
-            let needle = id.lowercased()
-            var searchStart = haystack.startIndex
-            while let range = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
-                if isStartBoundary(haystack, at: range.lowerBound),
-                   isEndBoundary(haystack, at: range.upperBound) {
-                    return id
-                }
-                searchStart = range.upperBound
+        var earliest: (index: String.Index, behavior: Behavior)?
+        for behavior in Behavior.allCases {
+            guard let index = firstWord(behavior.rawValue, in: haystack) else { continue }
+            if let earliest, index >= earliest.index { continue }
+            earliest = (index, behavior)
+        }
+        return earliest?.behavior
+    }
+
+    private static func firstWord(_ word: String, in text: String) -> String.Index? {
+        var searchStart = text.startIndex
+        while let range = text.range(of: word, range: searchStart..<text.endIndex) {
+            if isStartBoundary(text, at: range.lowerBound),
+               isEndBoundary(text, at: range.upperBound) {
+                return range.lowerBound
             }
+            searchStart = range.upperBound
         }
         return nil
     }
@@ -119,12 +156,6 @@ public enum ChoiceParser {
     private static func isEndBoundary(_ text: String, at index: String.Index) -> Bool {
         guard index < text.endIndex else { return true }
         let next = text[index]
-        if next.isLetter || next.isNumber { return false }
-        // `.` and `-` continue an id only when a suffix follows (`E90.sparse`).
-        if next == "." || next == "-" {
-            let suffix = text.index(after: index)
-            return suffix == text.endIndex || !(text[suffix].isLetter || text[suffix].isNumber)
-        }
-        return true
+        return !(next.isLetter || next.isNumber)
     }
 }

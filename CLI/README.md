@@ -3,13 +3,14 @@
 `rater-cli`, a SwiftPM executable built against `Core`. Commands:
 
 - `rater-cli rate <path|dir>...` — run the real MLX agent over reference
-  drawings and print the chosen id and latency per image, then a summary table.
+  drawings and print each image's rated class, the automaton picked for it, and
+  latency, then a summary table.
   A path may be an image file or a directory, in which case its top-level
   images are rated (so `rate artifacts/` runs every drawing in the folder).
   Each image is normalized to the model's input through `Core/Import` (512×512
-  by default; `--image-size <px>` overrides it). The engine
-  keeps its recent-choice window across the batch, so each image is asked to
-  pick an automaton the earlier images did not. Debug
+  by default; `--image-size <px>` overrides it). The engine's session
+  keeps the picked ids across the batch, so each image gets a random automaton
+  of its class that the batch has not shown. Debug
   output is on by default (the resolved model, the prompt
   size, the per-turn prefilled/cached prompt and generation token counts and
   seconds, the model's raw
@@ -88,11 +89,10 @@
   `rate` blocks on Return. `--image-size <px>` sets the square input dimension
   (default 512), so a single command sweeps the vision-token tradeoff.
 - `rater-cli classify <path|dir>...` — the headless accuracy path. Preloads the
-  model and system-prefix cache, runs each image once with no window, clears the
-  no-repeat window between images so the score measures classification and not
-  batch order, and prints `name<TAB>class<TAB>id` plus a class tally, so a
-  labeled reference set can be scored against the model.
-- `rater-cli catalog` — print the catalog and the generated index.
+  model and system-prefix cache, runs each image once with no window, and
+  prints `name<TAB>class` plus a class tally, so a labeled reference set can be
+  scored against the model.
+- `rater-cli catalog` — print the catalog grouped by class.
 
 `catalog` is AppKit-free. `rate` links AppKit to host the window and drives
 `Core/Render`'s on-screen sink.

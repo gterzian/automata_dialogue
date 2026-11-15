@@ -118,13 +118,14 @@ public struct DisplayHints: Sendable, Hashable {
     }
 }
 
-/// One row of the single table that feeds the renderer and the prompt index.
+/// One row of the single table that feeds the renderer and the session's
+/// random pick.
 public struct ProgramSpec: Sendable {
     public let id: String
     public let title: String
     public let behavior: Behavior
-    /// One sentence of how the entry looks. Used as the matching text in the
-    /// system prompt's automata listing.
+    /// One sentence of how the entry looks, kept in sync with the inventory. It
+    /// is not submitted to the model: the class is what the model rates.
     public let look: String
     public let gpu: GPUProgram
     public let board: Board
