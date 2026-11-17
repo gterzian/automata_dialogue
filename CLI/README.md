@@ -28,8 +28,9 @@
   When
   an image
   sits beside an `examples.json` reference manifest, its page shows the class it
-  illustrates in English and Chinese in the top-left corner; the window draws
-  that label and the image the model reads carries no text. Left and
+  illustrates in English and Chinese in the top-left corner when `--labels` is
+  passed; labels are off by default, and the window draws
+  that label while the image the model reads carries no text. Left and
   right arrows move through the carousel: the drawing page, then every image,
   then the drawing page again, so the drawing page is the wrap point at both
   ends. Draw by pressing the pointer down on the page and dragging: the stroke
@@ -106,6 +107,12 @@
   `LabeledPageView` sizes the panel to that view. The close button is a sibling
   placed in the panel's top-right corner, so `PageOverlayView.closeReserve` must
   keep that corner of the reason row clear of text.
+- **A flipped view draws a raster-backed `NSImage` bottom-up.**
+  `NSImage(cgImage:size:)` is drawn with the current context's flip, so the
+  reveal panel's thumbnail comes out upside down unless the draw call passes
+  `respectFlipped: true` (or the image is drawn through the context's own
+  transform). Any other view that draws a `CGImage`-backed image with
+  `draw(in:from:operation:fraction:)` needs the same flag.
 - **The page spans the title bar, which is invisible.** The window is
   `.titled, .closable, .miniaturizable, .resizable` with a transparent title
   bar and a full-size content view, so the traffic lights float over the page

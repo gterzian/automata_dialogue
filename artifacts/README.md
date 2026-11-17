@@ -24,7 +24,8 @@ or a snapshot changes (`Agent/README.md`, `rater-cli classify`). The table
 records the class each drawing illustrates, so the set can be scored without
 re-reading the images. `examples.json` is the class column in machine-readable
 form: `rater-cli rate` reads the manifest beside the images to label each
-carousel page with the class it illustrates. The label exists only in the
+carousel page with the class it illustrates when the window's labels are
+enabled (see `CLI/README.md`). The label exists only in the
 window, never in the pixels, so the model reads the drawing without it. The
 table and the manifest are edited together; `CoreTests` fails when they drift.
 

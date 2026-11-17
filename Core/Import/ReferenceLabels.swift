@@ -2,10 +2,10 @@ import Foundation
 
 /// The class each reference drawing illustrates, read from the `examples.json`
 /// manifest in the drawing's directory. A label is display metadata: the
-/// window shows it over the drawing, while the pixels the model reads carry no
-/// text. A directory without a manifest contributes no labels, so an arbitrary
-/// image stays unlabeled; a manifest that is present but unreadable is thrown,
-/// never ignored.
+/// window can show it over the drawing, while the pixels the model reads carry
+/// no text. A directory without a manifest contributes no labels, so an
+/// arbitrary image stays unlabeled; a manifest that is present but unreadable
+/// is thrown, never ignored.
 public enum ReferenceLabels {
     public static let manifestName = "examples.json"
 

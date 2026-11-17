@@ -264,12 +264,15 @@ final class PageOverlayView: NSView {
             let fitted = NSSize(
                 width: (size.width * scale).rounded(.down),
                 height: (size.height * scale).rounded(.down))
+            // The view is flipped, so a raster-backed `NSImage` draws
+            // bottom-up unless it, too, respects the context's flip.
             image.draw(
                 in: NSRect(
                     x: rect.midX - fitted.width / 2,
                     y: rect.midY - fitted.height / 2,
                     width: fitted.width, height: fitted.height),
-                from: .zero, operation: .sourceOver, fraction: 1)
+                from: .zero, operation: .sourceOver, fraction: 1,
+                respectFlipped: true, hints: nil)
         }
 
         let border = NSBezierPath(

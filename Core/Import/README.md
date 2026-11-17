@@ -34,7 +34,8 @@ review loop.
 
 `ReferenceLabels.load(forPaths:)` reads the `examples.json` manifest in an
 image's directory and maps its path to the `Behavior` it illustrates. The CLI
-shows that class in the carousel; the manifest is display metadata, so the
+can show that class in the carousel (see `CLI/README.md`); the manifest is
+display metadata, so the
 normalized model input still contains only the drawing. A directory with no
 manifest labels nothing, while a manifest that cannot be decoded throws instead
 of silently dropping every label.

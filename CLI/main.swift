@@ -16,7 +16,7 @@ let command = arguments.first ?? "catalog"
 /// token when that token is not itself a flag. Without this, a boolean flag at
 /// the end of the arguments would swallow the following path. `show` is
 /// accepted for compatibility; showing the automaton is the default now.
-let booleanFlags: Set<String> = ["quiet", "show", "show-prompt"]
+let booleanFlags: Set<String> = ["quiet", "show", "show-prompt", "labels"]
 
 /// Parses `--key value` pairs from the arguments after `command`.
 func flags(from args: [String]) -> [String: String] {
@@ -77,7 +77,9 @@ func printUsage() -> Never {
       catalog                         print the catalog grouped by class
       rate <path|dir> ...               run the MLX agent over reference images
         a directory contributes its top-level images; the batch cycles
-        options: --model <dir> [--quiet] [--show-prompt] [--image-size <px>]
+        options: --model <dir> [--quiet] [--show-prompt] [--labels] [--image-size <px>]
+        --labels shows the class each reference drawing illustrates beside it;
+        it is off by default.
         The window opens on a black drawing page. Left and right arrows move
         through the carousel: the drawing page, then every image, then back to
         the drawing page. Draw by pressing the pointer down on the page and
@@ -707,6 +709,7 @@ struct RateSetup: Sendable {
     let configuration: AgentEngine.Configuration
     let verbose: Bool
     let showPrompt: Bool
+    let showLabels: Bool
 }
 
 /// Validates the `rate` arguments and resolves the model. Exits with usage on
@@ -751,7 +754,8 @@ func rateSetup() -> RateSetup {
         paths: paths,
         configuration: configuration,
         verbose: flags["quiet"] == nil,
-        showPrompt: flags["show-prompt"] != nil
+        showPrompt: flags["show-prompt"] != nil,
+        showLabels: flags["labels"] != nil
     )
 }
 
@@ -989,13 +993,17 @@ func review(_ setup: RateSetup, presenter: AutomatonWindow) async {
     await presenter.beginSubmission(nil, loops: true)
     let sessionID = UUID()
     let directory = ImageImport.sessionDirectory(for: sessionID)
-    let labels: [String: Behavior]
-    do {
-        labels = try ReferenceLabels.load(forPaths: setup.paths)
-    } catch {
-        FileHandle.standardError.write(Data(
-            "rate: could not read \(ReferenceLabels.manifestName): \(error.localizedDescription)\n".utf8))
-        labels = [:]
+    // The class each reference drawing illustrates is display-only, so the
+    // window shows it only when `--labels` asks, and an unreadable manifest
+    // then costs the carousel nothing but the labels.
+    var labels: [String: Behavior] = [:]
+    if setup.showLabels {
+        do {
+            labels = try ReferenceLabels.load(forPaths: setup.paths)
+        } catch {
+            FileHandle.standardError.write(Data(
+                "rate: could not read \(ReferenceLabels.manifestName): \(error.localizedDescription)\n".utf8))
+        }
     }
     let pages = InputPage.carousel(for: setup.paths, labels: labels)
     var index = 0
